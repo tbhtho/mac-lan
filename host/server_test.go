@@ -26,6 +26,20 @@ func TestPrivateLANOnly(t *testing.T) {
 		}
 	}
 }
+func TestConsentReportsRequestedCodec(t *testing.T) {
+	for _, test := range []struct {
+		request start
+		want    string
+	}{
+		{start{}, "hardware H.264 / 8 Mbit/s"},
+		{start{Codec: "h264", Bitrate: 12}, "hardware H.264 / 12 Mbit/s"},
+		{start{Codec: "jpeg", Quality: 70}, "JPEG quality 70"},
+	} {
+		if got := streamDescription(test.request); got != test.want {
+			t.Fatalf("consent: got %q, want %q", got, test.want)
+		}
+	}
+}
 func TestFreshTLSIdentity(t *testing.T) {
 	a, fp, err := identity()
 	if err != nil {

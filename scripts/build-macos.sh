@@ -6,6 +6,11 @@ xcode-select -p >/dev/null 2>&1 || { echo "Existing Xcode/Command Line Tools SDK
 command -v swiftc >/dev/null || { echo "An existing Xcode/Command Line Tools Swift compiler is required. Nothing will be installed." >&2; exit 1; }
 command -v go >/dev/null || { echo "An existing Go 1.24+ toolchain is required. Nothing will be installed." >&2; exit 1; }
 export GOMAXPROCS=2
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.cache/swift}"
+export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$CLANG_MODULE_CACHE_PATH}"
+export GOCACHE="${GOCACHE:-$PWD/.cache/go-build}"
+export GOMODCACHE="${GOMODCACHE:-$PWD/.cache/go-mod}"
+mkdir -p "$CLANG_MODULE_CACHE_PATH" "$GOCACHE" "$GOMODCACHE"
 mkdir -p artifacts/macos-arm64
 swiftc -swift-version 5 -O -target arm64-apple-macos14.0 native/MacDowCapture.swift -o artifacts/macos-arm64/MacDowCapture -framework ApplicationServices -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework CoreGraphics -framework CoreMedia -framework CoreImage -framework VideoToolbox -framework ImageIO -framework UniformTypeIdentifiers
 (cd host && go test -p 1 ./... && go build -trimpath -o ../artifacts/macos-arm64/MacDowHost .)

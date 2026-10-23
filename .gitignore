@@ -2,6 +2,7 @@
 **/obj/
 artifacts/
 .cache/
+.build-cache/
 .tools/
 *.user
 *.pfx

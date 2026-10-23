@@ -2,7 +2,7 @@
 
 Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream one selected Mac window in a normal Windows window with **App Priority**.
 
-**Private development prerelease.** Windows compiles and headless tests pass. Real Mac capture/control, hardware codec behavior and Wi-Fi editing latency have not been validated. The Mac is offline. This release includes a Windows portable app and a **Mac build kit**, not a verified ready-to-run Mac companion.
+**Private development prerelease.** Windows compiles and headless tests pass. The Apple Silicon Mac host and Swift helper are now natively compiled and pass non-capturing tests on macOS 15.5. Real capture/control, hardware codec behavior and Wi-Fi editing latency remain untested. This release includes a Windows portable app and a **native Mac command-line companion**.
 
 [Prereleases](https://github.com/tbhtho/MAC-DOW/releases) · [Validation status](docs/verification.md) · [Hardware checklist](docs/manual-validation.md)
 
@@ -25,17 +25,21 @@ The application has not been opened on your desktop during development. Physical
 
 Apple Silicon, macOS 14+. There is no Mac tab UI.
 
-**Build-kit status:** the Go host is cross-compiled for darwin/arm64 and has not been executed on macOS. The native Swift capture helper is supplied as source and must be compiled on a Mac before use. No native build or notarization is claimed.
+**Native build status:** Go host and Swift capture helper compiled on Apple Silicon macOS 15.5 with Swift 6.1.2 and Go 1.24.1. Native lease/mailbox and host TLS tests pass. This is a foreground Terminal companion, unsigned and not notarized; real capture/input and hardware encoding are still untested.
 
-On a Mac with an **existing** Swift/Xcode Command Line Tools compiler, extract the build kit, open Terminal there, and run:
+Extract `MAC-DOW-macos-arm64-unsigned.tar.gz`, open Terminal in its `macos-arm64` folder, and first run:
 
 ```sh
-bash build-native-helper.sh
 ./MacDowHost --check
+```
+
+This only reads existing permission status. Missing Screen Recording returns a nonzero status. When you choose to test with both machines, grant Screen Recording yourself under **System Settings → Privacy & Security → Screen & System Audio Recording** (wording may vary). Grant **Accessibility** only if you want remote control. Verify the identity macOS attributes to these Terminal-launched programs; restart them after changing permissions. Then start the foreground host yourself:
+
+```sh
 ./MacDowHost --listen YOUR_PRIVATE_MAC_IPV4:4433
 ```
 
-The build script installs nothing. If the compiler is absent, stop until the user chooses to obtain it or a verified CI build is available.
+No service or autostart is installed. Keep macOS security protections enabled. If the downloaded unsigned binary is blocked, build the trusted source using `bash scripts/build-macos.sh`; no quarantine removal or Gatekeeper bypass is part of this project.
 
 The host checks existing Screen Recording access without asking for it. The user must choose and grant required macOS permissions in System Settings. Accessibility is additionally needed for remote input; absent access keeps control off. macOS may attribute terminal-launched programs to Terminal; verify the actual permission identity on the Mac. These permission flows remain untested.
 

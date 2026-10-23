@@ -1,6 +1,6 @@
 # Hardware acceptance checklist — NOT YET EXECUTED
 
-The Mac is offline/not authorized. Development has not opened the Windows UI, installed hooks, captured either real desktop, injected input, requested permissions or changed firewall/router settings.
+Native Apple Silicon compilation and non-capturing diagnostics passed on macOS 15.5. Development has not opened the Windows UI, installed hooks, captured either real desktop, injected input, requested permissions or changed firewall/router settings. Screen Recording and Accessibility are currently missing.
 
 After native Apple Silicon compilation succeeds and the user explicitly grants the necessary Mac access:
 
