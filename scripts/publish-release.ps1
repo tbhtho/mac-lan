@@ -12,7 +12,10 @@ function Invoke-Checked {
     return $result
 }
 function Get-Releases {
-    $pages=Invoke-Checked -Command gh -Arguments @('api',"repos/$repository/releases",'--paginate','--slurp') | ConvertFrom-Json -NoEnumerate
+    $json=(Invoke-Checked -Command gh -Arguments @('api',"repos/$repository/releases",'--paginate','--slurp')) -join "`n"
+    # Windows PowerShell 5.1 keeps the slurped array whole; PowerShell 7 needs -NoEnumerate for the same result.
+    $options=@{};if((Get-Command ConvertFrom-Json).Parameters.ContainsKey('NoEnumerate')){$options.NoEnumerate=$true}
+    $pages=$json | ConvertFrom-Json @options
     foreach($page in $pages){foreach($entry in $page){$entry}}
 }
 $config=Get-Content -LiteralPath 'host/internal/updater/config.json' -Raw | ConvertFrom-Json
