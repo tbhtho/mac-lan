@@ -1,5 +1,10 @@
 # MAC-DOW updates
 
+**Current distribution:** the user chose manual reinstalls from
+[`tbhtho/MAC-DOW` releases](https://github.com/tbhtho/MAC-DOW/releases).
+The separate public repository and update feed are withdrawn. The design below
+is retained as implementation history, not an active publishing plan.
+
 The Windows single EXE and Apple Silicon command-line preview use the shared Go
 updater. Starting with alpha.12, production updates come from the public
 `tbhtho/MAC-DOW-Downloads` binary repository. Source remains in `tbhtho/MAC-DOW`,

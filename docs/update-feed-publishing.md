@@ -1,5 +1,11 @@
 # Publishing signed updates
 
+**Inactive:** the user chose manual reinstalls from
+[`tbhtho/MAC-DOW` releases](https://github.com/tbhtho/MAC-DOW/releases).
+The separate public repository and update feed are withdrawn. Keep these tooling
+notes for reference; do not publish or recreate that distribution without a new
+explicit user request.
+
 The applications trust an Ed25519 public key in their build configuration. The
 private signing key stays on the publishing computer. The local publisher does
 not upload artifacts, modify a GitHub repository, or sign in to GitHub.
