@@ -84,11 +84,11 @@ func main() {
 		fatal(err)
 	}
 	helper := filepath.Join(filepath.Dir(exe), "MacDowCapture")
-	helper, err = resolveCaptureHelper(context.Background(), helper)
-	if err != nil {
-		fatal(err)
-	}
+	helper, captureErr := resolveCaptureHelper(context.Background(), helper)
 	if *check {
+		if captureErr != nil {
+			fatal(captureErr)
+		}
 		cmd := exec.Command(helper, "--check")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -97,11 +97,15 @@ func main() {
 		}
 		return
 	}
-	if err = hostSession(helper, *addr, *gui, *noUpdateCheck, *terminalConsent); err != nil {
+	if captureErr != nil {
+		fmt.Fprintln(os.Stderr, captureErr)
+		fmt.Fprintln(os.Stderr, "Video setup is unavailable. Pairing and file transfers can still be used; see the Mac diagnostic report for the build stage.")
+	}
+	if err = hostSession(helper, *addr, *gui, *noUpdateCheck, *terminalConsent, captureErr); err != nil {
 		fatal(err)
 	}
 }
-func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) error {
+func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, captureErr error) error {
 	diagnostics.Emit("mac", "startup", "ok", nil)
 	all, err := localInterfaces()
 	if err != nil {
@@ -111,16 +115,22 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) e
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(helper, "--check")
-	if !gui {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+	videoError := ""
+	if captureErr != nil {
+		videoError = "Native video setup failed. Check the Mac diagnostic report, then restart MAC-DOW after fixing the build. File transfers are available."
+	} else {
+		cmd := exec.Command(helper, "--check")
+		if !gui {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+		if err = cmd.Run(); err != nil {
+			diagnostics.Emit("mac", "permissions-missing", "screen", nil)
+			videoError = "Screen Recording is unavailable. Grant MAC-DOW Screen Recording access in System Settings and restart it. File transfers are available."
+		} else {
+			diagnostics.Emit("mac", "permissions-ok", "ok", map[string]int{"screenPermission": 1})
+		}
 	}
-	if err = cmd.Run(); err != nil {
-		diagnostics.Emit("mac", "permissions-missing", "screen", nil)
-		return errors.New("Screen Recording is not available to the capture helper. Open MAC-DOW Host, choose Screen Recording, grant access yourself and restart the app")
-	}
-	diagnostics.Emit("mac", "permissions-ok", "ok", map[string]int{"screenPermission": 1})
 	cert, fp, err := identity()
 	if err != nil {
 		return err
@@ -131,7 +141,16 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) e
 	}
 	token := hex.EncodeToString(secret)
 	s := &server{token: token, peerAllowed: privateIP, slot: make(chan struct{}, 1)}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return errors.New("Cannot locate the Mac Downloads folder")
+	}
+	s.transfers = newTransferReceiver(filepath.Join(userHome, "Downloads", "MAC-DOW"))
+	s.videoError = videoError
 	s.catalog = func() ([]window, error) {
+		if videoError != "" {
+			return []window{}, nil
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		out, err := exec.CommandContext(ctx, helper, "--list").Output()
@@ -166,13 +185,13 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) e
 	}
 	if gui {
 		s.pair = func(peer, code string) bool {
-			return broker.ask("pair", map[string]any{"peer": peer, "code": code}, 45*time.Second)
+			return broker.ask("pair", map[string]any{"peer": peer, "code": code, "message": "Pairing lets this PC send files to Downloads/MAC-DOW. Viewing needs separate approval."}, 45*time.Second)
 		}
 	} else {
 		s.pair = func(peer, code string) bool {
 			fmt.Printf("Windows pairing request: %s. Compare this number on Windows.\n", code)
 			if !terminalConsent {
-				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nOnly allow the request you started. Viewing needs a separate approval.")
+				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nPairing lets this PC send files to Downloads/MAC-DOW. Only allow the request you started. Viewing needs a separate approval.")
 			}
 			fmt.Print("Type ALLOW to approve this pairing request: ")
 			return scanner.Scan() && scanner.Text() == "ALLOW"

@@ -22,7 +22,7 @@ internal sealed class TabBar : Window,IDisposable
     bool registered,positioning,queued,disposed;
     string? monitor;
     HwndSource? source;
-    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null)
+    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
     {
         Title="MAC-DOW Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=48;
         Background=new SolidColorBrush(Color.FromRgb(19,32,51));Foreground=Brushes.White;
@@ -52,6 +52,7 @@ internal sealed class TabBar : Window,IDisposable
             menu.Items.Add(Item("Disconnect",disconnect));
             connectionButton.ContextMenu=menu;menu.IsOpen=true;
         };
+        if(files!=null)right.Children.Add(ActionButton("Files",files));
         right.Children.Add(connectionButton);
         updateButton.Foreground=Brushes.White;updateButton.Background=Brushes.Transparent;updateButton.BorderBrush=Brushes.Transparent;updateButton.MinHeight=32;updateButton.FontSize=12;
         right.Children.Add(updateButton);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);

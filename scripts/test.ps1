@@ -11,6 +11,8 @@ dotnet run --project tests/Core.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Core tests failed'}
 dotnet run --project tests/Session.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Session protocol tests failed'}
+dotnet run --project tests/Transfer.Tests -c Release -p:BuildInParallel=false
+if($LASTEXITCODE){throw 'File transfer tests failed'}
 dotnet run --project tests/Presentation.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Presentation tests failed'}
 node tests/viewer.test.mjs

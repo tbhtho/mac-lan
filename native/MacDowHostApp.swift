@@ -258,7 +258,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
         let alert = NSAlert(); alert.alertStyle = .warning
         if kind == "pair" {
             alert.messageText = "Pair Windows \(object["peer"] as? String ?? "")?"
-            alert.informativeText = "Allow only if Windows shows this pairing number:\n\n\(object["code"] as? String ?? "")\n\nWindows must also match this Mac's identity above. Pairing permits window selection; screen sharing needs another approval."
+            alert.informativeText = "Allow only if Windows shows this pairing number:\n\n\(object["code"] as? String ?? "")\n\nWindows must also match this Mac's identity above. Pairing lets this PC send files to Downloads/MAC-DOW. Screen sharing needs another approval."
         } else if kind == "stream" {
             alert.messageText = "Allow this screen stream?"
             alert.informativeText = "\(object["scope"] as? String ?? "Unknown scope")\n\(object["width"] ?? "") px · \(object["fps"] ?? "") fps · \(object["codec"] ?? "")\n\nKeyboard/mouse remain off until explicitly armed on focused Windows. Stop Sharing or Quit ends the session."

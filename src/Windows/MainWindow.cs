@@ -34,7 +34,8 @@ internal sealed partial class MainWindow : Window
     Session? session;
     RemoteView? appView;
     Window? appWindow;
-    bool remote,closing,connecting;
+    FileTransferWindow? filesWindow;
+    bool remote,closing,connecting,openingFiles,awaitingFileTransfer;
     byte[]? pendingFrame;
     int frameScheduled;
     string? preferred;
@@ -51,7 +52,7 @@ internal sealed partial class MainWindow : Window
         Title="MAC-DOW - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo());
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm();tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);BuildSetup();
@@ -64,9 +65,34 @@ internal sealed partial class MainWindow : Window
         Activated+=(_,_)=>RefreshContext();
         timer.Tick+=(_,_)=>Tick();timer.Start();
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
-        Closing+=(_,_)=>{closing=true;Telemetry.Report("shutdown");gate.Disarm();timer.Stop();updateTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");desktop.Dispose();tabBar.Dispose();};
+        Closing+=async(_,e)=>
+        {
+            if(closing)return;
+            if(awaitingFileTransfer){e.Cancel=true;return;}
+            if(filesWindow?.IsBusy==true)
+            {
+                // Keep the process alive until cancellation has closed the upload and removed any temporary folder ZIP.
+                e.Cancel=true;awaitingFileTransfer=true;gate.Disarm();session?.Abort("Closed");
+                await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
+            }
+            closing=true;Telemetry.Report("shutdown");gate.Disarm();timer.Stop();updateTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+        };
     }
     Button MakeButton(string text,Action action){var b=new Button{Content=text,Margin=new Thickness(0,4,0,4),HorizontalAlignment=HorizontalAlignment.Left};b.Click+=(_,_)=>action();return b;}
+    async void ShowFiles()
+    {
+        if(openingFiles||closing||awaitingFileTransfer)return;
+        openingFiles=true;
+        try
+        {
+            gate.Disarm();SendLease();var previous=filesWindow;
+            if(previous!=null&&ReferenceEquals(previous.BoundSession,session)){previous.Activate();return;}
+            if(previous!=null){await previous.CancelAndWaitAsync();previous.Close();}
+            if(closing||awaitingFileTransfer)return;
+            var current=new FileTransferWindow(session);filesWindow=current;current.Closed+=(_,_)=>{if(ReferenceEquals(filesWindow,current))filesWindow=null;};current.Show();current.Activate();
+        }
+        finally{openingFiles=false;}
+    }
     void ShowSetup()
     {
         gate.Disarm();remote=false;if(appWindow!=null){appWindow.Activate();return;}
@@ -148,7 +174,7 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":paired=true;connecting=false;Title="MAC-DOW - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString())).ToList();status.Text=pairingProgress.Text="Connected. Click MacBook above to view the desktop, or choose a window below.";break;
+            case "catalog":paired=true;connecting=false;Title="MAC-DOW - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString())).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
             case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=$"MAC-DOW | {(gate.CanRoute?"CONTROLLING":"VIEW ONLY")} | RTT {ms:F0} ms | Ctrl+Alt+Shift+Backspace releases";}}break;
             case "video":(appView??desktop).Configure(m);break;
@@ -158,6 +184,7 @@ internal sealed partial class MainWindow : Window
     void Start(bool app)
     {
         if(session==null||!session.IsPaired){status.Text="Connect to your Mac first, then choose what to view.";return;}
+        if(session.VideoError is string videoError){ShowSetup();status.Text=pairingProgress.Text="Connected for files. Video is unavailable on your Mac: "+videoError;return;}
         if(session.IsReady||session.IsStarting){ShowRemote();return;}
         if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update MAC-DOW on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
         uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;}
@@ -188,7 +215,7 @@ internal sealed partial class MainWindow : Window
     void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Brushes.DarkOrange:Brushes.White;control.Foreground=gate.CanRoute?Brushes.White:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
     void Escape(){gate.Disarm();if(appWindow==null)ShowDesktop();else{appWindow.Title="MAC-DOW App Priority | VIEW ONLY | control released";UpdateControl();}}
     bool CanControlVideo() {long shown=(appView??desktop).LastPresented;return shown>0&&session!=null&&session.NativeAlive>0&&Stopwatch.GetElapsedTime(session.NativeAlive).TotalSeconds<1.5&&(session.LastFrame<=shown||Stopwatch.GetElapsedTime(shown).TotalSeconds<1);}
-    void SendLease(){if(session?.IsReady==true){lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=gate.CanRoute,generation=controlGeneration,view=remote||appWindow!=null,stamp=lastLease});}}
+    void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
         RefreshContext();if(gate.CanRoute&&!CanControlVideo())gate.Disarm();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":null);
