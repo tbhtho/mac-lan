@@ -4,7 +4,13 @@ internal static class Program
 {
     [STAThread] static void Main(string[] args)
     {
-        if(args.Contains("--package-diagnostics")){Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Payloads.Diagnose()));return;}
+        if(args.Contains("--package-diagnostics"))
+        {
+            var probeApp=new Application();
+            try{Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Payloads.Diagnose()));}
+            finally{probeApp.Shutdown();}
+            return;
+        }
         if(args.Contains("--update-check")){Console.WriteLine(UpdateProcess.Call("check","--channel","preview").GetAwaiter().GetResult().GetRawText());return;}
         if(args.Contains("--diagnostics"))
         {
@@ -14,10 +20,10 @@ internal static class Program
             return;
         }
         var app=new Application { ShutdownMode=ShutdownMode.OnMainWindowClose };
-        app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/MAC-DOW;component/Theme.xaml",UriKind.Relative)});
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/mac-lan;component/Theme.xaml",UriKind.Relative)});
         if(args.Length==2&&args[0]=="--layout-smoke"){LayoutSmoke.Start(app,args[1]);app.Run();return;}
         Telemetry.Report("startup");
-        app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Report("fatal",e.Exception.GetType().Name);MessageBox.Show("MAC-DOW stopped safely. Reopen it to reconnect. A diagnostic report is queued.","MAC-DOW");app.Shutdown(1);e.Handled=true;};
+        app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Report("fatal",e.Exception.GetType().Name);MessageBox.Show("mac-lan stopped safely. Reopen it to reconnect. A diagnostic report is queued.","mac-lan");app.Shutdown(1);e.Handled=true;};
         app.Run(new MainWindow());
     }
 }

@@ -243,6 +243,52 @@ func TestProductionFeedTrustAnchorsCannotBeRedirected(t *testing.T) {
 		t.Fatal("invalid key accepted")
 	}
 }
+func TestProductionFeedUsesRenamedSourceRepository(t *testing.T) {
+	s, _, _, _ := testFeed(t)
+	config := Config{UpdateFeedBase: "https://raw.githubusercontent.com/tbhtho/mac-lan/main/updates/", UpdatePublicKey: base64.StdEncoding.EncodeToString(s.key)}
+	if _, err := NewSignedFeed(config); err != nil {
+		t.Fatal("renamed source repository feed refused", err)
+	}
+	for _, old := range []string{"https://raw.githubusercontent.com/tbhtho/MAC-DOW/main/updates/", "https://raw.githubusercontent.com/tbhtho/MAC-DOW-Downloads/main/updates/"} {
+		config.UpdateFeedBase = old
+		if _, err := NewSignedFeed(config); err == nil {
+			t.Fatal("withdrawn feed still accepted", old)
+		}
+	}
+}
+
+func TestSignedFeedDownloadsRenamedPlatformAssets(t *testing.T) {
+	for _, platform := range []struct{ os, arch, name string }{
+		{"windows", "amd64", "mac-lan.exe"},
+		{"darwin", "arm64", "mac-lan-macos-arm64-commandline-preview.tar.gz"},
+	} {
+		t.Run(platform.os, func(t *testing.T) {
+			s, p, key, data := testFeed(t)
+			p.Releases[0].Assets[0].Name = platform.name
+			s.client.Transport = feedTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.String() == publicFeedBase+"feed.json" {
+					return response(signFeed(t, p, key)), nil
+				}
+				if r.URL.String() != "https://github.com/tbhtho/mac-lan/releases/download/v0.2.0/"+platform.name {
+					t.Fatalf("unexpected download URL %s", r.URL)
+				}
+				return response(data), nil
+			})
+			e := Engine{Current: "0.1.0", OS: platform.os, Arch: platform.arch, Source: s}
+			plan, err := e.Check(context.Background(), "stable")
+			if err != nil || plan.Asset.Name != platform.name {
+				t.Fatal(plan, err)
+			}
+			path := filepath.Join(t.TempDir(), platform.name)
+			if err := s.Download(context.Background(), plan, path); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Verify(context.Background(), plan.Tag, path); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestSignedFeedEngineStagesRevalidatesAndApplies(t *testing.T) {
 	s, p, key, _ := testFeed(t)

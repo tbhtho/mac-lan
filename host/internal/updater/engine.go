@@ -187,7 +187,7 @@ func (e *Engine) extractChecked(archive string, p Plan, dest string) error {
 		return err
 	}
 	if standalonePlan(p) {
-		return copyStandalone(f, dest)
+		return copyStandalone(f, dest, p.Asset.Name)
 	}
 	ext := ".zip"
 	if p.OS == "darwin" {
@@ -197,7 +197,7 @@ func (e *Engine) extractChecked(archive string, p Plan, dest string) error {
 }
 func payloadRoot(base string, p Plan) string {
 	if standalonePlan(p) {
-		return filepath.Join(base, "MAC-DOW.exe")
+		return filepath.Join(base, p.Asset.Name)
 	}
 	if p.OS == "darwin" {
 		if info, err := os.Lstat(appBundle(base)); err == nil && info.IsDir() {

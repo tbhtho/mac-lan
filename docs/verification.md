@@ -1,5 +1,43 @@
 # Verification record
 
+## Alpha.14 - mac-lan public distribution and signed updates
+
+The public app name is `mac-lan`. Source history remains in the original
+repository (ID 1430459188), renamed to `tbhtho/mac-lan`. Public assets use
+`mac-lan.exe` and `mac-lan-macos-arm64-commandline-preview.tar.gz`; the Mac
+preview retains its `MacDowHost` executable and legacy configuration/cache
+paths. The public Mac package must contain no embedded diagnostic destination.
+Existing private Mac diagnostic configuration stays local, and Windows
+diagnostics remain local-only.
+
+Windows headless checks passed: 49 core, 28 encoded-video, 34 session,
+9 update-workflow, and 46 transfer checks; presentation, pointer/decoder race,
+real headless DOM, and software H.264 regressions; all Go package tests and
+`go vet`. The Windows Release build has zero warnings and errors. A non-UI
+package probe loads the renamed assembly's actual embedded theme, viewer,
+and updater without starting windows, capture, or input hooks. Updater tests
+cover both legacy and renamed install filenames, preserved neighboring files,
+and renewal of authenticated expired publisher history while clients still
+reject expired or forged feeds.
+
+The signed feed and public binaries share this repository. Alpha.14 is the
+one-time manual installation needed on both computers after the old feed was
+withdrawn. Future signed updates check at startup and every six hours and offer
+restart while idle. Publication verification must bind the public feed and both
+downloaded artifacts to the intended source commit, sizes and SHA-256 hashes.
+
+The branding and distribution change does not establish new native capture,
+input, permission, Mac update-worker/relaunch, or hardware performance evidence.
+The Mac remains a cross-compiled command-line preview whose capture helper
+builds on first launch using existing Apple tools. A configured 1920×1080/60 fps
+target remains distinct from measured throughput and end-to-end latency.
+See the alpha.13 record below for the inherited frame-delivery evidence and the
+[hardware checklist](manual-validation.md) for the user's two-computer checks.
+
+Earlier entries below are historical records for their named releases. Their
+former repository names, manual distribution decisions, withdrawn feeds, and
+private bootstrap paths do not describe current public distribution.
+
 ## Alpha.13 - preserve encoded frames through temporary viewer delays
 
 The user confirmed working native video and mouse/keyboard control in alpha.12,

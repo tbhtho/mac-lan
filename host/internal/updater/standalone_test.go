@@ -21,6 +21,49 @@ func standaloneFixture(t *testing.T, version, commit string) []byte {
 	data = binary.LittleEndian.AppendUint32(data, uint32(len(b)))
 	return append(data, []byte("MCDOWPK1")...)
 }
+func TestRenamedStandaloneApplyPreservesInstalledPathAndNeighbors(t *testing.T) {
+	for _, installedName := range []string{"mac-lan.exe", "MAC-DOW.exe"} {
+		t.Run(installedName, func(t *testing.T) {
+			e, legacy, src := newFixture(t, true)
+			install := filepath.Join(filepath.Dir(legacy), installedName)
+			old := standaloneFixture(t, "0.1.0", src.SHA)
+			if err := os.WriteFile(install, old, 0600); err != nil {
+				t.Fatal(err)
+			}
+			sibling := filepath.Join(filepath.Dir(install), "settings.json")
+			if err := os.WriteFile(sibling, []byte("preserve"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			src.Data = standaloneFixture(t, "0.2.0", src.SHA)
+			digest := sha256.Sum256(src.Data)
+			src.R.Assets[0] = Asset{ID: 12, Name: "mac-lan.exe", Size: int64(len(src.Data)), Digest: "sha256:" + hex.EncodeToString(digest[:])}
+			stage, err := e.Stage(context.Background(), "stable")
+			if err != nil || !stage.CanApply {
+				t.Fatal("renamed standalone staging", stage, err)
+			}
+			if filepath.Base(payloadRoot(filepath.Join(stage.Directory, "preview"), stage.Plan)) != "mac-lan.exe" {
+				t.Fatal("staged filename lost")
+			}
+			journal, err := e.Apply(context.Background(), stage.Directory, install, stage.Plan.confirmation(), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := os.ReadFile(install); string(got) != string(src.Data) {
+				t.Fatal("actual installed path not replaced")
+			}
+			if got, _ := os.ReadFile(sibling); string(got) != "preserve" {
+				t.Fatal("neighbor changed")
+			}
+			var tx Transaction
+			if err := readJSON(journal, &tx); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := os.ReadFile(tx.Backup); string(got) != string(old) {
+				t.Fatal("backup changed")
+			}
+		})
+	}
+}
 func TestStandaloneApplyReplacesOnlyExecutable(t *testing.T) {
 	e, legacy, src := newFixture(t, true)
 	install := filepath.Join(filepath.Dir(legacy), "MAC-DOW.exe")

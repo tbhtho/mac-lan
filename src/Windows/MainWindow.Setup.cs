@@ -13,7 +13,7 @@ internal sealed partial class MainWindow
     {
         FontFamily=new FontFamily("Segoe UI");FontSize=14;Foreground=Ink;Background=new SolidColorBrush(Color.FromRgb(243,245,249));
         setup.Children.Add(new TextBlock{Text="Connect your Mac",FontSize=28,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,8)});
-        setup.Children.Add(new TextBlock{Text="Open MAC-DOW on your Mac. Find it here, then allow the connection there.",Foreground=Muted,Margin=new Thickness(0,0,0,24),LineHeight=21});
+        setup.Children.Add(new TextBlock{Text="Open mac-lan on your Mac. Find it here, then allow the connection there.",Foreground=Muted,Margin=new Thickness(0,0,0,24),LineHeight=21});
         findButton=MakeButton("Find my Mac",async()=>await FindMac());findButton.Style=(Style)FindResource("PrimaryButton");findButton.MinWidth=144;setup.Children.Add(findButton);
         setup.Children.Add(new TextBlock{Text="Macs on your network",FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,18,0,8)});
         nearby.Width=double.NaN;nearby.MinWidth=260;nearby.IsEnabled=false;

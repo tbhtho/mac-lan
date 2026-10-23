@@ -25,7 +25,7 @@ internal sealed class FileTransferWindow : Window
     public Task CancelAndWaitAsync(){operation?.Cancel();return settled?.Task??Task.CompletedTask;}
     public FileTransferWindow(Session? session)
     {
-        this.session=session;Title="MAC-DOW · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;
+        this.session=session;Title="mac-lan · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;
         var layout=new Grid{Margin=new Thickness(28)};layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new());layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
         var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Send to your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Files, ZIPs and folders go to Downloads/MAC-DOW on your Mac.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};
@@ -44,7 +44,7 @@ internal sealed class FileTransferWindow : Window
         if(session!=null)session.Ended+=SessionEnded;
         Closing+=(_,e)=>{if(busy){e.Cancel=true;closeRequested=true;operation?.Cancel();}};
         Closed+=(_,_)=>{closed=true;if(session!=null)session.Ended-=SessionEnded;operation?.Cancel();};
-        message.Text=CanSend?"Ready when you are.":session?.IsPaired==true?"Update MAC-DOW on your Mac to enable file transfer.":"Connect to your Mac first, then open Files again.";Refresh();
+        message.Text=CanSend?"Ready when you are.":session?.IsPaired==true?"Update mac-lan on your Mac to enable file transfer.":"Connect to your Mac first, then open Files again.";Refresh();
     }
     bool CanSend=>session?.CanTransfer==true;
     void Refresh()

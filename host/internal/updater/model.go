@@ -13,7 +13,7 @@ import (
 var (
 	ErrNoUpdate   = errors.New("no newer compatible release in this channel")
 	ErrProvenance = errors.New("publisher signature unavailable; automatic update is blocked")
-	ErrAccess     = errors.New("GitHub unavailable or private-repo access missing; use an existing authenticated GitHub CLI or manually download the private release; MAC-DOW will not sign in or save credentials")
+	ErrAccess     = errors.New("GitHub unavailable; retry or manually download the release; mac-lan will not sign in or save credentials")
 )
 
 //go:embed config.json
@@ -31,7 +31,7 @@ type Config struct {
 func BuildConfig() Config {
 	b, _ := configFS.ReadFile("config.json")
 	var c Config
-	if json.Unmarshal(b, &c) != nil || c.Repository != "tbhtho/MAC-DOW" || c.RepositoryID != 1430459188 {
+	if json.Unmarshal(b, &c) != nil || c.Repository != "tbhtho/mac-lan" || c.RepositoryID != 1430459188 {
 		panic("invalid build identity")
 	}
 	return c
@@ -157,6 +157,20 @@ func assetName(goos, arch string) (string, error) {
 	}
 	return "", errors.New("unsupported update platform/architecture")
 }
+
+// Prefer the current product name while retaining signed older releases for
+// existing installations and rollback. An invalid preferred asset never causes
+// a downgrade to a different artifact in the same release.
+func assetNames(goos, arch string) ([]string, error) {
+	legacy, err := assetName(goos, arch)
+	if err != nil {
+		return nil, err
+	}
+	if goos == "windows" {
+		return []string{"mac-lan.exe", "MAC-DOW.exe", legacy}, nil
+	}
+	return []string{"mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz", legacy}, nil
+}
 func Select(releases []Release, current, channel, goos, arch string) (Plan, error) {
 	var result Plan
 	cv, err := ParseVersion(current)
@@ -166,7 +180,7 @@ func Select(releases []Release, current, channel, goos, arch string) (Plan, erro
 	if channel != "stable" && channel != "preview" {
 		return result, errors.New("unknown update channel")
 	}
-	name, err := assetName(goos, arch)
+	names, err := assetNames(goos, arch)
 	if err != nil {
 		return result, err
 	}
@@ -181,21 +195,16 @@ func Select(releases []Release, current, channel, goos, arch string) (Plan, erro
 		}
 		var chosen *Asset
 		duplicate := false
-		selectedName := name
-		if goos == "windows" {
+		selectedName := ""
+		for _, name := range names {
 			for _, a := range r.Assets {
-				if a.Name == "MAC-DOW.exe" {
-					selectedName = "MAC-DOW.exe"
+				if a.Name == name {
+					selectedName = name
 					break
 				}
 			}
-		}
-		if goos == "darwin" {
-			for _, a := range r.Assets {
-				if a.Name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
-					selectedName = a.Name
-					break
-				}
+			if selectedName != "" {
+				break
 			}
 		}
 		for i := range r.Assets {

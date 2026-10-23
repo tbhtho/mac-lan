@@ -85,7 +85,7 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Println("MAC-DOW TLS identity self-test passed; capture/input not started")
+		fmt.Println("mac-lan TLS identity self-test passed; capture/input not started")
 		return
 	}
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
@@ -133,7 +133,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	}
 	videoError := ""
 	if captureErr != nil {
-		videoError = "Native video setup failed. Check the Mac diagnostic report, then restart MAC-DOW after fixing the build. File transfers are available."
+		videoError = "Native video setup failed. Check the Mac diagnostic report, then restart mac-lan after fixing the build. File transfers are available."
 	} else {
 		cmd := exec.Command(helper, "--check")
 		if !gui {
@@ -142,7 +142,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 		}
 		if err = cmd.Run(); err != nil {
 			diagnostics.Emit("mac", "permissions-missing", "screen", nil)
-			videoError = "Screen Recording is unavailable. Grant MAC-DOW Screen Recording access in System Settings and restart it. File transfers are available."
+			videoError = "Screen Recording is unavailable. Grant mac-lan Screen Recording access in System Settings and restart it. File transfers are available."
 		} else {
 			diagnostics.Emit("mac", "permissions-ok", "ok", map[string]int{"screenPermission": 1})
 		}
@@ -253,7 +253,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	if gui {
 		broker.emit(map[string]any{"type": "ready", "address": actual.IP.String(), "port": actual.Port, "fingerprint": fp, "token": token})
 	} else {
-		fmt.Printf("\nMAC-DOW is ready - waiting for Windows. Ctrl+C stops sharing.\nMac identity: %s\n\nAdvanced connection details (only if discovery is unavailable):\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\n\nConnect from Windows, then choose Allow on this Mac to begin viewing. Video has not started yet.\n", strings.ToUpper(fp[:32]), listener.Addr(), fp, token)
+		fmt.Printf("\nmac-lan is ready - waiting for Windows. Ctrl+C stops sharing.\nMac identity: %s\n\nAdvanced connection details (only if discovery is unavailable):\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\n\nConnect from Windows, then choose Allow on this Mac to begin viewing. Video has not started yet.\n", strings.ToUpper(fp[:32]), listener.Addr(), fp, token)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

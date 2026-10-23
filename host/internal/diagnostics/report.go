@@ -247,7 +247,7 @@ func NewReport(role, event, code string, counts map[string]int) Report {
 			safe[key] = value
 		}
 	}
-	return Report{"MAC-DOW", updater.BuildConfig().Version, runtime.GOOS, runtime.GOARCH, role, event, code, time.Now().UTC().Format(time.RFC3339), safe}
+	return Report{"mac-lan", updater.BuildConfig().Version, runtime.GOOS, runtime.GOARCH, role, event, code, time.Now().UTC().Format(time.RFC3339), safe}
 }
 func validEndpoint(endpoint string) bool {
 	u, err := url.Parse(endpoint)
@@ -261,7 +261,7 @@ func deliver(ctx context.Context, client *http.Client, endpoint string, report R
 		return errors.New("diagnostic destination unavailable")
 	}
 	body, _ := json.Marshal(report)
-	payload, _ := json.Marshal(map[string]any{"content": "MAC-DOW diagnostic\n```json\n" + string(body) + "\n```", "allowed_mentions": map[string]any{"parse": []string{}}})
+	payload, _ := json.Marshal(map[string]any{"content": "mac-lan diagnostic\n```json\n" + string(body) + "\n```", "allowed_mentions": map[string]any{"parse": []string{}}})
 	for attempt := 0; attempt < 2; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"?wait=true", bytes.NewReader(payload))
 		if err != nil {

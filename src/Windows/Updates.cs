@@ -32,7 +32,7 @@ internal static class UpdateProcess
     }
     static async Task<JsonElement> CallCore(string[] arguments)
     {
-        if(!File.Exists(Helper))throw new InvalidOperationException("This development build has no bundled update helper. Use a packaged MAC-DOW.exe.");
+        if(!File.Exists(Helper))throw new InvalidOperationException("This development build has no bundled update helper. Use a packaged mac-lan.exe.");
         var start=new ProcessStartInfo(Helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(string argument in arguments)start.ArgumentList.Add(argument);
         using var process=Process.Start(start)??throw new IOException("Cannot start update helper.");
@@ -76,7 +76,7 @@ internal sealed class UpdateDialog : Window
     readonly TextBlock description=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,18,0,18)};
     readonly ComboBox channel=new(){ItemsSource=new[]{"stable","preview"},Width=160,HorizontalAlignment=HorizontalAlignment.Left};
     readonly CheckBox automatic=new(){Content="Download updates automatically",Margin=new Thickness(0,8,0,4)};
-    readonly CheckBox relaunch=new(){Content="Reopen MAC-DOW after updating",IsChecked=true,Margin=new Thickness(0,10,0,10)};
+    readonly CheckBox relaunch=new(){Content="Reopen mac-lan after updating",IsChecked=true,Margin=new Thickness(0,10,0,10)};
     readonly Button apply=new(){Content="Restart to update",IsEnabled=false,Margin=new Thickness(0,6,0,6)};
     readonly Action shutdown;
     readonly Func<Task> prepareRestart;
@@ -88,9 +88,9 @@ internal sealed class UpdateDialog : Window
     {
         this.shutdown=shutdown;this.prepareRestart=prepareRestart;preferences=UpdatePreferences.Load();
         stage=preferences.Stage;
-        Owner=owner;Title="MAC-DOW Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;
+        Owner=owner;Title="mac-lan Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;
         var content=new StackPanel{Margin=new Thickness(28)};Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-        content.Children.Add(new TextBlock{Text="Keep MAC-DOW up to date",FontSize=25,FontWeight=FontWeights.SemiBold});
+        content.Children.Add(new TextBlock{Text="Keep mac-lan up to date",FontSize=25,FontWeight=FontWeights.SemiBold});
         content.Children.Add(new TextBlock{Text="Updates download in the background. Restart when you are ready.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,0)});
         content.Children.Add(description);content.Children.Add(actions);
         apply.Style=(Style)FindResource("PrimaryButton");
@@ -146,7 +146,7 @@ internal sealed class UpdateDialog : Window
         Describe(result);
         if(!result.GetProperty("ok").GetBoolean())return;
         string version=result.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString()!;
-        if(MessageBox.Show(this,"Close MAC-DOW and reinstall verified "+version+"? This downloads the signed older release again; external settings are preserved. "+(relaunch.IsChecked==true?"MAC-DOW will reopen.":"Reopen it yourself afterwards."),"Confirm rollback",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        if(MessageBox.Show(this,"Close mac-lan and reinstall verified "+version+"? This downloads the signed older release again; external settings are preserved. "+(relaunch.IsChecked==true?"mac-lan will reopen.":"Reopen it yourself afterwards."),"Confirm rollback",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
         await prepareRestart();var latest=UpdatePreferences.Load();latest.ResultFile=Path.Combine(Path.GetDirectoryName(journal)!,"worker-result.json");latest.Save();
         var args=new List<string>{"rollback","--journal",journal,"--install",install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","ROLLBACK","--result-file",latest.ResultFile};
         if(relaunch.IsChecked==true)args.Add("--relaunch");

@@ -68,7 +68,7 @@ func Run(args []string, out io.Writer) int {
 		result = Result{OK: true, Status: "info", Version: BuildConfig().Version, Message: "Automatic updates use a public signed feed and SHA-256 verified downloads. No GitHub sign-in is required."}
 		return 0
 	}
-	flags := flag.NewFlagSet("MAC-DOW updates", flag.ContinueOnError)
+	flags := flag.NewFlagSet("mac-lan updates", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	channel := flags.String("channel", BuildConfig().DefaultChannel, "stable or preview")
 	stage := flags.String("stage", "", "owned staged update")
@@ -157,20 +157,20 @@ func StartupCheck(out io.Writer) {
 	defer cancel()
 	e, err := NewEngine()
 	if err != nil {
-		fmt.Fprintln(out, "Updates: signed update feed unavailable; MAC-DOW will retry while it is open.")
+		fmt.Fprintln(out, "Updates: signed update feed unavailable; mac-lan will retry while it is open.")
 		return
 	}
 	p, err := e.Check(ctx, BuildConfig().DefaultChannel)
 	if err == nil {
-		fmt.Fprintf(out, "Update %s available. MAC-DOW downloads updates in the background and offers Restart to update.\n", p.Tag)
+		fmt.Fprintf(out, "Update %s available. mac-lan downloads updates in the background and offers Restart to update.\n", p.Tag)
 	} else if !errors.Is(err, ErrNoUpdate) {
-		fmt.Fprintln(out, "Update check unavailable; MAC-DOW will retry the signed feed while open.")
+		fmt.Fprintln(out, "Update check unavailable; mac-lan will retry the signed feed while open.")
 	} else {
-		fmt.Fprintln(out, "MAC-DOW", e.Current, "- no newer compatible update.")
+		fmt.Fprintln(out, "mac-lan", e.Current, "- no newer compatible update.")
 	}
 }
 func Console(in io.Reader, out io.Writer) int {
-	fmt.Fprintln(out, "MAC-DOW updates", BuildConfig().Version, "- Check / Update (stage) / Apply / Rollback / Quit. No capture or listener in this mode.")
+	fmt.Fprintln(out, "mac-lan updates", BuildConfig().Version, "- Check / Update (stage) / Apply / Rollback / Quit. No capture or listener in this mode.")
 	fmt.Fprintln(out, "Uses signed public update downloads. No GitHub sign-in is required.")
 	scanner := bufio.NewScanner(in)
 	var staged *Stage

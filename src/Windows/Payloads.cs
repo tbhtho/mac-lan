@@ -11,11 +11,12 @@ internal static class Payloads
     static readonly Lazy<string> extracted=new(Extract);
     internal static string Root=>extracted.Value;
     internal static string Helper=>Path.Combine(Root,"MAC-DOW-Update.exe");
-    internal static string Install=>Environment.ProcessPath??throw new IOException("Cannot locate MAC-DOW.exe.");
+    internal static string Install=>Environment.ProcessPath??throw new IOException("Cannot locate mac-lan.exe.");
     internal static object Diagnose()
     {
         string root=Root;
-        return new {executable=Install, payloadRoot=root, helperPresent=File.Exists(Helper),viewerPresent=new[]{"viewer.html","viewer.mjs","viewer-core.mjs"}.All(n=>File.Exists(Path.Combine(root,n))),uiStarted=false,hooksStarted=false,captureStarted=false};
+        var theme=new System.Windows.ResourceDictionary{Source=new Uri("/mac-lan;component/Theme.xaml",UriKind.Relative)};
+        return new {executable=Install, payloadRoot=root,themePresent=theme.Count>0, helperPresent=File.Exists(Helper),viewerPresent=new[]{"viewer.html","viewer.mjs","viewer-core.mjs"}.All(n=>File.Exists(Path.Combine(root,n))),uiStarted=false,hooksStarted=false,captureStarted=false};
     }
     static string Extract()
     {

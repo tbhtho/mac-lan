@@ -2,7 +2,7 @@
 
 The README describes the current preview workflow. This document keeps build instructions and earlier development context out of that introduction. Verify the exact downloaded version against [validation status](verification.md); an older release does not gain a feature just because it appears on the development branch.
 
-Distribution now uses manual reinstalls from the existing `tbhtho/MAC-DOW` releases. The separate public update feed is withdrawn; references below to that distribution describe earlier development.
+The existing repository is now named `tbhtho/mac-lan` (repository ID 1430459188), with public source, releases, and a signed update feed in the same repository. Install alpha.14 on both computers once to move from the withdrawn feed to this distribution. Subsequent updates need no GitHub sign-in.
 
 ## Local builds
 
@@ -14,15 +14,15 @@ Windows requires .NET SDK 10, Go 1.24+, and Node 22+:
 ./scripts/test-standalone.ps1
 ```
 
-Run these commands from the repository root. The Windows package is one `artifacts/MAC-DOW.exe`, including its .NET runtime, native loader, viewer, and discovery/updater helper. Internal resources extract to a private application cache. The existing Microsoft WebView2 Runtime is an external prerequisite.
+Run these commands from the repository root. The Windows package is one `artifacts/mac-lan.exe`, including its .NET runtime, native loader, viewer, and discovery/updater helper. Internal resources extract to a private application cache. The existing Microsoft WebView2 Runtime is an external prerequisite.
 
 Build the cross-compiled Apple Silicon command-line preview on Windows:
 
 ```powershell
-./scripts/package-macos-preview.ps1 -PublicUpdate
+./scripts/package-macos-preview.ps1
 ```
 
-The public package has no embedded diagnostics destination. The private bootstrap build omits `-PublicUpdate` and reads `MACDOW_DIAGNOSTICS_WEBHOOK` or the ignored `.cache/discord-webhook.txt`; it saves that configuration locally on the Mac for later public updates. Never publish the private bootstrap or its embedded destination in the public downloads repository.
+The Mac package is public by default and has no embedded diagnostic destination. `-PublicUpdate` remains an optional compatibility flag. A private bootstrap requires explicit `-PrivateBootstrap`, reads `MACDOW_DIAGNOSTICS_WEBHOOK` or the ignored `.cache/discord-webhook.txt`, and is written only under `artifacts/private-bootstrap`. It saves that configuration locally on the Mac for later public updates. Never publish the private bootstrap or its embedded destination. Existing private diagnostic configuration remains in its legacy per-user location when the public preview is installed.
 
 The Mac preview embeds canonical `native/MacDowCapture.swift`. First launch compiles it into the user's application cache with the Mac's existing Apple command-line tools, runs a non-capturing self-test, and verifies the cached binary on subsequent launches. It does not install tools, accept licenses, or alter OS security. Full bounded compiler output stays in the Mac cache as `last-build-error.txt`; diagnostics contain fixed categories and numeric source locations.
 
@@ -32,7 +32,7 @@ A full native source build requires existing Go and Swift toolchains on Apple Si
 bash scripts/build-macos.sh
 ```
 
-That script's private diagnostic configuration follows its existing bootstrap requirements. The source for a menu-bar-only AppKit launcher is present, but the distributed Mac preview is still a Terminal companion, not a built `.app`. Capture and Accessibility permissions must be granted deliberately in macOS System Settings. Keep OS protections enabled; quarantine removal and Gatekeeper bypass are not project setup steps.
+That script also defaults to no embedded diagnostic destination. A private native bootstrap requires explicit `MACDOW_PRIVATE_BOOTSTRAP=1` and the existing private diagnostic configuration. The source for a menu-bar-only AppKit launcher is present, but the distributed Mac preview is still a Terminal companion, not a built `.app`. Capture and Accessibility permissions must be granted deliberately in macOS System Settings. Keep OS protections enabled; quarantine removal and Gatekeeper bypass are not project setup steps.
 
 The optional [native workflow](../.github/workflows/native-build.yml) has no push/tag trigger. It requires explicit confirmation that sufficient included free Actions minutes exist. It has not provided proof of current native capture or control. Do not start paid CI or broaden account permissions as an incidental publishing step.
 
@@ -40,7 +40,7 @@ The optional [native workflow](../.github/workflows/native-build.yml) has no pus
 
 Use [signed update publishing](update-feed-publishing.md) for the feed, pinned-key verification, immutable artifact identities, and private-key handling. Publish public artifacts without the Mac diagnostic destination. Do not rewrite published Git history to improve presentation or replace an old asset under its existing version.
 
-Keep the source repository and its permissions separate from the public binary downloads repository. Making binaries public does not require making source, diagnostic configuration, or signing keys public. Public feeds and binaries must be verified anonymously after publication.
+Build both packages from clean committed source, then publish from this existing repository using `./scripts/publish-release.ps1 -NotesFile <path>`; there is no separate downloads repository. The local publisher does not build binaries. It coordinates immutable public assets, a source ZIP, checksum list, and the signed feed at `updates/feed.json`. Diagnostic configuration and signing keys stay outside version control and public artifacts. Verify the feed and both binaries anonymously after publication.
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
@@ -58,13 +58,14 @@ These notes are historical; older ZIP, manual token, and Terminal-only update in
 - **Alpha.10:** explicit SDK resolution and fixed compiler diagnostics followed a native-build failure whose exact original cause was unknown. The user confirmed successful native compilation and live video. Authenticated Windows-to-Mac transfer added files, ZIPs, and folders. Discovery, pairing, and transfer remain usable when video setup fails rather than starting a lower-rate stream.
 - **Alpha.11:** full desktop output adopted 1920×1080 at a 60 fps target, stretched to fill without cropping or changing Mac display settings. App Priority retained aspect fit, and pointer mapping follows the presentation mode. Native video omits its cursor so Windows supplies one immediate pointer. A consumed activation click replaced the hidden-menu-only control flow; normal input-pipe EOF releases inputs and exits cleanly.
 - **Alpha.12:** the updater work replaces GitHub-authenticated downloads with a signed public feed and public binaries. The private Mac bootstrap preserves its existing diagnostic destination locally, keeping subsequent public Mac updates free of that secret. Current implementation and validation evidence belong in the linked update and verification documents.
-- **Alpha.13:** bounded dependency-aware queues and browser batches replace arbitrary encoded-frame dropping. Decoder output coalesces for display, stream epochs reject delayed callbacks, and the Mac reports fixed control-release reasons. The user confirmed native control in alpha.12; the new delivery path has synthetic and real software-codec checks, with hardware responsiveness still awaiting user testing. Releases remain manual in the original repository.
+- **Alpha.13:** bounded dependency-aware queues and browser batches replace arbitrary encoded-frame dropping. Decoder output coalesces for display, stream epochs reject delayed callbacks, and the Mac reports fixed control-release reasons. The user confirmed native control in alpha.12; the new delivery path has synthetic and real software-codec checks, with hardware responsiveness still awaiting user testing. Distribution at that point remained manual in the original private repository.
+- **Alpha.14:** the public app name becomes `mac-lan`. The same repository is renamed and made public, and signed automatic updates use its releases and `updates/feed.json`. Public packages omit private diagnostic destinations; existing settings, cache paths, permissions identity, and `MacDowHost` remain compatible. Earlier private bootstrap assets are not advertised as public downloads. See the current verification record for the distinction between headless checks, cross-compilation, and native execution.
 
 ## Runtime boundaries
 
 Direct LAN TLS 1.3 and WebSockets carry video and input, with ephemeral launch identity, local pairing approval, one controller, and separate video approval. There is no cloud relay, STUN/TURN, saved pairing, daemon, or automatic login startup. An older command-line mode printed a temporary token and fingerprint and accepted `--listen`; the normal discovery flow needs neither manual entry nor a selected interface argument.
 
-Hardware H.264 uses ScreenCaptureKit and VideoToolbox on the Mac. Windows WebCodecs prefers hardware decoding, subject to the installed runtime and GPU. Newest-frame queues, bounded buffers, and sequence-gap recovery favor recent pictures. RTT, encode time, and local decode/submit time are local measurements, not synchronized capture-to-display latency. Reliable TCP may stall behind retransmission; WebRTC/UDP behavior is not claimed.
+Hardware H.264 uses ScreenCaptureKit and VideoToolbox on the Mac. Windows WebCodecs prefers hardware decoding, subject to the installed runtime and GPU. Dependency-aware encoded-frame queues, bounded buffers, and sequence-gap recovery preserve decodability; decoded pictures coalesce for display. RTT, encode time, and local decode/submit time are local measurements, not synchronized capture-to-display latency. Reliable TCP may stall behind retransmission; WebRTC/UDP behavior is not claimed.
 
 App Priority captures one selected window, not all windows belonging to an app. Conservative scope checks can pause input; a closed, minimized, or resized target stops capture without falling back to the desktop. Input leases, EOF handling, and the supervisor recover from normal disconnects and failures; a simultaneous hard kill of the entire process tree or OS failure cannot guarantee synthetic-key release.
 

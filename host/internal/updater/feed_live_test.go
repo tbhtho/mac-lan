@@ -15,7 +15,7 @@ import (
 )
 
 // TestLiveSignedUpdates deliberately opts into the production HTTPS feed. It
-// never executes downloaded programs: only a temporary copy of an alpha.11
+// never executes downloaded programs: only a temporary copy of an alpha.13
 // executable is replaced, and Mac validation stops at archive/identity/Mach-O.
 // The ordinary suite skips before reading a local binary or making a request.
 func TestLiveSignedUpdates(t *testing.T) {
@@ -25,10 +25,10 @@ func TestLiveSignedUpdates(t *testing.T) {
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		t.Fatal("this live updater verification expects a Windows x64 test runner")
 	}
-	const previous = "0.1.0-alpha.11"
+	const previous = "0.1.0-alpha.13"
 	oldPath := os.Getenv("MACDOW_LIVE_OLD_EXE")
 	if !filepath.IsAbs(oldPath) {
-		t.Fatal("MACDOW_LIVE_OLD_EXE must be an absolute path to the real alpha.11 standalone EXE")
+		t.Fatal("MACDOW_LIVE_OLD_EXE must be an absolute path to the real alpha.13 standalone EXE")
 	}
 	oldInfo, err := os.Lstat(oldPath)
 	if err != nil || !oldInfo.Mode().IsRegular() || oldInfo.Size() <= 0 || oldInfo.Size() > MaxArchive {
@@ -36,11 +36,11 @@ func TestLiveSignedUpdates(t *testing.T) {
 	}
 	oldMarker, err := ReadPackageIdentity(oldPath)
 	if err != nil || oldMarker.Product != "MAC-DOW" || oldMarker.RepositoryID != BuildConfig().RepositoryID || oldMarker.Version != previous || oldMarker.OS != "windows" || oldMarker.Arch != "amd64" {
-		t.Fatal("old executable is not the expected alpha.11 Windows standalone release", oldMarker, err)
+		t.Fatal("old executable is not the expected alpha.13 Windows standalone release", oldMarker, err)
 	}
 	originalHash := liveFileHash(t, oldPath)
 	root := t.TempDir()
-	install := filepath.Join(root, "isolated-install", "MAC-DOW.exe")
+	install := filepath.Join(root, "isolated-install", "mac-lan.exe")
 	if err = os.Mkdir(filepath.Dir(install), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestLiveSignedUpdates(t *testing.T) {
 	}
 	e.Root, e.Current = filepath.Join(root, "windows-cache"), previous
 	plan, err := e.Check(ctx, BuildConfig().DefaultChannel)
-	if err != nil || plan.Version != BuildConfig().Version || plan.Asset.Name != "MAC-DOW.exe" || plan.Commit == "" {
+	if err != nil || plan.Version != BuildConfig().Version || plan.Asset.Name != "mac-lan.exe" || plan.Commit == "" {
 		t.Fatal("published Windows update did not match this build", plan, err)
 	}
 	stage, err := e.Stage(ctx, BuildConfig().DefaultChannel)
@@ -99,7 +99,7 @@ func TestLiveSignedUpdates(t *testing.T) {
 	}
 	mac.Root, mac.Current, mac.OS, mac.Arch = filepath.Join(root, "mac-cache"), previous, "darwin", "arm64"
 	macPlan, err := mac.Check(ctx, BuildConfig().DefaultChannel)
-	if err != nil || macPlan.Version != BuildConfig().Version || !commandlinePreviewPlan(macPlan) {
+	if err != nil || macPlan.Version != BuildConfig().Version || macPlan.Asset.Name != "mac-lan-macos-arm64-commandline-preview.tar.gz" {
 		t.Fatal("published Mac update did not match this build", macPlan, err)
 	}
 	macStage, err := mac.Stage(ctx, BuildConfig().DefaultChannel)

@@ -225,6 +225,35 @@ func signPayload(keyPath string, payload []byte, configured string, now time.Tim
 }
 
 func verifyEnvelope(raw []byte, trusted string, now time.Time) ([]byte, error) {
+	payload, err := authenticatedPayload(raw, trusted)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = validatePayload(payload, now); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+// Publication can renew expired, authenticated history after an inactive period.
+// This never makes an expired envelope valid for a client or the verify command.
+func verifyPreviousEnvelope(raw []byte, trusted string, now time.Time) (feedPayload, error) {
+	payload, err := authenticatedPayload(raw, trusted)
+	if err != nil {
+		return feedPayload{}, err
+	}
+	var p feedPayload
+	if err = decodeStrict(payload, &p); err != nil {
+		return feedPayload{}, err
+	}
+	published, err := time.Parse(time.RFC3339, p.PublishedAt)
+	if err != nil || published.After(now.Add(5*time.Minute)) {
+		return feedPayload{}, errors.New("previous feed publication time is invalid")
+	}
+	return validatePayload(payload, published)
+}
+
+func authenticatedPayload(raw []byte, trusted string) ([]byte, error) {
 	if len(raw) > maximumFeedBytes*2 {
 		return nil, errors.New("signed envelope is too large")
 	}
@@ -243,9 +272,6 @@ func verifyEnvelope(raw []byte, trusted string, now time.Time) ([]byte, error) {
 	signature, err := base64.StdEncoding.Strict().DecodeString(e.Signature)
 	if err != nil || len(signature) != ed25519.SignatureSize || !ed25519.Verify(public, payload, signature) {
 		return nil, errors.New("update signature does not match the trusted public key")
-	}
-	if _, err = validatePayload(payload, now); err != nil {
-		return nil, err
 	}
 	return payload, nil
 }
@@ -315,13 +341,21 @@ func validatePayload(raw []byte, now time.Time) (feedPayload, error) {
 		}
 		names := map[string]bool{}
 		for _, a := range r.Assets {
-			if a.ID <= 0 || assetIDs[a.ID] || names[a.Name] || a.Size <= 0 || !digestPattern.MatchString(a.SHA256) || (a.Name != "MAC-DOW.exe" && a.Name != "MAC-DOW-macos-arm64-commandline-preview.tar.gz") {
+			if a.ID <= 0 || assetIDs[a.ID] || names[a.Name] || a.Size <= 0 || !digestPattern.MatchString(a.SHA256) || !publisherAssetName(a.Name) {
 				return p, errors.New("invalid or duplicate asset binding")
 			}
 			assetIDs[a.ID], names[a.Name] = true, true
 		}
 	}
 	return p, nil
+}
+
+func publisherAssetName(name string) bool {
+	switch name {
+	case "mac-lan.exe", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW.exe", "MAC-DOW-macos-arm64-commandline-preview.tar.gz":
+		return true
+	}
+	return false
 }
 
 func makeManifest(o manifestOptions, previous []byte, trusted string, now time.Time) ([]byte, error) {
@@ -337,7 +371,7 @@ func makeManifest(o manifestOptions, previous []byte, trusted string, now time.T
 	for _, file := range []struct {
 		path, name string
 		id         int64
-	}{{o.Windows, "MAC-DOW.exe", o.WindowsID}, {o.Mac, "MAC-DOW-macos-arm64-commandline-preview.tar.gz", o.MacID}} {
+	}{{o.Windows, "mac-lan.exe", o.WindowsID}, {o.Mac, "mac-lan-macos-arm64-commandline-preview.tar.gz", o.MacID}} {
 		a, err := artifactMetadata(file.path, file.name, file.id)
 		if err != nil {
 			return nil, err
@@ -346,13 +380,9 @@ func makeManifest(o manifestOptions, previous []byte, trusted string, now time.T
 	}
 	p.Releases = []feedRelease{r}
 	if len(previous) != 0 {
-		verified, err := verifyEnvelope(previous, trusted, now)
+		old, err := verifyPreviousEnvelope(previous, trusted, now)
 		if err != nil {
 			return nil, fmt.Errorf("previous feed cannot be trusted: %w", err)
-		}
-		old, err := validatePayload(verified, now)
-		if err != nil {
-			return nil, err
 		}
 		for _, release := range old.Releases {
 			if release.Tag == r.Tag {
@@ -386,7 +416,7 @@ func artifactMetadata(path, name string, id int64) (feedAsset, error) {
 	if err != nil || !os.SameFile(info, opened) {
 		return a, errors.New("artifact changed while opening")
 	}
-	if name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
+	if name == "mac-lan-macos-arm64-commandline-preview.tar.gz" || name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
 		if err = validatePublicMacArchive(f); err != nil {
 			return a, err
 		}
