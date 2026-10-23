@@ -7,6 +7,10 @@ import re
 import struct
 import tarfile
 import plistlib
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import macos_codesign  # noqa: E402  (sibling build module)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--windows', required=True, type=Path)
@@ -65,11 +69,16 @@ if args.mac_app:
         for member in archive.getmembers():
             if member.isfile():public(archive.extractfile(member).read())
         prefix='mac-lan.app/Contents/'
-        for name in ['MacOS/mac-lan','Helpers/MacDowHost']:
+        # The app's executables are the compatibility host re-signed with the mac-lan certificate.
+        certificate=Path('installer/macos-codesign.cer').read_bytes()
+        info_plist=archive.extractfile(prefix+'Info.plist').read()
+        resources=archive.extractfile(prefix+'_CodeSignature/CodeResources').read()
+        for name,identifier,slots in [('MacOS/mac-lan','com.tbhtho.macdow.host',{1:hashlib.sha256(info_plist).digest(),3:hashlib.sha256(resources).digest()}),('Helpers/MacDowHost','com.tbhtho.macdow.host.helper',{})]:
             member=archive.getmember(prefix+name)
             content=archive.extractfile(member).read()
-            if not member.mode & 0o111 or content != binary:
+            if not member.mode & 0o111 or macos_codesign.code_bytes(content) != macos_codesign.code_bytes(binary):
                 raise ValueError('Mac app executable differs from the verified compatibility host')
+            macos_codesign.verify_macho(content,identifier,slots,certificate)
         identity(json.load(archive.extractfile(prefix+'Resources/MAC-DOW-INSTALL.json')),'darwin','app-bundle')
         app_provenance=json.load(archive.extractfile(prefix+'Resources/BUILD-PROVENANCE.json'))
         if app_provenance.get('hostCommit')!=args.commit or app_provenance.get('dirty') is not False or app_provenance.get('publicUpdate') is not True or app_provenance.get('menuSourceSha256')!=menu_hash or app_provenance.get('captureSourceSha256')!=source_hash:

@@ -3,16 +3,16 @@
 No Apple tools run on Windows, so this writes a read-only ISO 9660 image with
 Rock Ridge extensions, which macOS mounts from a .dmg like any other disk image.
 Rock Ridge keeps the real names, executable modes and the Applications link.
-The app comes from the verified archive, ad-hoc signed and sealed by
-macos_adhoc_sign; Finder window settings and a hidden background come from
-macos_dsstore. The image is read back and compared before the script reports
-success. Update feeds keep the unsigned archive that existing updaters accept.
+The app comes unchanged from the verified, already signed archive; its
+signature is re-checked here. Finder window settings and a hidden background
+come from macos_dsstore. The image is read back and compared before the script
+reports success.
 """
 from pathlib import Path
 import hashlib, plistlib, struct, sys, tarfile, time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import macos_adhoc_sign, macos_dsstore  # noqa: E402  (sibling build modules)
+import macos_codesign, macos_dsstore  # noqa: E402  (sibling build modules)
 
 SECTOR = 2048
 VOLUME = b'MAC-LAN'
@@ -224,12 +224,9 @@ def read_back(path):
 
 
 def main():
-    archive, output, background = (Path(p).resolve() for p in sys.argv[1:4])
-    entries = archive_entries(archive)
-    app = {k[len('mac-lan.app/'):]: v for k, v in entries.items() if k.startswith('mac-lan.app/')}
-    identifier = plistlib.loads(app['Contents/Info.plist'][1])['CFBundleIdentifier']
-    signed = macos_adhoc_sign.sign_bundle(app, identifier)
-    image = {'mac-lan.app': entries['mac-lan.app']} | {'mac-lan.app/' + k: v for k, v in signed.items()}
+    archive, output, background, certificate = (Path(p).resolve() for p in sys.argv[1:5])
+    image = archive_entries(archive)
+    identifier = plistlib.loads(image['mac-lan.app/Contents/Info.plist'][1])['CFBundleIdentifier']
     image['Applications'] = (0o120755, '/Applications')
     image['.background'] = (0o40755, None)
     image['.background/background.png'] = (0o100644, background.read_bytes())
@@ -251,13 +248,14 @@ def main():
     for name in ('mac-lan.app/Contents/MacOS/mac-lan', 'mac-lan.app/Contents/Helpers/MacDowHost'):
         assert actual[name][0] & 0o111, name + ' lost its executable mode'
     resources = actual['mac-lan.app/Contents/_CodeSignature/CodeResources'][1]
-    helper = macos_adhoc_sign.verify_macho(actual['mac-lan.app/Contents/Helpers/MacDowHost'][1], 'MacDowHost', {})
+    cert = certificate.read_bytes()
+    helper = macos_codesign.verify_macho(actual['mac-lan.app/Contents/Helpers/MacDowHost'][1], identifier + '.helper', {}, cert)
     assert plistlib.loads(resources)['files2']['Helpers/MacDowHost']['cdhash'] == helper
-    macos_adhoc_sign.verify_macho(actual['mac-lan.app/Contents/MacOS/mac-lan'][1], identifier, {
-        1: hashlib.sha256(actual['mac-lan.app/Contents/Info.plist'][1]).digest(), 3: hashlib.sha256(resources).digest()})
+    macos_codesign.verify_macho(actual['mac-lan.app/Contents/MacOS/mac-lan'][1], identifier, {
+        1: hashlib.sha256(actual['mac-lan.app/Contents/Info.plist'][1]).digest(), 3: hashlib.sha256(resources).digest()}, cert)
     view = {(n, c): p for n, c, _, p in macos_dsstore.read(actual['.DS_Store'][1])}
     assert plistlib.loads(view[('.', b'icvp')])['backgroundImageAlias'] == picture and (('mac-lan.app', b'Iloc') in view)
-    print(f'Mac disk image verified: {len(expected)} entries, ad-hoc signed app bundle, Applications link and install window settings.')
+    print(f'Mac disk image verified: {len(expected)} entries, certificate-signed app bundle, Applications link and install window settings.')
 
 
 if __name__ == '__main__':
