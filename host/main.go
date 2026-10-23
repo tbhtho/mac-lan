@@ -84,6 +84,10 @@ func main() {
 		fatal(err)
 	}
 	helper := filepath.Join(filepath.Dir(exe), "MacDowCapture")
+	helper, err = resolveCaptureHelper(context.Background(), helper)
+	if err != nil {
+		fatal(err)
+	}
 	if *check {
 		cmd := exec.Command(helper, "--check")
 		cmd.Stdout = os.Stdout

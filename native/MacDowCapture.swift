@@ -28,6 +28,7 @@ func jsonStatus(_ value: [String: Any]) {
 }
 func die(_ message: String) -> Never { status(message, paused: true); exit(1) }
 func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+func validCaptureFPS(_ value: Int) -> Bool { value == 60 }
 func existingPermissions() -> Bool {
     let screen = CGPreflightScreenCaptureAccess(), input = AXIsProcessTrusted()
     status("Existing permissions: Screen Recording \(screen ? "granted" : "missing"); Accessibility \(input ? "granted" : "missing - viewing only"). No permission request made.")
@@ -93,7 +94,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var mode = "h264"
     var quality = 0.7
     var encodeStart: TimeInterval = 0
-    var width = 0, height = 0, fps = 30, bitrate = 8
+    var width = 0, height = 0, fps = 60, bitrate = 8
 
     func start(id: CGWindowID, maxWidth: Int, fps: Int, quality: Int, codec: String, bitrate: Int) async throws {
         self.windowID = id; self.fps = fps; self.quality = Double(quality)/100; self.mode = codec; self.bitrate = bitrate
@@ -122,7 +123,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         config.capturesAudio = false
         config.ignoreShadowsSingleWindow = true
         if codec == "h264" { setupEncoder() }
-        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height]) }
+        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps]) }
         stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream!.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "MAC-DOW.capture", qos: .userInteractive))
         try await stream!.startCapture()
@@ -218,7 +219,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
                     let parameter = Data(bytes:pointer,count:size)
                     if index == 0 && size >= 4 {
                         let codec = String(format:"avc1.%02X%02X%02X",pointer[1],pointer[2],pointer[3])
-                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"hardware":true]) }
+                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"fps":fps,"hardware":true]) }
                     }
                     data.append(contentsOf:[0,0,0,1]);data.append(parameter)
                 }
@@ -407,6 +408,7 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
+    precondition(validCaptureFPS(60) && !validCaptureFPS(30) && !validCaptureFPS(15) && !validCaptureFPS(61))
     var l=Lease();precondition(!l.valid(now:0));l.update(true,now:1);precondition(l.valid(now:1.5));precondition(!l.valid(now:2));l.release();precondition(!l.valid(now:1))
     var delivered=0,failed=false
     let mailbox=InputMailbox(receive:{_,_ in delivered += 1},failure:{failed=true})
@@ -414,7 +416,7 @@ if args.contains("--self-test") {
     mailbox.push(["type":"release"],received:2);mailbox.drain();precondition(delivered==1 && !failed)
     let overflowing=InputMailbox(receive:{_,_ in preconditionFailure("overflow must not deliver input")},failure:{failed=true})
     for _ in 0..<33 {overflowing.push(["type":"key"],received:1)};overflowing.drain();precondition(failed)
-    print("PASS native lease expiration/release and bounded/urgent mailbox; no permission checks, capture or input")
+    print("PASS native 60 fps bounds, lease expiration/release and bounded/urgent mailbox; no permission checks, capture or input")
     exit(0)
 }
 if args.contains("--check") { exit(existingPermissions() ? 0 : 2) }
@@ -426,7 +428,7 @@ if args.contains("--list") {
     }
     RunLoop.main.run()
 } else if args.count==8 && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
-          width>=640,width<=1920,fps>=5,fps<=30,quality>=35,quality<=85,bitrate>=2,bitrate<=20,["h264","jpeg"].contains(args[6]) {
+          width>=640,width<=1920,validCaptureFPS(fps),quality>=35,quality<=85,bitrate>=2,bitrate<=20,["h264","jpeg"].contains(args[6]) {
     let engine=Engine()
     Task { do { try await engine.start(id:id,maxWidth:width,fps:fps,quality:quality,codec:args[6],bitrate:bitrate) } catch { die("Capture setup failed: \(error)") } }
     RunLoop.main.run()

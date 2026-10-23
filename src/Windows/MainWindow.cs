@@ -159,6 +159,7 @@ internal sealed partial class MainWindow : Window
     {
         if(session==null||!session.IsPaired){status.Text="Connect to your Mac first, then choose what to view.";return;}
         if(session.IsReady||session.IsStarting){ShowRemote();return;}
+        if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update MAC-DOW on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
         uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;}
         gate.Disarm();viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
@@ -170,7 +171,7 @@ internal sealed partial class MainWindow : Window
             Hide();tabBar.Suspend();appWindow.Show();
         }
         else{remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
-        var profile=codec.SelectedItem as StreamProfile??StreamProfile.Compatible;
+        var profile=codec.SelectedItem as StreamProfile??StreamProfile.DefaultHardware;
         session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
     }

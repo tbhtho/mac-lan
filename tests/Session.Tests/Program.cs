@@ -33,15 +33,15 @@ await using(var session=new Session())
     session.Send(new{type="button",button=0,down=true});
     session.Send(new{type="scroll",x=0,y=1});
     session.Send(new{type="start",window=0});
-    await peer.Send(new{type="catalog",windows=Array.Empty<object>()});
+    await peer.Send(new{type="catalog",maxFps=60,windows=Array.Empty<object>()});
     await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
     Check(session.IsPaired&&!session.IsStarting&&!session.IsReady,"catalog establishes pairing without implying an active stream");
     session.Send(new{type="release"});
-    session.Send(StreamProfile.Compatible.CreateStart(0));
+    session.Send(StreamProfile.DefaultHardware.CreateStart(0));
     Check(session.IsPaired&&session.IsStarting&&!session.IsReady,"start stays pending while Mac approval is awaited");
     var first=await peer.Next();
     Check(first.GetProperty("type").GetString()=="start","focus release and input never replace the pending stream start");
-    Check(first.GetProperty("codec").GetString()=="jpeg"&&first.GetProperty("width").GetInt32()==1280&&first.GetProperty("fps").GetInt32()==15&&first.GetProperty("quality").GetInt32()==70,"default stream requests compatible JPEG before Mac approval instead of the failing hardware encoder");
+    Check(first.GetProperty("codec").GetString()=="h264"&&first.GetProperty("width").GetInt32()==1280&&first.GetProperty("fps").GetInt32()==60&&first.GetProperty("quality").GetInt32()==70,"default stream requests actual H.264 60fps before Mac approval");
     Parallel.For(0,20,_=>{session.Send(new{type="release"});session.Send(new{type="start",window=0});});
     await peer.Send(new{type="ready"});
     await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
@@ -54,6 +54,41 @@ await using(var session=new Session())
     Check((await peer.Next()).GetProperty("type").GetString()=="key","ready sessions accept routed input");
     session.Abort("test ended");
     Check(!session.IsPaired&&!session.IsStarting&&!session.IsReady,"abort clears all lifecycle state");
+}
+
+await using(var peer=new LocalPeer())
+await using(var session=new Session())
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    foreach(int requested in new[]{5,10,15,30,59})
+    {
+        bool blocked=false;
+        try{session.Send(StreamProfile.DefaultHardware.CreateStart(0,fps:requested));}
+        catch(InvalidOperationException e){blocked=e.Message.Contains("60 fps",StringComparison.Ordinal);}
+        Check(blocked&&session.IsPaired&&!session.IsStarting,"sub60 start remains paired without requesting a lower stream: "+requested);
+    }
+    await Task.Delay(100);
+    Check(!peer.HasPendingMessage,"sub60 start never goes onto the wire even when host advertises 60fps");
+}
+
+foreach(var advertised in new object?[]{null,30,0,61,"60",60.5})
+await using(var peer=new LocalPeer())
+await using(var session=new Session())
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    if(advertised==null)await peer.Send(new{type="catalog",windows=Array.Empty<object>()});
+    else await peer.Send(new{type="catalog",maxFps=advertised,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    bool blocked=false;
+    try{session.Send(StreamProfile.DefaultHardware.CreateStart(0));}
+    catch(InvalidOperationException e){blocked=e.Message.Contains("update",StringComparison.OrdinalIgnoreCase)&&e.Message.Contains("Mac",StringComparison.Ordinal);}
+    Check(blocked&&session.IsPaired&&!session.IsStarting,"old or invalid host capability refuses 60fps before stream start: "+(advertised??"absent"));
 }
 
 await using(var peer=new LocalPeer())
@@ -146,5 +181,6 @@ sealed class LocalPeer : IAsyncDisposable
     public async Task Send(object value)=>await socket!.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)),WebSocketMessageType.Text,true,stop.Token);
     public void Abort()=>socket!.Abort();
     public async Task<JsonElement> Next()=>await incoming.Reader.ReadAsync(stop.Token).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
+    public bool HasPendingMessage=>incoming.Reader.TryPeek(out _);
     public async ValueTask DisposeAsync(){stop.Cancel();socket?.Abort();if(receiver!=null)await receiver;socket?.Dispose();tcp?.Dispose();listener.Stop();certificate.Dispose();stop.Dispose();}
 }

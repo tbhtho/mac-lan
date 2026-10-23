@@ -1,7 +1,8 @@
-import {parseFrame,SequenceGate,mapPointer} from './viewer-core.mjs';
+import {parseFrame,SequenceGate,mapPointer,videoFrameDuration} from './viewer-core.mjs';
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0;
+let frameDuration=videoFrameDuration({fps:60});
 function show(text){hint.textContent=text;}
 function reset(){renderGeneration++;if(decoder){decoder.close();decoder=null;}sequence.reset();pending.clear();ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 function newDecoder(){
@@ -15,6 +16,7 @@ chrome.webview.addEventListener('message',async e=>{
   if(m.type==='armed'){armed=m.active;if(armed)canvas.focus();document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
   if(m.type==='clear'){reset();show('VIEW ONLY � stream paused or disconnected');return;}
   if(m.type==='video'){
+    frameDuration=videoFrameDuration(m);
     if(m.codec==='jpeg'){if(config){reset();config=null;}return;}
     // Key packets carry SPS/PPS and configure themselves too; pipe delivery order is irrelevant.
     if(config?.codec===m.codec)return;
@@ -30,7 +32,7 @@ chrome.webview.addEventListener('message',async e=>{
     if(!decoder||decoder.state!=='configured'||configuredCodec!==config.codec){if(!p.key)return;newDecoder();}
     if(decoder.decodeQueueSize>=2){sequence.reset();return;}
 
-    const timestamp=++serial*33333;pending.set(timestamp,performance.now());
+    const timestamp=Math.round(++serial*frameDuration);pending.set(timestamp,performance.now());
     decoder.decode(new EncodedVideoChunk({type:p.key?'key':'delta',timestamp,data:p.data}));
   }catch(err){sequence.reset();show('Video error: '+err.message);}
   finally{post({type:'frameAck'});}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"github.com/gorilla/websocket"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,11 @@ func connectFixture(t *testing.T, s *server) *websocket.Conn {
 		t.Fatal(err)
 	}
 	c.SetReadDeadline(time.Now().Add(3 * time.Second))
-	var catalog struct{ Type string }
-	if err := c.ReadJSON(&catalog); err != nil || catalog.Type != "catalog" {
+	var catalog struct {
+		Type   string
+		MaxFPS int `json:"maxFps"`
+	}
+	if err := c.ReadJSON(&catalog); err != nil || catalog.Type != "catalog" || catalog.MaxFPS != 60 {
 		t.Fatalf("catalog: %+v, %v", catalog, err)
 	}
 	return c
@@ -66,7 +70,7 @@ func TestPairedIdleReleaseAndLeaseDoNotEndSessionOrStartCapture(t *testing.T) {
 		t.Fatal("idle safety messages started capture")
 	default:
 	}
-	request := start{Type: "start", FPS: 30, Width: 1600, Quality: 70, Codec: "h264", Bitrate: 8}
+	request := start{Type: "start", FPS: 60, Width: 1280, Quality: 70, Codec: "h264", Bitrate: 8}
 	if err := c.WriteJSON(request); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +133,7 @@ func TestCaptureFailureReachesClientBeforeConnectionEnds(t *testing.T) {
 		},
 	}
 	c := connectFixture(t, s)
-	if err := c.WriteJSON(start{Type: "start", FPS: 10, Width: 1280, Quality: 70}); err != nil {
+	if err := c.WriteJSON(start{Type: "start", FPS: 60, Width: 1280, Quality: 70}); err != nil {
 		t.Fatal(err)
 	}
 	for {
@@ -158,7 +162,7 @@ func TestNativeStatusBurstDoesNotDisconnectApprovedCapture(t *testing.T) {
 		},
 	}
 	c := connectFixture(t, s)
-	if err := c.WriteJSON(start{Type: "start", FPS: 10, Width: 1280, Quality: 70}); err != nil {
+	if err := c.WriteJSON(start{Type: "start", FPS: 60, Width: 1280, Quality: 70}); err != nil {
 		t.Fatal(err)
 	}
 	for {
@@ -268,7 +272,7 @@ func TestAuthenticatedConsentAndFrames(t *testing.T) {
 	if err != nil || !bytes.Contains(catalog, []byte("Editor")) {
 		t.Fatal("catalog", err)
 	}
-	c.WriteJSON(start{Type: "start", Window: 42, FPS: 10, Width: 1280, Quality: 70})
+	c.WriteJSON(start{Type: "start", Window: 42, FPS: 60, Width: 1280, Quality: 70})
 	c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	gotFrame := false
 	for i := 0; i < 4; i++ {
@@ -303,15 +307,38 @@ func TestNoBrowserOrigins(t *testing.T) {
 func mapHeader(origin string) map[string][]string { return map[string][]string{"Origin": {origin}} }
 func TestStartBoundsAndClosedWindow(t *testing.T) {
 	ws := []window{{ID: 42}}
-	for _, s := range []start{{Type: "start", FPS: 15, Width: 1600, Quality: 70}, {Type: "start", Window: 42, FPS: 5, Width: 800, Quality: 40}} {
+	for _, s := range []start{{Type: "start", FPS: 60, Width: 1280, Quality: 70, Codec: "h264"}, {Type: "start", FPS: 60, Width: 1280, Quality: 70, Codec: "jpeg"}, {Type: "start", FPS: 60, Width: 1600, Quality: 70}, {Type: "start", Window: 42, FPS: 60, Width: 800, Quality: 40}} {
 		if !s.valid(ws) {
 			t.Fatal(s)
 		}
 	}
-	for _, s := range []start{{Type: "start", Window: 99, FPS: 15, Width: 1600, Quality: 70}, {Type: "start", FPS: 120, Width: 1600, Quality: 70}, {Type: "start", FPS: 15, Width: 8000, Quality: 70}} {
+	for _, s := range []start{{Type: "start", Window: 99, FPS: 60, Width: 1600, Quality: 70}, {Type: "start", FPS: 61, Width: 1600, Quality: 70}, {Type: "start", FPS: 120, Width: 1600, Quality: 70}, {Type: "start", FPS: 60, Width: 8000, Quality: 70}} {
 		if s.valid(ws) {
 			b, _ := json.Marshal(s)
 			t.Fatal(string(b))
 		}
+	}
+}
+
+func TestSub60RequestsNeverAskConsentOrStartCapture(t *testing.T) {
+	for _, fps := range []int{0, 5, 10, 15, 30, 59} {
+		t.Run(strconv.Itoa(fps)+"-fps", func(t *testing.T) {
+			s := &server{token: strings.Repeat("g", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+				catalog: func() ([]window, error) { return nil, nil },
+				consent: func(start) bool { t.Error("sub60 request asked for consent"); return true },
+				stream: func(func([]byte), func(string), <-chan input) error {
+					t.Error("sub60 request started capture")
+					return nil
+				},
+			}
+			c := connectFixture(t, s)
+			if err := c.WriteJSON(start{Type: "start", FPS: fps, Width: 1280, Quality: 70, Codec: "h264"}); err != nil {
+				t.Fatal(err)
+			}
+			var response struct{ Type, Message string }
+			if err := c.ReadJSON(&response); err != nil || response.Type != "error" || !strings.Contains(response.Message, "60 fps") {
+				t.Fatalf("sub60 request must give an actionable 60fps error: %+v, %v", response, err)
+			}
+		})
 	}
 }

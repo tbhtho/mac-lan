@@ -25,7 +25,7 @@ import (
 
 const maxFrame = 4 << 20
 
-var errInvalidStart = errors.New("Choose a Mac desktop or window to start viewing")
+var errInvalidStart = errors.New("Choose a Mac desktop or window at 60 fps. Update both MAC-DOW apps if needed")
 
 type window struct {
 	ID    uint32 `json:"id"`
@@ -43,7 +43,7 @@ type start struct {
 }
 
 func (s start) valid(windows []window) bool {
-	if s.Type != "start" || s.FPS < 5 || s.FPS > 30 || s.Width < 640 || s.Width > 1920 || s.Quality < 35 || s.Quality > 85 {
+	if s.Type != "start" || s.FPS != 60 || s.Width < 640 || s.Width > 1920 || s.Quality < 35 || s.Quality > 85 {
 		return false
 	}
 	if s.Codec != "" && s.Codec != "h264" && s.Codec != "jpeg" || s.Bitrate != 0 && (s.Bitrate < 2 || s.Bitrate > 20) {
@@ -227,7 +227,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = c.WriteJSON(map[string]string{"type": "error", "message": err.Error()})
 		return
 	}
-	if err = c.WriteJSON(map[string]any{"type": "catalog", "windows": windows}); err != nil {
+	if err = c.WriteJSON(map[string]any{"type": "catalog", "maxFps": 60, "windows": windows}); err != nil {
 		return
 	}
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
