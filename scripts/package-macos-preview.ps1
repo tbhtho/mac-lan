@@ -42,7 +42,8 @@ New-Item -ItemType Directory -Force -Path $macRoot | Out-Null
 $linkFlags="-s -w -X main.NativeCaptureSourceGzip=$encodedSource -X main.NativeCaptureSourceSHA256=$sourceHash"
 $linkFlags+=" -X main.NativeMenuSourceGzip=$encodedMenu -X main.NativeMenuSourceSHA256=$menuHash -X main.NativeMenuInfoBase64=$encodedInfo"
 if(-not $PublicUpdate){$linkFlags+=" -X github.com/tbhtho/MAC-DOW/host/internal/diagnostics.Webhook=$diagnosticDestination"}
-if($linkFlags.Length -gt 29000){throw 'Embedded source linker options exceed the Windows command-line budget'}
+# Windows allows 32,767 characters per command line; Go passes long linker flags through a response file.
+if($linkFlags.Length -gt 31500){throw 'Embedded source linker options exceed the Windows command-line budget'}
 go build -C host -trimpath -ldflags $linkFlags -o (Join-Path $macRoot 'MacDowHost') .
 if($LASTEXITCODE){throw 'Mac host cross-build failed'}
 Copy-Item -LiteralPath 'README.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination $macRoot
