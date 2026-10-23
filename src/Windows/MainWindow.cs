@@ -22,6 +22,9 @@ internal sealed class MainWindow : Window
     readonly ComboBox monitors=new(){Width=140,DisplayMemberPath="Id"};
     readonly ComboBox codec=new(){Width=160},resolution=new(){Width=110},fps=new(){Width=80},bitrate=new(){Width=100};
     readonly TextBlock status=new(){Text="Local Windows � Ctrl+Alt+Shift+Backspace releases control",VerticalAlignment=VerticalAlignment.Center,Foreground=Brushes.LightGray,Margin=new Thickness(12,0,8,0)};
+    readonly Button updatesButton=new(){Content="Updates",Padding=new Thickness(12,5,12,5)};
+    readonly DispatcherTimer updateTimer=new(){Interval=TimeSpan.FromHours(6)};
+    bool checkingUpdates;
     readonly Button control=new(){Content="Control Mac",Padding=new Thickness(14,5,14,5)};
     readonly ControlGate gate=new();
     readonly KeyboardHook keyboard;
@@ -47,6 +50,7 @@ internal sealed class MainWindow : Window
         left.Children.Add(MakeButton("01  Windows",()=>ShowDesktop()));
         left.Children.Add(MakeButton("02  MacBook",()=>ShowRemote()));
         left.Children.Add(MakeButton("Pair / App Priority",()=>ShowSetup()));
+        updatesButton.Click+=(_,_)=>ShowUpdates();left.Children.Add(updatesButton);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm();Position();}};left.Children.Add(monitors);
         var close=MakeButton("x",()=>Close());DockPanel.SetDock(close,Dock.Right);strip.Children.Add(close);strip.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);BuildSetup();
@@ -58,7 +62,8 @@ internal sealed class MainWindow : Window
         Deactivated+=(_,_)=>{if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false);};
         Activated+=(_,_)=>RefreshContext();
         timer.Tick+=(_,_)=>Tick();timer.Start();
-        Closing+=(_,_)=>{closing=true;gate.Disarm();timer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");desktop.Dispose();};
+        Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
+        Closing+=(_,_)=>{closing=true;gate.Disarm();timer.Stop();updateTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");desktop.Dispose();};
     }
     Button MakeButton(string text,Action action){var b=new Button{Content=text,Padding=new Thickness(14,6,14,6),Margin=new Thickness(2),VerticalAlignment=VerticalAlignment.Center};b.Click+=(_,_)=>action();return b;}
     void BuildSetup()
@@ -92,6 +97,7 @@ internal sealed class MainWindow : Window
         var panel=new DockPanel();var toolbar=new StackPanel{Orientation=Orientation.Horizontal,Height=40,Background=new SolidColorBrush(Color.FromRgb(34,42,49))};
         // A single control button is reparented only after the previous surface has been detached.
         if(control.Parent is Panel old)old.Children.Remove(control);toolbar.Children.Add(control);
+        toolbar.Children.Add(MakeButton("Updates",ShowUpdates));
         toolbar.Children.Add(MakeButton("Release",Escape));toolbar.Children.Add(MakeButton("Disconnect",()=>Disconnect()));
         toolbar.Children.Add(new TextBlock{Text="  Ctrl+Alt+Shift+Backspace � release",VerticalAlignment=VerticalAlignment.Center});
         DockPanel.SetDock(toolbar,Dock.Top);panel.Children.Add(toolbar);panel.Children.Add(view);return panel;
@@ -168,6 +174,14 @@ internal sealed class MainWindow : Window
         if(msg==0x312&&w==901){Escape();handled=true;}
         if(msg is 0x007E or 0x02E0){gate.Disarm();Dispatcher.BeginInvoke(()=>{RefreshMonitors();Position();});}
         return 0;
+    }
+    void ShowUpdates(){gate.Disarm();var dialog=new UpdateDialog(appWindow??this,()=>{Disconnect();Close();});dialog.ShowDialog();}
+    async Task CheckUpdates()
+    {
+        if(checkingUpdates||closing)return;var preferences=UpdatePreferences.Load();if(!preferences.Automatic)return;checkingUpdates=true;
+        try {var result=await UpdateProcess.Call("check","--channel",preferences.Channel);if(result.TryGetProperty("status",out var state)&&state.GetString()=="available")updatesButton.Content="Update available";updatesButton.ToolTip=result.GetProperty("message").GetString();}
+        catch(Exception e){updatesButton.ToolTip="Update check unavailable: "+e.Message;}
+        finally{checkingUpdates=false;}
     }
     record WindowChoice(uint ID,string Label);
 }
