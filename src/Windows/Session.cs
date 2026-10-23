@@ -33,6 +33,8 @@ internal sealed class Session : IAsyncDisposable
     public bool IsPaired { get { int current=Volatile.Read(ref phase);return current is Paired or Starting or Ready; } }
     public bool IsStarting => Volatile.Read(ref phase)==Starting;
     public int MaxFPS => Volatile.Read(ref maxFPS);
+    // Mac hosts from alpha.22 force a keyframe on request; older hosts close the session on unknown input.
+    public bool SupportsKeyframes {get;private set;}
     public string? VideoError {get {lock(lifecycle)return videoError;}}
     public bool CanTransfer => TransferTarget!=null;
     public TransferTarget? TransferTarget {get {lock(lifecycle)return phase is Paired or Starting or Ready?transferTarget:null;}}
@@ -74,9 +76,9 @@ internal sealed class Session : IAsyncDisposable
             {
                 if(phase!=Paired)return;
                 if(!message.TryGetProperty("fps",out var requestedFPS)||requestedFPS.ValueKind!=JsonValueKind.Number||!requestedFPS.TryGetInt32(out var requested)||requested<60)
-                    throw new InvalidOperationException("Video requires at least 60 fps. Update both MAC-DOW apps if needed.");
+                    throw new InvalidOperationException("Video requires at least 60 fps. Update both mac-lan apps if needed.");
                 if(requested>maxFPS)
-                    throw new InvalidOperationException($"Update MAC-DOW on your Mac to stream at {requested} fps. This Mac host supports up to {maxFPS} fps.");
+                    throw new InvalidOperationException($"Update mac-lan on your Mac to stream at {requested} fps. This Mac host supports up to {maxFPS} fps.");
                 phase=Starting;
             }
             else if(type=="lease"&&phase==Paired&&transferTarget!=null)
@@ -115,6 +117,7 @@ internal sealed class Session : IAsyncDisposable
                             if(t.GetString()=="catalog")
                             {
                                 if(phase!=Authenticating)throw new InvalidDataException("Unexpected pairing response.");
+                                SupportsKeyframes=value.TryGetProperty("keyframes",out var keyframes)&&keyframes.ValueKind==JsonValueKind.True;
                                 maxFPS=value.TryGetProperty("maxFps",out var advertised)&&advertised.ValueKind==JsonValueKind.Number&&advertised.TryGetInt32(out var maximum)&&maximum is >=5 and <=60?maximum:30;
                                 if(value.TryGetProperty("videoError",out var captureError)&&captureError.ValueKind==JsonValueKind.String)
                                 {

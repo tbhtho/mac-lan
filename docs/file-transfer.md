@@ -2,7 +2,7 @@
 
 Pair the Windows app with the Mac, then choose **Files** in the Windows tab bar.
 Select files, ZIPs, or a folder, or drag them into the transfer window. The Mac
-receives them in `~/Downloads/MAC-DOW`. A folder arrives as a folder, and a ZIP
+receives them in `~/Downloads/mac-lan` (`~/Downloads/MAC-DOW` before alpha.22). A folder arrives as a folder, and a ZIP
 selected as a file stays a ZIP. Existing names receive a numbered suffix; nothing
 is overwritten. The Mac's pairing approval also authorizes receiving files for
 that pairing. Video requires its own approval. File transfers remain available

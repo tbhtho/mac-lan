@@ -13,7 +13,8 @@ function reset(clearPicture=true){
   configuredCodec=null;sequence.reset();pending.clear();encoded=[];bufferedBytes=0;queuedJpeg=null;
   if(clearPicture){ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 }
-function recover(message){reset(false);show(message);}
+// A reset viewer asks the Mac for a keyframe instead of waiting for the next periodic one.
+function recover(message){reset(false);show(message);post({type:'keyframe',epoch:streamEpoch});}
 function epochFor(m,advance=false){
   if(m.epoch===undefined)return streamEpoch===0;
   if(!Number.isSafeInteger(m.epoch)||m.epoch<=0||m.epoch<streamEpoch)return false;
