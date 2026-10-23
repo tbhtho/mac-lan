@@ -23,7 +23,7 @@ Remove-Item -LiteralPath $setup -ErrorAction SilentlyContinue
 & $makensisPath /V2 "/DVERSION=$($config.version)" "/DNUMERIC_VERSION=$numeric" "/DAPP_EXE=$exe" "/DOUT_FILE=$setup" 'installer/mac-lan-setup.nsi'
 if($LASTEXITCODE -or -not (Test-Path -LiteralPath $setup)){throw 'Windows setup build failed'}
 $dmg=[IO.Path]::GetFullPath('artifacts/update-public/mac-lan-macos-arm64.dmg')
-& $python -I scripts/package-macos-dmg.py 'artifacts/update-public/mac-lan-macos-arm64.tar.gz' $dmg 'installer/dmg-background.png'
+& $python -I scripts/package-macos-dmg.py 'artifacts/update-public/mac-lan-macos-arm64.tar.gz' $dmg 'installer/dmg-background.png' 'installer/macos-codesign.cer'
 if($LASTEXITCODE){throw 'Mac disk image build failed'}
-@{version=$config.version;commit=$commit;dirty=$dirty;windowsSetup='mac-lan-setup.exe';macDiskImage='mac-lan-macos-arm64.dmg';macDiskImageFormat='ISO 9660 with Rock Ridge and Finder window settings, written on Windows';macAppSignature='ad-hoc bundle signature written on Windows; not Developer ID or notarized'} | ConvertTo-Json | Set-Content -LiteralPath 'artifacts/installers-build.json'
+@{version=$config.version;commit=$commit;dirty=$dirty;windowsSetup='mac-lan-setup.exe';macDiskImage='mac-lan-macos-arm64.dmg';macDiskImageFormat='ISO 9660 with Rock Ridge and Finder window settings, written on Windows';macAppSignature='mac-lan certificate (self-made, not Developer ID or notarized), applied by package-macos-app.ps1'} | ConvertTo-Json | Set-Content -LiteralPath 'artifacts/installers-build.json'
 Get-FileHash -LiteralPath $setup,$dmg -Algorithm SHA256 | Format-Table Hash,Path -AutoSize | Out-String -Width 200

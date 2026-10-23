@@ -39,11 +39,7 @@ per-user NSIS `mac-lan-setup.exe` (needs an existing NSIS 3 installation) and
 `mac-lan-macos-arm64.dmg`, a read-only ISO 9660/Rock Ridge image with
 `mac-lan.app`, an Applications link, and Finder window settings with a hidden
 background (`installer/dmg-background.png`), written and read back by
-`scripts/package-macos-dmg.py`. The app inside the image gets an ad-hoc bundle
-signature from `scripts/macos_adhoc_sign.py`; Go's linker-only signature makes
-a downloaded bundle look damaged to Gatekeeper. Feed archives stay unsigned and
-byte-identical, because alpha.17 and older updaters reject `_CodeSignature`;
-from alpha.18 the validator accepts the seal so disk-image installs can update. Both are release downloads only; the signed feed
+`scripts/package-macos-dmg.py`. Both are release downloads only; the signed feed
 keeps updating the installed EXE and app in place. Run the packaging scripts in
 PowerShell 7 or Windows PowerShell 5.1. On a PC where an extensionless `python`
 file shadows Python in PowerShell, alias `python` to `python.exe` first; the
@@ -64,6 +60,26 @@ Applications use it without GitHub sign-in. Existing alpha.13 and older users
 must install alpha.14 on both computers once because their old feed was
 withdrawn. Keep old private bootstrap releases private: their embedded diagnostic
 configuration is unsuitable for public assets.
+
+## Mac code signing identity
+
+`package-macos-app.ps1` signs `mac-lan.app` with `scripts/macos_codesign.py`
+using the committed certificate `installer/macos-codesign.cer` (SHA-1
+`5aa75b4598c42bc585845f608b2baab649196cd5`) and its private key
+`.release-private/macos-codesign.pem`. Each build carries the designated
+requirement `identifier "com.tbhtho.macdow.host" and certificate leaf =
+H"5aa75b45..."`, which is what macOS stores with Screen Recording and
+Accessibility grants, so later builds signed with the same key keep them. The
+certificate is self-made, not an Apple Developer ID; Gatekeeper still asks once
+and nothing is notarized. Never replace or lose the key: a new key changes the
+requirement and every user must grant permissions again. Back it up with the
+update key. Without the key the packager signs ad hoc, and the publisher refuses
+to release that build.
+
+The seal adds `Contents/_CodeSignature/CodeResources`. Mac updaters from
+alpha.15 to alpha.17 reject that folder, so those installations must install
+the disk image once; alpha.18 and later accept it, and the feed and canonical
+archives stay byte-identical.
 
 ## Key custody
 

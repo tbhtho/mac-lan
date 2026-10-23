@@ -42,6 +42,7 @@ foreach($build in @($windowsBuild,$macBuild,$appBuild,$installerBuild)){
     if($build.commit -ne $commit -or $build.version -ne $version -or $build.dirty -ne $false){throw 'Build metadata must match the clean current source commit and version'}
 }
 if($macBuild.publicUpdate -ne $true -or $appBuild.publicUpdate -ne $true){throw 'Only public Mac packages may be published'}
+if($appBuild.signature -ne 'certificate'){throw 'The Mac app must be signed with the mac-lan certificate so privacy grants survive updates'}
 if((Get-FileHash -LiteralPath $appPath).Hash -ne (Get-FileHash -LiteralPath $appAliasPath).Hash){throw 'Mac app compatibility alias differs from canonical download'}
 Invoke-Checked -Command python -Arguments @('scripts/verify-release-packages.py','--windows',$windowsPath,'--mac',$macPath,'--mac-app',$appPath,'--commit',$commit,'--version',$version)
 $previous=if(Test-Path -LiteralPath 'updates/feed.json'){(Resolve-Path -LiteralPath 'updates/feed.json').Path}else{$null}

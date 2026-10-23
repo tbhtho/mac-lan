@@ -20,10 +20,17 @@ $provenance | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resources 'B
 @{product='MAC-DOW';repositoryId=$config.repositoryId;version=$config.version;os='darwin';arch='arm64';layout='app-bundle';commit=$metadata.commit} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resources 'MAC-DOW-INSTALL.json')
 $plist=[IO.File]::ReadAllText((Join-Path $PWD 'native/Info.plist')).Replace('@NUMERIC_VERSION@',($config.version -split '-')[0])
 [IO.File]::WriteAllText((Join-Path $contents 'Info.plist'),$plist,[Text.UTF8Encoding]::new($false))
-python scripts/package-macos-app.py $bundle artifacts/update-public/mac-lan-macos-arm64.tar.gz
+# Sign last: the seal covers Info.plist and every resource. One persistent certificate keeps
+# macOS privacy grants valid across updates; without the private key the app is ad-hoc signed.
+$python=(Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$signing=& $python -I scripts/macos_codesign.py sign-app $bundle installer/macos-codesign.cer .release-private/macos-codesign.pem
+if($LASTEXITCODE){throw 'Mac app signing failed'}
+$signing
+$signature=if($signing -match 'certificate'){'certificate'}else{'ad-hoc'}
+& $python scripts/package-macos-app.py $bundle artifacts/update-public/mac-lan-macos-arm64.tar.gz
 if($LASTEXITCODE){throw 'Mac app archive verification failed'}
 # Alpha.14 strictly recognizes this existing alias. The signed feed uses it;
 # the canonical manual download has the same bytes, not a separate update feed.
 Copy-Item -LiteralPath 'artifacts/update-public/mac-lan-macos-arm64.tar.gz' -Destination 'artifacts/update-public/MAC-DOW-macos-arm64-unsigned.tar.gz' -Force
-@{version=$config.version;commit=$metadata.commit;dirty=$metadata.dirty;nativeMacValidated=$false;captureSourceSha256=$metadata.captureSourceSha256;menuSourceSha256=$metadata.menuSourceSha256;packageRoot=$bundle;publicUpdate=$true;format='app-bundle'} | ConvertTo-Json | Set-Content -LiteralPath 'artifacts/update-public/macos-app-build.json'
+@{version=$config.version;commit=$metadata.commit;dirty=$metadata.dirty;nativeMacValidated=$false;captureSourceSha256=$metadata.captureSourceSha256;menuSourceSha256=$metadata.menuSourceSha256;packageRoot=$bundle;publicUpdate=$true;format='app-bundle';signature=$signature} | ConvertTo-Json | Set-Content -LiteralPath 'artifacts/update-public/macos-app-build.json'
 Write-Output 'Mac menu-bar app packaged. Native AppKit compilation/execution remain first-launch checks on the Mac.'
