@@ -66,8 +66,9 @@ internal sealed partial class MainWindow : Window
         Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
         discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
-        Deactivated+=(_,_)=>{if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");};
-        Activated+=(_,_)=>RefreshContext();
+        // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
+        Deactivated+=(_,_)=>{Topmost=false;if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");};
+        Activated+=(_,_)=>{Topmost=remote;RefreshContext();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
         Closing+=async(_,e)=>
@@ -113,6 +114,7 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
         status.Visibility=Visibility.Visible;body.Background=Brushes.Transparent;
         Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
+        ShowInTaskbar=true;Topmost=false;
         WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;WindowState=WindowState.Normal;Width=840;Height=720;
         if(setup.Parent is ScrollViewer old)old.Content=null;body.Child=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
         tabBar.SetMode(true);Show();
@@ -124,7 +126,7 @@ internal sealed partial class MainWindow : Window
         if(appWindow!=null){appWindow.Activate();return;}
         if(session?.IsPaired!=true){ShowSetup();return;}
         if(!session.IsReady&&!session.IsStarting){Start(false);return;}
-        remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();RefreshContext();SendLease();UpdateControl();
+        remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();RefreshContext();SendLease();UpdateControl();
     }
     FrameworkElement RemotePanel(RemoteView view)
     {
@@ -144,7 +146,7 @@ internal sealed partial class MainWindow : Window
     // instead of sending the user back to the connection page.
     void ShowVideoUnavailable()
     {
-        gate.Disarm("tab-change");remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
+        gate.Disarm("tab-change");remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
         var notice=new StackPanel{MaxWidth=560,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         notice.Children.Add(new TextBlock{Text="Video is off on your Mac",FontSize=22,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,10)});
         notice.Children.Add(new TextBlock{Text="macOS has not allowed Screen Recording for this copy of mac-lan. A newly installed or updated mac-lan can need permission again, even when the switch in System Settings already looks on.",Foreground=Glass.Muted,LineHeight=21,Margin=new Thickness(0,0,0,14)});
@@ -239,7 +241,7 @@ internal sealed partial class MainWindow : Window
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
         }
-        else{remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
+        else{remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
         var profile=codec.SelectedItem as StreamProfile??StreamProfile.DefaultHardware;
         session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
@@ -304,7 +306,7 @@ internal sealed partial class MainWindow : Window
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
     void Disconnect(){paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
-    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;Native.Position(this,DisplayLayout.Select(all,preferred),false);}
+    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));}
     nint WndProc(nint hwnd,int msg,nint w,nint l,ref bool handled)
     {
         if(msg==0x312&&w==901){Escape();handled=true;}
