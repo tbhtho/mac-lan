@@ -24,9 +24,9 @@ configuration and consent. Never overwrite an unrelated app or user file.
   installation; implement the launcher, bounded builder and app migration.
 - [x] Add app-bundle validation, signed manifest bindings, compatibility selection
   and isolated apply/rollback tests while retaining alpha.14 feed compatibility.
-- [ ] Package a real `.app`, bridge CLI and Windows EXE from the same clean
+- [x] Package a real `.app`, bridge CLI and Windows EXE from the same clean
   commit; check identities, source hashes, credentials and legal resources.
-- [ ] Update launch/release documentation, run meaningful headless checks,
+- [x] Update launch/release documentation, run meaningful headless checks,
   publish alpha.15 and signed feed, then verify actual anonymous downloads and
   isolated update/migration. Report native AppKit execution as unverified here.
 

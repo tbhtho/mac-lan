@@ -10,9 +10,41 @@ cache reuse and tamper recovery, safe app migration with preserved source and
 neighbors, proportional mapping and noninteractive bars, app apply/rollback,
 and public app manifest binding. An actual ARM64 compatibility package was
 copied into a validated temporary `.app` without executing native code.
-Final clean package checks and public release verification are pending.
+Clean package and public release checks completed on 2026-10-23:
 
-The Mac primary package is intended to contain `mac-lan.app`, with a menu-bar
+- Release `v0.1.0-alpha.15` binds source commit
+  `dcc664b033a03c28603d1265e78c6cff25c87a35`; both Mac layouts, Windows marker,
+  source ZIP and the signed feed identify that same commit. Feed commit
+  `c39c878` follows the binary source commit. All six actual downloads were
+  read anonymously and their byte counts/SHA-256 matched local artifacts and
+  GitHub metadata. The canonical app and compatibility alias are identical:
+  7,308,443 bytes, SHA-256
+  `1296dd061cb233382eba4cc44647a80ece53b4cabb32e3ad845725629d257122`.
+  Windows is 149,667,362 bytes, SHA-256
+  `31d26ae6e6e41bfed204b5fe69660a335773f6166aa2b807283924ec424bf500`.
+  The release checksum file covers all five binary/source archives.
+- The actual alpha.14 Windows EXE authenticated the expanded feed and reported
+  alpha.15 available; the alpha.15 EXE reported current. A production-feed test
+  downloaded, verified and applied alpha.14 to alpha.15 in a temporary Windows
+  installation, preserving its source EXE, backup identity and neighboring file,
+  with no program relaunch. The production engine separately staged the signed
+  Mac app and checked its exact bundle, marker, source commit, plist and ARM64
+  executable headers, without Darwin execution.
+- The clean release compatibility host was installed into a validated temporary
+  `.app` using the migration function on Windows. Both copied ARM64 executables
+  matched its source bytes; no LaunchServices registration or app was started.
+  The single Windows EXE passed isolated theme/viewer/updater/runtime diagnostics
+  with UI, hooks and capture all false.
+- Actual public package/source contents excluded the local diagnostic destination
+  and private signing material. Embedded capture/menu source hashes matched the
+  exact committed source ZIP bytes. Capture SHA-256 is
+  `61c5510729392ea5c0127141c85411b6e57de16e4adc6cf3f7be3e89f81be36e`;
+  menu source SHA-256 is
+  `bd8cf1ff128fa8215ea1674489e7ee5963e77dc7964d0407767c9789eb8ffd8d`.
+  The twelve historical private bootstrap releases remain drafts, with anonymous
+  alpha.13 bootstrap access returning 404. No Actions run was triggered.
+
+The Mac primary package contains `mac-lan.app`, with a menu-bar
 icon for sharing, permission settings, updates, and Quit, without a Dock icon,
 main window or Terminal session. Its arm64 Go launcher is cross-compiled on
 Windows. First launch builds verified embedded AppKit source with existing
@@ -28,7 +60,7 @@ from activation/input, and maps the pointer within the displayed picture even
 when an old host labels it `fill`. Correcting pixels already stretched by an
 old native helper requires the new helper. Sixty fps remains a target.
 
-The intended release includes Windows, the canonical app archive, a byte-identical
+The release includes Windows, the canonical app archive, a byte-identical
 legacy app alias, the command-line update bridge, source ZIP, and checksums.
 The shared signed feed uses the three asset names recognized by alpha.14.
 After its bridge update, the old host's next normal launch installs and opens a
