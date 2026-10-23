@@ -88,7 +88,7 @@ internal sealed class UpdateDialog : Window
     {
         this.shutdown=shutdown;this.prepareRestart=prepareRestart;preferences=UpdatePreferences.Load();
         stage=preferences.Stage;
-        Owner=owner;Title="mac-lan Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;
+        Owner=owner;Title="mac-lan Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;Glass.Apply(this);
         var content=new StackPanel{Margin=new Thickness(28)};Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
         content.Children.Add(new TextBlock{Text="Keep mac-lan up to date",FontSize=25,FontWeight=FontWeights.SemiBold});
         content.Children.Add(new TextBlock{Text="Updates download in the background. Restart when you are ready.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,0)});

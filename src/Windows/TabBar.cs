@@ -18,55 +18,43 @@ internal sealed class TabBar : Window,IDisposable
     [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowPos(nint hwnd,nint after,int x,int y,int width,int height,uint flags);
     const int CallbackMessage=0x8000+724;
     readonly Button local,mac;
-    readonly TextBlock connection=new(){Foreground=new SolidColorBrush(Color.FromRgb(167,184,207)),VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(16,0,12,0),Text="Mac disconnected",TextWrapping=TextWrapping.NoWrap};
+    readonly TextBlock connection=new(){Foreground=Glass.Muted,VerticalAlignment=VerticalAlignment.Center,FontSize=12,Text="Mac disconnected",TextWrapping=TextWrapping.NoWrap,TextTrimming=TextTrimming.CharacterEllipsis};
     bool registered,positioning,queued,disposed;
     string? monitor;
     HwndSource? source;
     public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
     {
         Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=48;
-        Background=new SolidColorBrush(Color.FromRgb(19,32,51));Foreground=Brushes.White;
-        var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(12,5,12,5)};
+        Glass.Apply(this,rounded:false);FontSize=12;
+        var ghost=(Style)FindResource("GhostButton");
+        var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(14,8,10,8)};
         var right=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(right,Dock.Right);
-        Button ActionButton(string label,Action action){var b=new Button{Content=label,Padding=new Thickness(12,5,12,5),Margin=new Thickness(4,0,0,0),MinHeight=32,Background=Brushes.Transparent,BorderBrush=Brushes.Transparent,Foreground=Brushes.White,FontSize=12};b.Click+=(_,_)=>action();return b;}
-        var connectionButton=ActionButton("Connection",()=>{});
-        connectionButton.Click+=(_,_)=>
-        {
-            var menu=new ContextMenu{PlacementTarget=connectionButton,Placement=PlacementMode.Bottom,Background=Background,Foreground=Brushes.White,BorderBrush=new SolidColorBrush(Color.FromRgb(57,74,96)),Padding=new Thickness(4)};
-            var itemTemplate=new ControlTemplate(typeof(MenuItem));
-            var surface=new FrameworkElementFactory(typeof(Border),"MenuItemSurface");
-            surface.SetValue(Border.BackgroundProperty,Brushes.Transparent);surface.SetValue(Border.CornerRadiusProperty,new CornerRadius(4));surface.SetValue(Border.PaddingProperty,new Thickness(12,7,12,7));
-            var header=new FrameworkElementFactory(typeof(ContentPresenter));header.SetValue(ContentPresenter.ContentSourceProperty,"Header");header.SetValue(ContentPresenter.RecognizesAccessKeyProperty,true);surface.AppendChild(header);itemTemplate.VisualTree=surface;
-            itemTemplate.Triggers.Add(new Trigger{Property=MenuItem.IsHighlightedProperty,Value=true,Setters={new Setter(Border.BackgroundProperty,new SolidColorBrush(Color.FromRgb(45,67,98)),"MenuItemSurface")}});
-            itemTemplate.Triggers.Add(new Trigger{Property=IsEnabledProperty,Value=false,Setters={new Setter(OpacityProperty,0.45)}});
-            MenuItem Item(string label,Action? action,bool enabled=true)
-            {
-                var item=new MenuItem{Header=label,IsEnabled=enabled&&action!=null,Foreground=Brushes.White,Template=itemTemplate};
-                if(action!=null)item.Click+=(_,_)=>action();
-                return item;
-            }
-            menu.Items.Add(Item("Connection settings",setup));
-            menu.Items.Add(new Separator());
-            menu.Items.Add(Item("Control Mac",controlMac,canControl?.Invoke()==true));
-            menu.Items.Add(Item("Release control",release));
-            menu.Items.Add(Item("Disconnect",disconnect));
-            connectionButton.ContextMenu=menu;menu.IsOpen=true;
-        };
+        Button ActionButton(string label,Action action){var b=new Button{Content=label,Style=ghost,Margin=new Thickness(2,0,0,0)};b.Click+=(_,_)=>action();return b;}
+        var connectionButton=ActionButton("Connection",setup);
         if(files!=null)right.Children.Add(ActionButton("Files",files));
         right.Children.Add(connectionButton);
-        updateButton.Foreground=Brushes.White;updateButton.Background=Brushes.Transparent;updateButton.BorderBrush=Brushes.Transparent;updateButton.MinHeight=32;updateButton.FontSize=12;
+        updateButton.Style=ghost;updateButton.Margin=new Thickness(2,0,0,0);
         right.Children.Add(updateButton);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);
         var left=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(left,Dock.Left);
-        left.Children.Add(new TextBlock{Text="mac-lan",Foreground=Brushes.White,FontWeight=FontWeights.SemiBold,FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,24,0)});
-        local=ActionButton("Windows",windows);mac=ActionButton("MacBook",macbook);local.MinWidth=108;mac.MinWidth=108;left.Children.Add(local);left.Children.Add(mac);grid.Children.Add(left);grid.Children.Add(connection);
+        left.Children.Add(new TextBlock{Text="mac-lan",FontWeight=FontWeights.SemiBold,FontSize=13,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,18,0)});
+        // Segmented control: one pill highlights the visible desktop.
+        Button Segment(string label,Action action){var b=new Button{Content=label,Style=ghost,MinWidth=96,MinHeight=26,Padding=new Thickness(12,3,12,3)};b.Click+=(_,_)=>action();return b;}
+        local=Segment("Windows",windows);mac=Segment("MacBook",macbook);
+        var segments=new StackPanel{Orientation=Orientation.Horizontal};segments.Children.Add(local);segments.Children.Add(mac);
+        left.Children.Add(new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(9),Padding=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Child=segments});
+        grid.Children.Add(left);
+        var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(20,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connection);
+        grid.Children.Add(status);
         Content=grid;SetMode(true);
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(Hook);};
         Closing+=(_,_)=>{Undock();source?.RemoveHook(Hook);};
     }
     public void SetMode(bool windows)
     {
-        local.Background=windows?new SolidColorBrush(Color.FromRgb(42,96,230)):Brushes.Transparent;
-        mac.Background=windows?Brushes.Transparent:new SolidColorBrush(Color.FromRgb(42,96,230));
+        local.Background=windows?Glass.Selected:Brushes.Transparent;
+        mac.Background=windows?Brushes.Transparent:Glass.Selected;
+        local.FontWeight=windows?FontWeights.SemiBold:FontWeights.Normal;
+        mac.FontWeight=windows?FontWeights.Normal:FontWeights.SemiBold;
     }
     public void SetConnection(bool connected,bool controlling,string? detail=null)
     {

@@ -13,8 +13,8 @@ internal sealed class FileTransferWindow : Window
     {public override string ToString()=>Name+(Folder?"  ·  Folder":"");}
     readonly Session? session;
     readonly ListBox items=new(){BorderThickness=new Thickness(0),Background=Brushes.Transparent,MinHeight=120,HorizontalContentAlignment=HorizontalAlignment.Stretch};
-    readonly TextBlock message=new(){TextWrapping=TextWrapping.Wrap,Foreground=new SolidColorBrush(Color.FromRgb(95,109,128)),Margin=new Thickness(0,10,0,0)};
-    readonly TextBlock detail=new(){Text="Drag files or folders here, or add them below.",Foreground=new SolidColorBrush(Color.FromRgb(95,109,128)),TextWrapping=TextWrapping.Wrap};
+    readonly TextBlock message=new(){TextWrapping=TextWrapping.Wrap,Foreground=Glass.Muted,Margin=new Thickness(0,10,0,0)};
+    readonly TextBlock detail=new(){Text="Drag files or folders here, or add them below.",Foreground=Glass.Muted,TextWrapping=TextWrapping.Wrap};
     readonly ProgressBar progress=new(){Height=5,Minimum=0,Maximum=100,Visibility=Visibility.Collapsed,Margin=new Thickness(0,0,0,10)};
     readonly Button addFiles,addFolder,remove,send,cancel;
     CancellationTokenSource? operation;
@@ -25,7 +25,7 @@ internal sealed class FileTransferWindow : Window
     public Task CancelAndWaitAsync(){operation?.Cancel();return settled?.Task??Task.CompletedTask;}
     public FileTransferWindow(Session? session)
     {
-        this.session=session;Title="mac-lan · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;
+        this.session=session;Title="mac-lan · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;Glass.Apply(this);
         var layout=new Grid{Margin=new Thickness(28)};layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new());layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
         var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Send to your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Files, ZIPs and folders go to Downloads/MAC-DOW on your Mac.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};
@@ -33,7 +33,7 @@ internal sealed class FileTransferWindow : Window
         addFiles=Action("Add files",ChooseFiles);addFolder=Action("Add folder",ChooseFolder);remove=Action("Remove",()=>{if(items.SelectedItem!=null)items.Items.Remove(items.SelectedItem);Refresh();});
         actions.Children.Add(addFiles);actions.Children.Add(addFolder);actions.Children.Add(remove);Grid.SetRow(actions,1);layout.Children.Add(actions);
         var drop=new DockPanel{Margin=new Thickness(14)};DockPanel.SetDock(detail,Dock.Top);detail.Margin=new Thickness(0,0,0,10);drop.Children.Add(detail);drop.Children.Add(items);
-        var card=new Border{Background=Brushes.White,BorderBrush=new SolidColorBrush(Color.FromRgb(220,227,237)),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(8),Child=drop,AllowDrop=true};
+        var card=new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Child=drop,AllowDrop=true};
         card.DragOver+=(_,e)=>{e.Effects=!busy&&CanSend&&e.Data.GetDataPresent(DataFormats.FileDrop)?DragDropEffects.Copy:DragDropEffects.None;e.Handled=true;};
         card.Drop+=(_,e)=>{if(!busy&&CanSend&&e.Data.GetData(DataFormats.FileDrop) is string[] paths)Add(paths);e.Handled=true;};Grid.SetRow(card,2);layout.Children.Add(card);
         var feedback=new StackPanel{Margin=new Thickness(0,14,0,14)};feedback.Children.Add(progress);feedback.Children.Add(message);Grid.SetRow(feedback,3);layout.Children.Add(feedback);
