@@ -15,12 +15,14 @@ import (
 func ValidateMacAppBundle(root string, requireExecutable bool) error {
 	var total int64
 	count := 0
-	allowedDirs := map[string]bool{".": true, "Contents": true, "Contents/MacOS": true, "Contents/Helpers": true, "Contents/Resources": true, "Contents/Resources/licenses": true}
+	// The disk-image install adds an ad-hoc bundle seal; feed archives have none.
+	allowedDirs := map[string]bool{".": true, "Contents": true, "Contents/MacOS": true, "Contents/Helpers": true, "Contents/Resources": true, "Contents/Resources/licenses": true, "Contents/_CodeSignature": true}
 	allowedFiles := map[string]bool{
 		"Contents/Info.plist": true, "Contents/MacOS/mac-lan": true, "Contents/Helpers/MacDowHost": true,
 		"Contents/Resources/MAC-DOW-INSTALL.json": true, "Contents/Resources/COMMIT.txt": true,
 		"Contents/Resources/BUILD-PROVENANCE.json": true, "Contents/Resources/README.md": true,
 		"Contents/Resources/LICENSE": true, "Contents/Resources/THIRD_PARTY_NOTICES.md": true,
+		"Contents/_CodeSignature/CodeResources": true,
 	}
 	for _, name := range []string{"zeroconf-LICENSE.txt", "webview2-NOTICE.txt", "webview2-LICENSE.txt", "miekg-dns-LICENSE.txt", "gorilla-websocket.txt", "golang-x-LICENSE.txt", "go-LICENSE.txt"} {
 		allowedFiles["Contents/Resources/licenses/"+name] = true

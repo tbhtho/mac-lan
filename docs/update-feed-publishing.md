@@ -37,8 +37,13 @@ publishing. A successful local validation is not a published release.
 `package-installers.ps1` wraps those exact packages for first installs: a
 per-user NSIS `mac-lan-setup.exe` (needs an existing NSIS 3 installation) and
 `mac-lan-macos-arm64.dmg`, a read-only ISO 9660/Rock Ridge image with
-`mac-lan.app` and an Applications link, written and read back by
-`scripts/package-macos-dmg.py`. Both are release downloads only; the signed feed
+`mac-lan.app`, an Applications link, and Finder window settings with a hidden
+background (`installer/dmg-background.png`), written and read back by
+`scripts/package-macos-dmg.py`. The app inside the image gets an ad-hoc bundle
+signature from `scripts/macos_adhoc_sign.py`; Go's linker-only signature makes
+a downloaded bundle look damaged to Gatekeeper. Feed archives stay unsigned and
+byte-identical, because alpha.17 and older updaters reject `_CodeSignature`;
+from alpha.18 the validator accepts the seal so disk-image installs can update. Both are release downloads only; the signed feed
 keeps updating the installed EXE and app in place. Run the packaging scripts in
 PowerShell 7 or Windows PowerShell 5.1. On a PC where an extensionless `python`
 file shadows Python in PowerShell, alias `python` to `python.exe` first; the

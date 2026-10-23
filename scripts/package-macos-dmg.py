@@ -3,11 +3,16 @@
 No Apple tools run on Windows, so this writes a read-only ISO 9660 image with
 Rock Ridge extensions, which macOS mounts from a .dmg like any other disk image.
 Rock Ridge keeps the real names, executable modes and the Applications link.
-The image holds exactly the archive's files and modes; it is read back and
-compared before the script reports success.
+The app comes from the verified archive, ad-hoc signed and sealed by
+macos_adhoc_sign; Finder window settings and a hidden background come from
+macos_dsstore. The image is read back and compared before the script reports
+success. Update feeds keep the unsigned archive that existing updaters accept.
 """
 from pathlib import Path
-import struct, sys, tarfile, time
+import hashlib, plistlib, struct, sys, tarfile, time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import macos_adhoc_sign, macos_dsstore  # noqa: E402  (sibling build modules)
 
 SECTOR = 2048
 VOLUME = b'MAC-LAN'
@@ -28,29 +33,35 @@ class Node:
         self.children, self.iso, self.lba, self.size, self.parent, self.number = [], b'', 0, 0, None, 0
 
 
-def load(archive_path):
-    root = Node('', 'dir', 0o40755)
+def tree(entries):
+    """entries: {path: (mode, bytes | None for a directory | str link target)}."""
+    root = Node('', 'dir', 0o40755); root.path = ''
     index = {'': root}
     def directory(path):
         if path not in index:
             parent = directory(path.rpartition('/')[0])
-            node = Node(path.rpartition('/')[2], 'dir', 0o40755)
+            node = Node(path.rpartition('/')[2], 'dir', 0o40755); node.path = path
             node.parent = parent; parent.children.append(node); index[path] = node
         return index[path]
+    for path, (mode, data) in sorted(entries.items()):
+        if data is None:
+            directory(path).mode = mode
+            continue
+        parent = directory(path.rpartition('/')[0])
+        node = Node(path.rpartition('/')[2], 'link', mode, target=data) if isinstance(data, str) else Node(path.rpartition('/')[2], 'file', mode, data)
+        node.path = path; node.parent = parent; parent.children.append(node)
+    return root
+
+
+def archive_entries(archive_path):
+    entries = {}
     with tarfile.open(archive_path, 'r:gz') as archive:
         for member in archive.getmembers():
             name = member.name.rstrip('/')
-            if member.isdir():
-                directory(name).mode = 0o40000 | (member.mode & 0o7777)
-            elif member.isfile():
-                parent = directory(name.rpartition('/')[0])
-                node = Node(name.rpartition('/')[2], 'file', 0o100000 | (member.mode & 0o7777), archive.extractfile(member).read())
-                node.parent = parent; parent.children.append(node)
-            else:
-                raise SystemExit('Unexpected archive member type: ' + member.name)
-    link = Node('Applications', 'link', 0o120755, target='/Applications')
-    link.parent = root; root.children.append(link)
-    return root
+            if member.isdir(): entries[name] = (0o40000 | member.mode & 0o7777, None)
+            elif member.isfile(): entries[name] = (0o100000 | member.mode & 0o7777, archive.extractfile(member).read())
+            else: raise SystemExit('Unexpected archive member type: ' + member.name)
+    return entries
 
 
 def walk(node):
@@ -162,6 +173,7 @@ def build(root, output, now):
         for d in directories: image.write(pack(list(entries(d))))
         for f in files: image.write(f.data + b'\0' * ((-len(f.data)) % SECTOR))
         if image.tell() != total * SECTOR: raise SystemExit('Image layout size mismatch')
+    return {d.path: d.lba for d in directories} | {f.path: f.lba for f in files}
 
 
 
@@ -212,21 +224,40 @@ def read_back(path):
 
 
 def main():
-    archive, output = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
-    root = load(archive)
-    build(root, output, time.time())
-    expected = {'Applications': (0o120755, '/Applications')}
-    with tarfile.open(archive, 'r:gz') as source:
-        for member in source.getmembers():
-            name = member.name.rstrip('/')
-            expected[name] = (0o40000 | member.mode & 0o7777, None) if member.isdir() else (0o100000 | member.mode & 0o7777, source.extractfile(member).read())
+    archive, output, background = (Path(p).resolve() for p in sys.argv[1:4])
+    entries = archive_entries(archive)
+    app = {k[len('mac-lan.app/'):]: v for k, v in entries.items() if k.startswith('mac-lan.app/')}
+    identifier = plistlib.loads(app['Contents/Info.plist'][1])['CFBundleIdentifier']
+    signed = macos_adhoc_sign.sign_bundle(app, identifier)
+    image = {'mac-lan.app': entries['mac-lan.app']} | {'mac-lan.app/' + k: v for k, v in signed.items()}
+    image['Applications'] = (0o120755, '/Applications')
+    image['.background'] = (0o40755, None)
+    image['.background/background.png'] = (0o100644, background.read_bytes())
+    window, icons = (200, 120, 640, 420), {'mac-lan.app': (170, 200), 'Applications': (470, 200)}
+    now = time.time()
+    # Two passes: the view settings have a fixed size, so the first layout gives the
+    # extents Finder uses as file IDs for the background picture's alias.
+    image['.DS_Store'] = (0o100644, macos_dsstore.write(window, icons))
+    extents = build(tree(image), output, now)
+    picture = macos_dsstore.alias(VOLUME.decode(), int(now), extents['.background'] * SECTOR,
+                                  extents['.background/background.png'] * SECTOR, '.background', 'background.png')
+    image['.DS_Store'] = (0o100644, macos_dsstore.write(window, icons, picture))
+    if build(tree(image), output, now) != extents: raise SystemExit('Disk image layout changed between passes')
+    expected = {k: (m, d) for k, (m, d) in image.items()}
     actual = read_back(output)
     if actual != expected:
-        missing = sorted(set(expected) ^ set(actual)) or sorted(k for k in expected if expected[k] != actual.get(k))
-        raise SystemExit('Disk image differs from the app archive: ' + ', '.join(missing[:5]))
+        differing = sorted(set(expected) ^ set(actual)) or sorted(k for k in expected if expected[k] != actual.get(k))
+        raise SystemExit('Disk image differs from the signed app: ' + ', '.join(differing[:5]))
     for name in ('mac-lan.app/Contents/MacOS/mac-lan', 'mac-lan.app/Contents/Helpers/MacDowHost'):
         assert actual[name][0] & 0o111, name + ' lost its executable mode'
-    print(f'Mac disk image verified: {len(expected)} entries match the app archive, executable modes and Applications link kept.')
+    resources = actual['mac-lan.app/Contents/_CodeSignature/CodeResources'][1]
+    helper = macos_adhoc_sign.verify_macho(actual['mac-lan.app/Contents/Helpers/MacDowHost'][1], 'MacDowHost', {})
+    assert plistlib.loads(resources)['files2']['Helpers/MacDowHost']['cdhash'] == helper
+    macos_adhoc_sign.verify_macho(actual['mac-lan.app/Contents/MacOS/mac-lan'][1], identifier, {
+        1: hashlib.sha256(actual['mac-lan.app/Contents/Info.plist'][1]).digest(), 3: hashlib.sha256(resources).digest()})
+    view = {(n, c): p for n, c, _, p in macos_dsstore.read(actual['.DS_Store'][1])}
+    assert plistlib.loads(view[('.', b'icvp')])['backgroundImageAlias'] == picture and (('mac-lan.app', b'Iloc') in view)
+    print(f'Mac disk image verified: {len(expected)} entries, ad-hoc signed app bundle, Applications link and install window settings.')
 
 
 if __name__ == '__main__':
