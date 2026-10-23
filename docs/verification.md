@@ -26,6 +26,35 @@ withdrawn. Future signed updates check at startup and every six hours and offer
 restart while idle. Publication verification must bind the public feed and both
 downloaded artifacts to the intended source commit, sizes and SHA-256 hashes.
 
+Publication completed and was checked anonymously on 2026-10-23:
+
+- Public repository `tbhtho/mac-lan` retains ID 1430459188. Release
+  `v0.1.0-alpha.14`, both package markers, provenance, tag, source ZIP, and signed
+  feed bind binary source commit `848768e7a9b13657c0a45190f9045116183c213e`.
+  The feed was published in the following commit, `db5561d`.
+- All four uploaded assets were downloaded without authentication; byte counts
+  and SHA-256 hashes matched the local packages and GitHub asset metadata.
+  Windows is 149,552,674 bytes, SHA-256
+  `db85e99a2209ce1076b6c577a35c02f0515f9702cb700e31b66ecfd2c0dff0b2`.
+  The Mac archive is 3,592,469 bytes, SHA-256
+  `d4f53bf427dbce2dbb880486c8ef86ce73606de80c162d4a8acdbd68a0d90659`.
+  See the release's `SHA256SUMS-0.1.0-alpha.14.txt` for the source ZIP hash.
+- The production signed-feed test passed against public HTTPS: a temporary copy
+  of the real alpha.13 Windows EXE was staged and replaced with alpha.14. Its
+  source EXE, backup identity, and neighboring sentinel survived; no downloaded
+  program was launched. The same production engine downloaded and verified the
+  Mac archive, exact layout, source identity, and ARM64 Mach-O header, with no
+  Darwin execution.
+- The actual single EXE passed isolated package/runtime diagnostics, including
+  its embedded theme/viewer/updater, with no visible windows, capture, or hooks.
+  Its bundled `--update-check` read the public signed feed and reported alpha.14
+  current, without GitHub sign-in.
+- Reachable source history and actual public package/source contents were
+  checked for the local diagnostic destination and signing-key material, with
+  no findings. All twelve older credential-bearing release sets remain private
+  drafts; an anonymous request for the alpha.13 Mac bootstrap returned 404.
+  No Actions run was triggered for the binary source commit.
+
 The branding and distribution change does not establish new native capture,
 input, permission, Mac update-worker/relaunch, or hardware performance evidence.
 The Mac remains a cross-compiled command-line preview whose capture helper
