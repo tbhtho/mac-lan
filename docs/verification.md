@@ -1,5 +1,16 @@
 # Verification record
 
+## Alpha.21 - Mac menu polish, hide-on-close, UTF-8 discovery names
+
+The user confirmed alpha.20 shows both permissions as allowed. Alpha.21 adds a
+Mac menu header (status dot, status, Mac ID), a Permissions section with status
+symbols and one Start/Stop item; the Windows connection page hides on X; helper
+output is read as UTF-8 (the previous build showed `Marcelâ€™s`).
+Headless suite passed. Release `v0.1.0-alpha.21` binds `bf9d0e4`; feed commit
+`2b214a2`. All checksummed downloads matched anonymously, the feed verified, and
+the alpha.20 EXE reported alpha.21 available. The Swift menu has not been
+compiled here; it compiles on the Mac at first launch.
+
 ## Alpha.20 - persistent Mac signing identity
 
 Ad-hoc signatures are identified by code hash, so each Mac build was a new app
