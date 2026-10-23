@@ -29,6 +29,13 @@ internal static class Native
         var hwnd=new WindowInteropHelper(window).Handle;
         SetWindowPos(hwnd,0,m.Left,m.Top,m.Width,strip?TabBarLayout.HeightPixels(m.Dpi):m.Height,0x0010|0x0040|0x0004);
     }
+    // The Mac view fills the whole monitor below the mac-lan bar, over the Windows taskbar.
+    public static void PositionCovering(Window window,MonitorArea m)
+    {
+        if(ScreenBounds(m.Id) is not var (left,top,width,height)){Position(window,m,false);return;}
+        int bar=TabBarLayout.HeightPixels(m.Dpi);
+        SetWindowPos(new WindowInteropHelper(window).Handle,0,left,top+bar,width,height-bar,0x0010|0x0040|0x0004);
+    }
     public static (int Left,int Top,int Width,int Height)? ScreenBounds(string id)
     {
         (int,int,int,int)? result=null;
