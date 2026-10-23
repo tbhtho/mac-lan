@@ -126,10 +126,11 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream!.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "MAC-DOW.capture", qos: .userInteractive))
         try await stream!.startCapture()
-        DispatchQueue.main.async {
-            self.watchdog = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
+        // Input state and watchdog remain serialized on the main queue.
+        DispatchQueue.main.async(execute: DispatchWorkItem {
+            self.watchdog = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.tick), userInfo: nil, repeats: true)
             self.readInput()
-        }
+        })
         status("Capture started; view only until Windows explicitly arms control")
     }
 
@@ -160,9 +161,11 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         let ready = VTCompressionSessionPrepareToEncodeFrames(encoder)
         guard ready == noErr else { shutdown("Hardware encoder preparation failed: \(ready)") }
-        var hardware: CFTypeRef?
-        VTSessionCopyProperty(encoder, key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder, allocator: nil, valueOut: &hardware)
-        guard (hardware as? Bool) == true else { shutdown("Hardware encoder not active; use explicit JPEG diagnostic if needed") }
+        // This C API returns a retained CF object through void*. Keep ownership explicit.
+        var hardware: Unmanaged<CFTypeRef>?
+        let hardwareResult = VTSessionCopyProperty(encoder, key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder, allocator: nil, valueOut: &hardware)
+        let hardwareValue = hardware?.takeRetainedValue()
+        guard hardwareResult == noErr, (hardwareValue as? Bool) == true else { shutdown("Hardware encoder not active; use explicit JPEG diagnostic if needed") }
         status("VideoToolbox hardware H.264; realtime, no B frames; bounded encoder submissions")
     }
     func shutdown(_ message: String) -> Never {
@@ -248,7 +251,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             inbox.fail()
         }
     }
-    func tick() {
+    @objc func tick() {
         if now()-lastAlive>0.5 {lastAlive=now();jsonStatus(["type":"captureAlive"])}
         if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll() }
         if now()-watchdogGrace>2 {
@@ -318,7 +321,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             guard generation>0,generation != revokedGeneration,received+0.85>now() else { releaseAll();return }
             if generation != currentGeneration {
                 currentGeneration=generation
-                if windowID != 0 { NSRunningApplication(processIdentifier:owner)?.activate(options:[.activateIgnoringOtherApps]) }
+                if windowID != 0 { NSRunningApplication(processIdentifier:owner)?.activate(options:[]) }
             }
             let allowed=AXIsProcessTrusted() && scopeAllowsInput()
             if !allowed {

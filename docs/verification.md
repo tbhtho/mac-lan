@@ -15,14 +15,23 @@ Windows development machine, 2026-10-23 UTC. Dedicated project was created in C:
 
 Tests never opened a visible application, installed actual input hooks, injected OS input or captured a real screen.
 
-## Not verified / blockers
+## Native Apple Silicon validation — 2026-10-23 UTC
 
-- Native Swift source has not compiled or run. No authorized Mac is online.
-- GitHub APIs user/settings/billing/usage and users/tbhtho/settings/billing/usage returned 404; account plan was unavailable with the current token scope. No scope expansion was attempted. Native Actions workflow remains manual and unrun because zero-cost capacity cannot be confirmed.
-- Apple Silicon Go host is cross-compiled, not executed or native-validated. Build kit is not a runnable Mac release.
-- No native capture, permissions, app/window/menus, physical monitor/DPI behavior, actual keyboard hook, hardware H.264 path, hardware Windows decoder or Wi-Fi latency/quality measurement.
-- No code-signing or notarization; no signing credentials available/configured. OS protections were not disabled.
+Dedicated checkout on the connected MacBook Pro at the alpha.1 commit. macOS 15.5 (24F74), arm64; existing Apple Command Line Tools, Swift 6.1.2 and Go 1.24.1. No installation or license acceptance required. Build concurrency capped at two for the 8 GB machine; compiler/dependency caches confined to this task workspace.
 
-## Remaining path
+- Native optimized arm64 macOS 14+ Swift helper and Go host compile. Swift build is warning-free after native review fixes.
+- Native lease expiration/release, bounded mailbox, urgent release and overflow self-tests pass, without permission queries, capture or event posting.
+- Host fresh TLS identity self-test passes.
+- Native Go synthetic TLS/WebSocket tests and consent codec regression pass; go vet and race detector pass.
+- Node frame/recovery/mapping and asynchronous viewer regressions pass on Node 26.
+- MacDowHost --check reports Screen Recording missing and Accessibility missing, returns 1 (helper returns 2), without requesting either permission.
+- Mach-O arm64 executable and deployment metadata inspected. Ad-hoc linker signatures are not Developer ID signing or notarization.
+- Windows alpha.1 binary is carried forward byte-for-byte, with its original SHA-256. Windows is unavailable in this environment, so no new Windows build or desktop validation is claimed.
 
-Verify sufficient included Actions minutes at no cost and run manual native workflow for the release commit, or compile on an authorized Apple Silicon Mac with existing toolchains. Resolve any compiler errors before replacing the clearly labeled build-kit asset with a native binary artifact. Then the user grants required permissions, performs explicit pairing/ALLOW, and runs manual-validation.md. Do not advertise measured editing performance until that checklist produces evidence.
+## Not verified / remaining steps
+
+No screen capture, window enumeration, event injection, visible app UI, listener/remote host, pairing, permission grant, persistent service, signing credentials, paid CI or security bypass was started. Synthetic test servers only bound ephemeral loopback ports.
+
+Screen Recording and Accessibility need the user's deliberate grants if they choose to proceed. Follow README instructions for the Terminal identity, foreground launch, fingerprint/token pairing and ALLOW, then manual-validation.md with both machines. Hardware H.264/decoder state, real app scope behavior, physical monitors and end-to-end Wi-Fi latency remain untested. No performance measurements are claimed.
+
+The existing manual Actions workflow remains unrun; no billing scope was added. Native local builds replace the need for CI compilation for this prerelease. Distribution is unsigned/developer-unsigned and not notarized; macOS protections remain enabled.

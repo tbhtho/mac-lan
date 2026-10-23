@@ -93,7 +93,7 @@ func main() {
 		if r.Window != 0 {
 			scope = fmt.Sprintf("ONLY window ID %d (child windows/dialogs excluded)", r.Window)
 		}
-		fmt.Printf("\nWindows requests %s, %d px / %d fps / JPEG %d.\nAllow viewing and explicitly armed keyboard/mouse for this session? Type ALLOW: ", scope, r.Width, r.FPS, r.Quality)
+		fmt.Printf("\nWindows requests %s, %d px / %d fps / %s.\nAllow viewing and explicitly armed keyboard/mouse for this session? Type ALLOW: ", scope, r.Width, r.FPS, streamDescription(r))
 		return scanner.Scan() && scanner.Text() == "ALLOW"
 	}
 	s.stream = func(send func([]byte), status func(string), events <-chan input) error {
@@ -113,6 +113,16 @@ func main() {
 	}
 }
 func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+func streamDescription(r start) string {
+	if r.Codec == "jpeg" {
+		return fmt.Sprintf("JPEG quality %d", r.Quality)
+	}
+	bitrate := r.Bitrate
+	if bitrate == 0 {
+		bitrate = 8
+	}
+	return fmt.Sprintf("hardware H.264 / %d Mbit/s", bitrate)
+}
 func runCapture(helper string, r start, send func([]byte), status func(string), events <-chan input) error {
 	codec := r.Codec
 	if codec == "" {
