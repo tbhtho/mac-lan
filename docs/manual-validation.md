@@ -1,17 +1,19 @@
-# Hardware acceptance checklist — NOT YET EXECUTED
+# Hardware acceptance checklist
 
-Native Apple Silicon compilation and non-capturing diagnostics passed on macOS 15.5. Development has not opened the Windows UI, installed hooks, captured either real desktop, injected input, requested permissions or changed firewall/router settings. Screen Recording and Accessibility are currently missing.
+The user reported successful native compilation, permission checks, pairing and live video in alpha.10. Actual delivered fps was not measured, and input was not armed because the user clicked directly into the view-only desktop. Alpha.11 adds click activation, a single local cursor and a filled 1080p stream; those changes still require Mac validation. Development checks remain headless and have not captured a real screen, installed input hooks, injected input or changed permissions/firewall/router settings. Current Accessibility permission is unknown.
 
 After native Apple Silicon compilation succeeds and the user explicitly grants the necessary Mac access:
 
 - Run --check; missing Screen Recording must fail with instructions and no permission prompt. Missing Accessibility must remain view only.
 - Compare fingerprint directly, use temporary token, deny ALLOW and verify no capture. Wrong fingerprint/token, browser Origin, public IP and second controller must fail.
 - Test desktop tab on physical second display at 100%, 150%, 200% scale, mixed DPI, negative origins, monitor removal/reconnect and primary-only fallback. Check monitor selection and keep unrelated desktop windows usable.
+- First left click inside the fresh Mac picture must activate control without clicking the Mac. Subsequent clicks, motion and typing must route; a canceled/blurred activation must release control. App Priority letterbox clicks must not activate. Verify clear Accessibility guidance, grant detection and deliberate reactivation if permission is missing.
+- Verify the full desktop stream is 1920×1080 by default, fills the available tab area without layout bars, and keeps the full menu bar/Dock visible. Different aspect ratios intentionally stretch. Confirm pointer targets at edges/center match the picture. Only the Windows pointer should appear in the stream; the physical Mac cursor should remain unchanged. App Priority must retain aspect fit.
 - Switch Windows/Mac 100 times while holding Shift/Command/mouse buttons. Focus another Windows app, minimize, disconnect Wi-Fi, close host, kill client process. Verify all Mac held input releases within lease timeout and returning always needs explicit rearm.
 - Confirm Alt+Tab switches Mac applications only while armed. Ctrl+Alt+Shift+Backspace must release immediately; Windows reserved/security shortcuts remain local.
 - App Priority must hide the tab shell entirely; move/resize/maximize/minimize its normal Windows window on either monitor. Verify only the selected Mac window is visible. Close/minimize chosen Mac window: clear image, stop capture, no desktop fallback. Open a modal/menu/child window: no invisible interaction; pause control when scope check detects another foremost window. Validate coordinate mapping after moving/resizing Mac window.
 - Check US-layout editing, repeats, modifiers, drag, scroll, double clicks; non-US layouts, IME, clipboard, stylus and audio are unsupported pending explicit implementation.
-- Measure H264 VideoToolbox hardware state and Windows actual hardware decoder using runtime diagnostics. Hardware preference is not proof of hardware decode. Compare 960/1280/1600/1920 width, 10/15/30 fps, 2/4/8/12/20 Mbit/s over Wi-Fi. Record RSS, CPU/GPU, fps, RTT, encode and local decode/submit timing.
+- Measure H264 VideoToolbox hardware state and Windows actual hardware decoder using runtime diagnostics. Hardware preference is not proof of hardware decode. Compare 960/1280/1600/1920 width at required 60 fps, 2/4/8/12/20 Mbit/s over Wi-Fi. Record RSS, CPU/GPU, fps, RTT, encode and local decode/submit timing.
 - Measure real key-to-photon latency with a camera or instrumented application. RTT + encode + local decode is not end-to-end latency; report P50/P95/P99. Test packet loss/congestion and recovery; no unbounded stale frames/input.
 - Quit both apps; confirm no listeners/children, hooks, autostart entries, credentials or persisted screen images remain.
 

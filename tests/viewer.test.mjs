@@ -5,7 +5,16 @@ assert.throws(()=>parseFrame(new Uint8Array([9,0,0,0,0,0,0,0,0])));
 const packet=new Uint8Array([2,0,0,0,1,0,0,3,232,0,0,0,1,0x65]);
 const p=parseFrame(packet);assert.equal(p.sequence,1);assert.equal(p.encodeMs,1);assert.equal(p.key,true);assert.equal(p.data.length,5);
 const gate=new SequenceGate();assert.equal(gate.accept(1,false),false);assert.equal(gate.accept(2,true),true);assert.equal(gate.accept(3,false),true);assert.equal(gate.accept(5,false),false);assert.equal(gate.accept(6,false),false);assert.equal(gate.accept(7,true),true);
-assert.deepEqual(mapPointer(200,150,400,300,1920,1080),{x:.5,y:.5});assert.equal(mapPointer(100,0,400,300,1920,1080),null);
+// The entire desktop fills the viewport, even when the Mac and PC aspect ratios differ.
+assert.deepEqual(mapPointer(200,150,400,300,1920,1080),{x:.5,y:.5});
+assert.deepEqual(mapPointer(100,0,400,300,1920,1080),{x:.25,y:0});
+assert.deepEqual(mapPointer(0,0,1920,984,1920,1080),{x:0,y:0},'the top-left Mac menu remains reachable below the tab strip');
+assert.deepEqual(mapPointer(1919,983,1920,984,1920,1080),{x:1919/1920,y:983/984},'the bottom-right Mac desktop remains reachable without cropping');
+assert.deepEqual(mapPointer(960,492,1920,984,2560,1600),{x:.5,y:.5},'Retina source pixels do not offset logical pointer coordinates');
+for(const point of [[-1,0],[0,-1],[400,0],[0,300]])assert.equal(mapPointer(...point,400,300,1920,1080),null);
+for(const dimensions of [[0,300,1920,1080],[400,0,1920,1080],[400,300,0,1080],[400,300,1920,0],[NaN,300,1920,1080]])assert.equal(mapPointer(10,10,...dimensions),null);
+assert.equal(mapPointer(100,0,400,300,1920,1080,'fit'),null,'individual-window letterbox bars never route input');
+assert.deepEqual(mapPointer(200,150,400,300,1920,1080,'fit'),{x:.5,y:.5});
 assert.equal(videoFrameDuration({fps:60}),1000000/60);
 for(const fps of [null,undefined,0,-1,61,'60',60.5])assert.equal(videoFrameDuration({fps}),1000000/60);
 console.log('PASS frame envelope, loss recovery at keyframe, pointer mapping');

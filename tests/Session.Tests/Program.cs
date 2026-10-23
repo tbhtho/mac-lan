@@ -41,7 +41,7 @@ await using(var session=new Session())
     Check(session.IsPaired&&session.IsStarting&&!session.IsReady,"start stays pending while Mac approval is awaited");
     var first=await peer.Next();
     Check(first.GetProperty("type").GetString()=="start","focus release and input never replace the pending stream start");
-    Check(first.GetProperty("codec").GetString()=="h264"&&first.GetProperty("width").GetInt32()==1280&&first.GetProperty("fps").GetInt32()==60&&first.GetProperty("quality").GetInt32()==70,"default stream requests actual H.264 60fps before Mac approval");
+    Check(first.GetProperty("codec").GetString()=="h264"&&first.GetProperty("width").GetInt32()==1920&&first.GetProperty("fps").GetInt32()==60&&first.GetProperty("quality").GetInt32()==70,"default stream requests full HD H.264 60fps before Mac approval");
     Parallel.For(0,20,_=>{session.Send(new{type="release"});session.Send(new{type="start",window=0});});
     await peer.Send(new{type="ready"});
     await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));

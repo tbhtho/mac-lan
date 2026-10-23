@@ -178,7 +178,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 		}
 		if !terminalConsent {
 			fmt.Println("Windows requested viewing. Choose Allow in the Mac dialog to start video.")
-			return nativeConsent(fmt.Sprintf("Allow Windows to view %s?\n\n%d px / %d fps / %s\n\nKeyboard and mouse stay off until you enable Control Mac on Windows.", scope, r.Width, r.FPS, streamDescription(r)))
+			return nativeConsent(fmt.Sprintf("Allow Windows to view %s?\n\n%d px / %d fps / %s\n\nKeyboard and mouse stay off until you click the Mac view to activate control on Windows.", scope, r.Width, r.FPS, streamDescription(r)))
 		}
 		fmt.Printf("\nWindows requests %s, %d px / %d fps / %s.\nAllow viewing and explicitly armed keyboard/mouse for this session? Type ALLOW: ", scope, r.Width, r.FPS, streamDescription(r))
 		return scanner.Scan() && scanner.Text() == "ALLOW"
@@ -314,8 +314,11 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 		defer close(stderrDone)
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
-			if failure := nativeFailureStatus(sc.Bytes()); failure != nil {
+			if failure := nativeFailureStatus(sc.Bytes()); failure != nil && nativeFailure == nil {
 				nativeFailure = failure
+			}
+			if state, ok := nativeControlStatus(sc.Bytes()); ok {
+				diagnostics.Emit("mac", "control-state", state.Code, map[string]int{"controlPermission": boolCount(state.Permission), "controlActive": boolCount(state.Active)})
 			}
 			if h, ok := parseHeld(sc.Bytes()); ok {
 				heldMu.Lock()
@@ -363,9 +366,20 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 		send(b)
 	}
 	_ = stdin.Close()
-	_ = cmd.Process.Kill()
-	<-stderrDone
-	waitErr := cmd.Wait()
+	// stdout closes as a helper exits, but its stderr and process teardown can
+	// finish slightly later. Let that clean exit preserve its native reason and
+	// exit status instead of racing it with an unconditional Kill.
+	waited := make(chan error, 1)
+	go func() { <-stderrDone; waited <- cmd.Wait() }()
+	grace := time.NewTimer(time.Second)
+	var waitErr error
+	select {
+	case waitErr = <-waited:
+		grace.Stop()
+	case <-grace.C:
+		_ = cmd.Process.Kill()
+		waitErr = <-waited
+	}
 	heldMu.Lock()
 	snapshot := held
 	heldMu.Unlock()

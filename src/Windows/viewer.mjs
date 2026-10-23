@@ -2,7 +2,7 @@ import {parseFrame,SequenceGate,mapPointer,videoFrameDuration} from './viewer-co
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0;
-let frameDuration=videoFrameDuration({fps:60});
+let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,presentation='fill';
 function show(text){hint.textContent=text;}
 function reset(){renderGeneration++;if(decoder){decoder.close();decoder=null;}sequence.reset();pending.clear();ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 function newDecoder(){
@@ -14,8 +14,9 @@ function newDecoder(){
 chrome.webview.addEventListener('message',async e=>{
   const m=e.data;
   if(m.type==='armed'){armed=m.active;if(armed)canvas.focus();document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
-  if(m.type==='clear'){reset();show('VIEW ONLY � stream paused or disconnected');return;}
+  if(m.type==='clear'){activationPointer=null;reset();show('VIEW ONLY � stream paused or disconnected');return;}
   if(m.type==='video'){
+    presentation=m.presentation==='fit'?'fit':'fill';canvas.style.objectFit=presentation==='fit'?'contain':'fill';
     frameDuration=videoFrameDuration(m);
     if(m.codec==='jpeg'){if(config){reset();config=null;}return;}
     // Key packets carry SPS/PPS and configure themselves too; pipe delivery order is irrelevant.
@@ -38,11 +39,22 @@ chrome.webview.addEventListener('message',async e=>{
   finally{post({type:'frameAck'});}
 });
 setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps � encode ${encode.toFixed(1)} ms � local decode/submit ${lastDecode.toFixed(1)} ms � ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
-function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height);}
-canvas.addEventListener('pointermove',e=>{if(!armed)return;const p=coords(e);if(p)post({type:'move',...p});});
-canvas.addEventListener('pointerdown',e=>{canvas.focus();if(!armed)return;const p=coords(e);if(!p)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);post({type:'move',...p});post({type:'button',button:e.button,down:true});});
-canvas.addEventListener('pointerup',e=>{if(armed){e.preventDefault();post({type:'button',button:e.button,down:false});}if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
-canvas.addEventListener('wheel',e=>{if(armed){e.preventDefault();post({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
+function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height,presentation);}
+canvas.addEventListener('pointermove',e=>{if(!armed||activationPointer!==null)return;const p=coords(e);if(p)post({type:'move',...p});});
+canvas.addEventListener('pointerdown',e=>{
+  canvas.focus();const p=coords(e);if(!p||activationPointer!==null)return;
+  if(!armed){if(e.button!==0)return;e.preventDefault();activationPointer=e.pointerId;canvas.setPointerCapture(e.pointerId);post({type:'requestControl'});return;}
+  e.preventDefault();canvas.setPointerCapture(e.pointerId);post({type:'move',...p});post({type:'button',button:e.button,down:true});
+});
+canvas.addEventListener('pointerup',e=>{
+  if(activationPointer===e.pointerId){activationPointer=null;e.preventDefault();}
+  else if(armed&&activationPointer===null){e.preventDefault();post({type:'button',button:e.button,down:false});}
+  if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+});
+function releaseControl(){const notify=armed||activationPointer!==null;activationPointer=null;armed=false;if(notify)post({type:'blur'});}
+canvas.addEventListener('pointercancel',e=>{if(activationPointer===e.pointerId||armed)releaseControl();if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
+canvas.addEventListener('lostpointercapture',e=>{if(activationPointer===e.pointerId)releaseControl();});
+canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null){e.preventDefault();post({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
-window.addEventListener('blur',()=>{if(armed)post({type:'blur'});});
+window.addEventListener('blur',releaseControl);

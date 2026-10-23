@@ -61,6 +61,8 @@ func nativeFailureCode(message string) string {
 		{"Capture dimensions exceed resource limit", "capture-dimensions"},
 		{"Viewer transport pipe closed", "viewer-pipe"},
 		{"Native input mailbox overflow/EOF", "input-pipe"},
+		{"Native input mailbox overflow", "input-overflow"},
+		{"Native input message invalid", "input-invalid"},
 		{"Viewer heartbeat expired", "viewer-heartbeat"},
 		{"Usage: MacDowCapture", "helper-arguments"},
 	} {
@@ -69,6 +71,41 @@ func nativeFailureCode(message string) string {
 		}
 	}
 	return ""
+}
+
+type nativeControlState struct {
+	Code       string
+	Permission bool
+	Active     bool
+}
+
+func boolCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+// Only fixed state labels and booleans from the native helper may enter remote
+// diagnostics. Guidance and all other fields remain on the authenticated LAN.
+func nativeControlStatus(line []byte) (nativeControlState, bool) {
+	if len(line) > 2048 {
+		return nativeControlState{}, false
+	}
+	var status struct {
+		Type       string `json:"type"`
+		Code       string `json:"code"`
+		Permission *bool  `json:"controlPermission"`
+		Active     *bool  `json:"active"`
+	}
+	if json.Unmarshal(line, &status) != nil || status.Type != "controlStatus" || status.Permission == nil || status.Active == nil {
+		return nativeControlState{}, false
+	}
+	switch status.Code {
+	case "view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked":
+		return nativeControlState{status.Code, *status.Permission, *status.Active}, true
+	}
+	return nativeControlState{}, false
 }
 
 func nativeFailureStatus(line []byte) *captureFailure {

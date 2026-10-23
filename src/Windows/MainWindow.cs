@@ -41,6 +41,8 @@ internal sealed partial class MainWindow : Window
     string? preferred;
     long lastLease;
     ulong controlGeneration;
+    bool? controlPermission;
+    string? controlIssue;
     HwndSource? source;
     readonly TabBar tabBar;
     readonly StackPanel streamSection=new(){Visibility=Visibility.Collapsed};
@@ -163,7 +165,7 @@ internal sealed partial class MainWindow : Window
     }
     Session CreateSession()
     {
-        var s=new Session();session=s;
+        var s=new Session();session=s;controlPermission=null;controlIssue=null;
         s.Message+=m=>Dispatcher.BeginInvoke(()=>HandleMessage(s,m));
         s.Frame+=b=>{Interlocked.Exchange(ref pendingFrame,b);if(Interlocked.Exchange(ref frameScheduled,1)==0)Dispatcher.BeginInvoke(()=>{var latest=Interlocked.Exchange(ref pendingFrame,null);Interlocked.Exchange(ref frameScheduled,0);if(latest!=null&&session==s&&s.IsReady&&(remote||appWindow!=null))(appView??desktop).Frame(latest);},DispatcherPriority.Background);};
         s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm();(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title="MAC-DOW - disconnected / view only";}});
@@ -178,6 +180,7 @@ internal sealed partial class MainWindow : Window
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
             case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=$"MAC-DOW | {(gate.CanRoute?"CONTROLLING":"VIEW ONLY")} | RTT {ms:F0} ms | Ctrl+Alt+Shift+Backspace releases";}}break;
             case "video":(appView??desktop).Configure(m);break;
+            case "controlStatus":HandleControlStatus(m);break;
             case "error":case "status":var msg=m.TryGetProperty("message",out var v)?v.GetString():"Mac status changed";status.Text=msg;if(t.GetString()=="error"){Telemetry.Report("capture-failed","host-error");viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}if(m.TryGetProperty("paused",out var paused)&&paused.GetBoolean()){gate.Disarm();(appView??desktop).Clear();viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}break;
         }
     }
@@ -207,26 +210,55 @@ internal sealed partial class MainWindow : Window
         (appView??desktop).Focus();RefreshContext();
         if(!gate.Arm()){status.Text="Connect, wait for a fresh frame and focus the remote window first.";return;}
         if(!CanControlVideo()){gate.Disarm();status.Text="Waiting for fresh video; control remains off.";return;}
-        try{keyboard.Install();controlGeneration++;SendLease();UpdateControl();}catch(Exception ex){gate.Disarm();status.Text="Cannot acquire keyboard: "+ex.Message;}
+        try{keyboard.Install();controlIssue=null;controlGeneration++;SendLease();UpdateControl();}catch(Exception ex){gate.Disarm();status.Text="Cannot acquire keyboard: "+ex.Message;}
     }
     void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
     void RefreshContext()=>gate.SetContext(session?.IsReady==true,remote||appWindow!=null,OwnerIsForeground());
     void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Brushes.DarkOrange:Brushes.White;control.Foreground=gate.CanRoute?Brushes.White:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
     void Escape(){gate.Disarm();if(appWindow==null)ShowDesktop();else{appWindow.Title="MAC-DOW App Priority | VIEW ONLY | control released";UpdateControl();}}
-    bool CanControlVideo() {long shown=(appView??desktop).LastPresented;return shown>0&&session!=null&&session.NativeAlive>0&&Stopwatch.GetElapsedTime(session.NativeAlive).TotalSeconds<1.5&&(session.LastFrame<=shown||Stopwatch.GetElapsedTime(shown).TotalSeconds<1);}
+    bool CanControlVideo() {long shown=(appView??desktop).LastPresented;return controlPermission!=false&&shown>0&&session!=null&&session.NativeAlive>0&&Stopwatch.GetElapsedTime(session.NativeAlive).TotalSeconds<1.5&&(session.LastFrame<=shown||Stopwatch.GetElapsedTime(shown).TotalSeconds<1);}
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
-        RefreshContext();if(gate.CanRoute&&!CanControlVideo())gate.Disarm();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":null);
+        RefreshContext();if(gate.CanRoute&&!CanControlVideo())gate.Disarm();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??"Click Mac to control":null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         SendLease();
     }
     void HandlePointer(JsonElement m)
     {
         if(m.TryGetProperty("type",out var eventType)&&eventType.GetString()=="blur"){gate.Disarm();return;}
+        if(eventType.ValueKind==JsonValueKind.String&&eventType.GetString()=="requestControl")
+        {
+            // The first desktop click is an explicit local request, consumed by the viewer.
+            // Never activate a window or route input from an unfocused or stale view.
+            if(session?.IsReady==true&&(remote||appWindow!=null)&&OwnerIsForeground()&&CanControlVideo())Arm();
+            return;
+        }
         if(!gate.CanRoute||!OwnerIsForeground())return;
         var type=m.GetProperty("type").GetString();if(type is "move" or "button" or "scroll")session?.Send(m);
+    }
+    void HandleControlStatus(JsonElement m)
+    {
+        if(!m.TryGetProperty("code",out var code)||code.ValueKind!=JsonValueKind.String)return;
+        bool wasDenied=controlPermission==false;
+        if(m.TryGetProperty("controlPermission",out var permission)&&permission.ValueKind is JsonValueKind.True or JsonValueKind.False)controlPermission=permission.GetBoolean();
+        if(wasDenied&&controlPermission==true)controlIssue=null;
+        if(controlPermission==false)
+        {
+            controlIssue="Allow Accessibility on your Mac to control";
+            if(gate.CanRoute)gate.Disarm();
+            status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow MAC-DOW. Then click the Mac desktop again.";
+            UpdateControl();return;
+        }
+        switch(code.GetString())
+        {
+            case "ready":controlIssue=null;break;
+            case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm();status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow MAC-DOW. Then click the Mac desktop again.";break;
+            case "scope-blocked":controlIssue="Control paused: refocus the selected Mac window";gate.Disarm();break;
+            case "lease-expired":case "stale-input":case "generation-revoked":controlIssue="Control paused: click Mac to control";gate.Disarm();break;
+        }
+        UpdateControl();
     }
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
     void Disconnect(){paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm();if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
