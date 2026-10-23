@@ -15,7 +15,7 @@ Windows development machine, 2026-10-23 UTC. Dedicated project was created in C:
 
 Tests never opened a visible application, installed actual input hooks, injected OS input or captured a real screen.
 
-## Native Apple Silicon validation — 2026-10-23 UTC
+## Native Apple Silicon validation - 2026-10-23 UTC
 
 Dedicated checkout on the connected MacBook Pro at the alpha.1 commit. macOS 15.5 (24F74), arm64; existing Apple Command Line Tools, Swift 6.1.2 and Go 1.24.1. No installation or license acceptance required. Build concurrency capped at two for the 8 GB machine; compiler/dependency caches confined to this task workspace.
 
@@ -35,3 +35,13 @@ No screen capture, window enumeration, event injection, visible app UI, listener
 Screen Recording and Accessibility need the user's deliberate grants if they choose to proceed. Follow README instructions for the Terminal identity, foreground launch, fingerprint/token pairing and ALLOW, then manual-validation.md with both machines. Hardware H.264/decoder state, real app scope behavior, physical monitors and end-to-end Wi-Fi latency remain untested. No performance measurements are claimed.
 
 The existing manual Actions workflow remains unrun; no billing scope was added. Native local builds replace the need for CI compilation for this prerelease. Distribution is unsigned/developer-unsigned and not notarized; macOS protections remain enabled.
+
+## Alpha.3 updater validation - Windows, 2026-10-23 UTC
+
+- Full headless suite passes: 26 core checks, viewer/decoder race regressions, Go host and updater fixtures, go vet, .NET Windows Release compile (zero warnings/errors).
+- Synthetic updater tests cover channels/platform/architecture and malformed versions, missing/ambiguous digest metadata, traversal/links/reserved paths/case collisions, partial downloads, tampered previews/archives/release metadata, signed fixture apply and rollback, preserved external settings, forged rollback paths/hashes, executable mode checks, and vulnerable GitHub CLI rejection. Test signatures are injected only inside Go tests; no production trust bypass exists.
+- Independent review findings fixed: rollback authenticated from fresh older release and bound to caller install; recovery-needed state distinguished; required updater/marker packaging; Darwin executable bits; PowerShell BOM; canonical Mac fixture paths; rollback provenance regression actually invokes verifier.
+- Repository API verified authenticated tbhtho, private tbhtho/MAC-DOW, ID1430459188. No PR, force push, credential/global config, autostart or firewall change.
+- Installed gh 2.88.0 is below the safe signature-verification prerequisite. A prior alpha.2 verification probe used it and returned no attestations. After finding GHSA-8xvp-7hj6-mcj9, no further signature commands used that version. User-managed CLI upgrade/security review is separate from this project; no credentials were rotated or changed.
+- Alpha.3 Mac Go host is cross-compiled for darwin/arm64, **unrun**. Swift capture source unchanged from alpha.2; packaged helper is reused byte-for-byte from the SHA-256 checked alpha.2 native archive, with provenance recorded inside the package. No alpha.3 native execution or end-to-end streaming validation is claimed.
+- Current releases lack signed GitHub provenance: secure automatic apply/rollback remain blocked. The implemented usable path is check + explicit authenticated staging + clear manual fallback.

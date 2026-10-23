@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/tbhtho/MAC-DOW/host/internal/updater"
 	"io"
 	"net"
 	"net/http"
@@ -28,7 +29,16 @@ func main() {
 	addr := flag.String("listen", "", "explicit private IPv4:port, e.g. 192.168.1.20:4433")
 	check := flag.Bool("check", false, "check existing Mac permissions; never request them")
 	self := flag.Bool("self-test", false, "transport-independent non-capturing self-test")
+	updates := flag.Bool("updates", false, "interactive updates; no capture/listener")
+	updateCheck := flag.Bool("update-check", false, "check private releases without UI/capture")
+	noUpdateCheck := flag.Bool("no-update-check", false, "disable startup release check")
 	flag.Parse()
+	if *updates {
+		os.Exit(updater.Console(os.Stdin, os.Stdout))
+	}
+	if *updateCheck {
+		os.Exit(updater.Run([]string{"check"}, os.Stdout))
+	}
 	if *self {
 		_, _, err := identity()
 		if err != nil {
@@ -104,6 +114,9 @@ func main() {
 		fatal(err)
 	}
 	fmt.Printf("\nMAC-DOW foreground host — Ctrl+C stops all capture/control.\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary pairing token: %s\nCompare the fingerprint directly on Windows. Do not share token beyond your PC.\nNo capture until authenticated session + ALLOW.\n", *addr, fp, token)
+	if !*noUpdateCheck {
+		go updater.StartupCheck(os.Stdout)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	srv := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}

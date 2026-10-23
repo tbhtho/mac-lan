@@ -2,9 +2,9 @@
 
 Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream one selected Mac window in a normal Windows window with **App Priority**.
 
-**Private development prerelease.** Windows compiles and headless tests pass. The Apple Silicon Mac host and Swift helper are now natively compiled and pass non-capturing tests on macOS 15.5. Real capture/control, hardware codec behavior and Wi-Fi editing latency remain untested. This release includes a Windows portable app and a **native Mac command-line companion**.
+**Private development prerelease.** Windows compiles and headless tests pass. The Swift capture helper was natively compiled and self-tested on macOS 15.5 for alpha.2. The alpha.3 Go host adds updates and is cross-compiled for arm64 but has not been run on macOS. Real capture/control, hardware codec behavior and Wi-Fi editing latency remain untested. This release includes a Windows portable app and an **Apple Silicon command-line companion**, with those validation limits.
 
-[Prereleases](https://github.com/tbhtho/MAC-DOW/releases) · [Validation status](docs/verification.md) · [Hardware checklist](docs/manual-validation.md)
+[Prereleases](https://github.com/tbhtho/MAC-DOW/releases) � [Validation status](docs/verification.md) � [Hardware checklist](docs/manual-validation.md)
 
 ## What is implemented
 
@@ -13,7 +13,7 @@ Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream 
 - A foreground Mac companion with ScreenCaptureKit capture, VideoToolbox hardware H.264 encoding and a Windows WebCodecs decoder that prefers hardware acceleration. Actual Windows hardware decoding depends on the installed runtime/GPU and is unverified. JPEG is an explicit diagnostic option.
 - Direct LAN TLS 1.3/WebSockets, ephemeral 256-bit token, manual SHA-256 fingerprint verification and per-session ALLOW on the Mac. No cloud relay/discovery, daemon, autostart or saved pairing.
 - View-only by default. Click **Control Mac** while focused to arm. Left Alt+Tab maps to Command+Tab; right Alt maps to Option. **Ctrl+Alt+Shift+Backspace** releases control. Focus/tab/monitor changes, disconnect and expired leases revoke input.
-- Width caps 960/1280/1600/1920, 10/15/30 fps and 2–20 Mbit/s H.264 choices before a stream starts. Bounded queues and sequence-gap recovery favor recent frames. RTT, encoder time and local decode/submit time are shown; these are not end-to-end latency.
+- Width caps 960/1280/1600/1920, 10/15/30 fps and 2-20 Mbit/s H.264 choices before a stream starts. Bounded queues and sequence-gap recovery favor recent frames. RTT, encoder time and local decode/submit time are shown; these are not end-to-end latency.
 
 ## Windows
 
@@ -25,7 +25,7 @@ The application has not been opened on your desktop during development. Physical
 
 Apple Silicon, macOS 14+. There is no Mac tab UI.
 
-**Native build status:** Go host and Swift capture helper compiled on Apple Silicon macOS 15.5 with Swift 6.1.2 and Go 1.24.1. Native lease/mailbox and host TLS tests pass. This is a foreground Terminal companion, unsigned and not notarized; real capture/input and hardware encoding are still untested.
+**Build status:** The unchanged Swift helper comes byte-for-byte from the alpha.2 native build on Apple Silicon macOS 15.5 (Swift 6.1.2). The alpha.3 Go host is cross-compiled on Windows with Go 1.27 and remains unrun on macOS. Alpha.2 native lease/mailbox and TLS tests passed; alpha.3 updater tests use synthetic fixtures on Windows. This is a foreground Terminal companion, unsigned and not notarized; real capture/input and hardware encoding are still untested.
 
 Extract `MAC-DOW-macos-arm64-unsigned.tar.gz`, open Terminal in its `macos-arm64` folder, and first run:
 
@@ -33,7 +33,7 @@ Extract `MAC-DOW-macos-arm64-unsigned.tar.gz`, open Terminal in its `macos-arm64
 ./MacDowHost --check
 ```
 
-This only reads existing permission status. Missing Screen Recording returns a nonzero status. When you choose to test with both machines, grant Screen Recording yourself under **System Settings → Privacy & Security → Screen & System Audio Recording** (wording may vary). Grant **Accessibility** only if you want remote control. Verify the identity macOS attributes to these Terminal-launched programs; restart them after changing permissions. Then start the foreground host yourself:
+This only reads existing permission status. Missing Screen Recording returns a nonzero status. When you choose to test with both machines, grant Screen Recording yourself under **System Settings  Privacy & Security  Screen & System Audio Recording** (wording may vary). Grant **Accessibility** only if you want remote control. Verify the identity macOS attributes to these Terminal-launched programs; restart them after changing permissions. Then start the foreground host yourself:
 
 ```sh
 ./MacDowHost --listen YOUR_PRIVATE_MAC_IPV4:4433
@@ -80,3 +80,15 @@ The manual [native build workflow](.github/workflows/native-build.yml) requires 
 Unsigned/developer-unsigned and not notarized. No signing identities or certificates have been configured. If OS security blocks an artifact, keep protection enabled and use a trusted source build or wait for a properly signed distribution.
 
 See [protocol](docs/protocol.md), [architecture](docs/design.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Updates (alpha.3)
+
+On Windows, open **Updates** from the tab strip or App Priority toolbar. Checks run at startup and every six hours while open; the dialog can disable automatic checking and choose stable/preview. **Update** downloads to staging only. On the Mac, run `./MacDowHost --updates` for the foreground Check/Update/Apply/Rollback console; `--update-check` checks once, and `--no-update-check` disables the normal host startup check. No listener or capture starts in update-only mode.
+
+Private downloads use an **already authenticated GitHub CLI** with access to this repository. MAC-DOW never requests, embeds, logs or stores a token. Without existing access, it reports the manual private-release path. GitHub CLI 2.93.0+ is required for signature verification because older versions are affected by [GHSA-8xvp-7hj6-mcj9](https://github.com/cli/cli/security/advisories/GHSA-8xvp-7hj6-mcj9). Nothing is installed or authenticated automatically.
+
+Version/channel/platform/architecture, fixed private repository identity, exact asset, SHA-256, bounded extraction and commit identity are checked. Automatic **Apply** additionally requires [GitHub's signed release attestation](https://cli.github.com/manual/gh_release_verify-asset). Current releases have no such attestation, so Apply is disabled; authenticated download/staging and manual review remain available. A checksum alone is not presented as a signature. No repository security setting, certificate or signing credential was changed.
+
+For a future attested release, Apply requires a separate confirmation, waits for the Windows app to exit, revalidates, swaps a recognized portable installation and keeps the previous folder. Relaunch is opt-in and reopens view-only; it never restarts capture/control. Settings live outside the installation. A detached worker result is saved and shown the next time Updates opens. Failed swaps attempt immediate restoration and report recovery-needed when restoration fails.
+
+Explicit rollback downloads and verifies the older published release again, preserving external settings. It requires network/private access and signed provenance for that older version; it never executes an editable cached backup based on journal hashes. Unattested old versions retain a **manual recovery folder only**. Root folders, development checkouts and linked install/cache paths are refused. No installed user application was replaced during testing.

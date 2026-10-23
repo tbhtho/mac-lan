@@ -19,5 +19,8 @@ artifacts/macos-arm64/MacDowHost --self-test
 cp README.md LICENSE THIRD_PARTY_NOTICES.md artifacts/macos-arm64/
 cp -R licenses artifacts/macos-arm64/
 if command -v git >/dev/null && git rev-parse HEAD >/dev/null 2>&1; then git rev-parse HEAD > artifacts/macos-arm64/COMMIT.txt; fi
+version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' host/internal/updater/config.json)"
+[[ -n "$version" ]] || { echo "Missing update build version" >&2; exit 1; }
+printf '{"product":"MAC-DOW","repositoryId":1430459188,"version":"%s","os":"darwin","arch":"arm64"}\n' "$version" > artifacts/macos-arm64/MAC-DOW-INSTALL.json
 (cd artifacts && tar -czf MAC-DOW-macos-arm64-unsigned.tar.gz macos-arm64)
 echo "Native build + non-capturing self-tests passed. This is unsigned/not notarized; real capture/control remain untested."

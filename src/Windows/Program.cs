@@ -4,6 +4,7 @@ internal static class Program
 {
     [STAThread] static void Main(string[] args)
     {
+        if(args.Contains("--update-check")){Console.WriteLine(UpdateProcess.Call("check","--channel","preview").GetAwaiter().GetResult().GetRawText());return;}
         if(args.Contains("--diagnostics"))
         {
             string runtime;try{runtime=Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString();}catch(Exception e){runtime="Unavailable: "+e.Message;}
