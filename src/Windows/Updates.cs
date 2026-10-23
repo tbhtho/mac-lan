@@ -20,14 +20,19 @@ internal sealed class UpdatePreferences
         try { var p=JsonSerializer.Deserialize<UpdatePreferences>(File.ReadAllText(PathName))??new();if(p.Channel is not ("stable" or "preview"))p.Channel="preview";return p; }
         catch(IOException){return new();}catch(JsonException){return new();}catch(UnauthorizedAccessException){return new();}
     }
-    public void Save(){Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);File.WriteAllText(PathName,JsonSerializer.Serialize(this));}
+    public void Save(){Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);string temporary=PathName+"."+Guid.NewGuid().ToString("N")+".tmp";try{File.WriteAllText(temporary,JsonSerializer.Serialize(this));File.Move(temporary,PathName,true);}finally{if(File.Exists(temporary))File.Delete(temporary);}}
 }
 internal static class UpdateProcess
 {
-    internal static string Helper => Path.Combine(AppContext.BaseDirectory,"MAC-DOW-Update.exe");
+    static readonly SemaphoreSlim operations=new(1,1);
+    internal static string Helper => Payloads.Helper;
     internal static async Task<JsonElement> Call(params string[] arguments)
     {
-        if(!File.Exists(Helper))throw new InvalidOperationException("Update helper is missing. Extract the complete Windows release ZIP. Manual private releases: https://github.com/tbhtho/MAC-DOW/releases");
+        await operations.WaitAsync();try{return await CallCore(arguments);}finally{operations.Release();}
+    }
+    static async Task<JsonElement> CallCore(string[] arguments)
+    {
+        if(!File.Exists(Helper))throw new InvalidOperationException("This development build has no bundled update helper. Use a packaged MAC-DOW.exe.");
         var start=new ProcessStartInfo(Helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(string argument in arguments)start.ArgumentList.Add(argument);
         using var process=Process.Start(start)??throw new IOException("Cannot start update helper.");
@@ -39,6 +44,27 @@ internal static class UpdateProcess
         string text=await output;_ = await errors;
         if(text.Length>2*1024*1024)throw new InvalidDataException("Updater output exceeded limit.");
         using var doc=JsonDocument.Parse(text);return doc.RootElement.Clone();
+    }
+    internal static async Task<JsonElement> DownloadAvailable(UpdatePreferences preferences)
+    {
+        var check=await Call("check","--channel",preferences.Channel);
+        if(!check.TryGetProperty("status",out var status)||status.GetString()!="available")return check;
+        if(preferences.Stage is string existing&&Directory.Exists(existing))
+        {
+            try
+            {
+                using var saved=JsonDocument.Parse(File.ReadAllText(Path.Combine(existing,"stage.json")));
+                if(saved.RootElement.GetProperty("plan").GetProperty("tag").GetString()==check.GetProperty("plan").GetProperty("tag").GetString())
+                    return JsonSerializer.SerializeToElement(new{ok=true,status="staged",message=saved.RootElement.GetProperty("message").GetString(),stage=saved.RootElement.Clone()});
+            }
+            catch(Exception e)when(e is IOException or JsonException or InvalidOperationException or KeyNotFoundException){}
+        }
+        var result=await Call("stage","--channel",preferences.Channel);
+        if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("stage",out var stage))
+        {
+            var latest=UpdatePreferences.Load();latest.Stage=stage.GetProperty("directory").GetString();latest.Save();
+        }
+        return result;
     }
     internal static void StartDetached(string[] arguments)
     {
@@ -55,9 +81,9 @@ internal sealed class UpdateDialog : Window
     readonly UpdatePreferences preferences;
     readonly TextBlock description=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,10)};
     readonly ComboBox channel=new(){ItemsSource=new[]{"stable","preview"},Width=160,HorizontalAlignment=HorizontalAlignment.Left};
-    readonly CheckBox automatic=new(){Content="Check automatically while MAC-DOW is open",Margin=new Thickness(0,10,0,10)};
-    readonly CheckBox relaunch=new(){Content="Reopen MAC-DOW after a verified apply/rollback",Margin=new Thickness(0,10,0,10)};
-    readonly Button apply=new(){Content="Apply verified update",IsEnabled=false,Margin=new Thickness(0,6,0,6)};
+    readonly CheckBox automatic=new(){Content="Download updates automatically while MAC-DOW is open",Margin=new Thickness(0,10,0,10)};
+    readonly CheckBox relaunch=new(){Content="Reopen MAC-DOW after updating",IsChecked=true,Margin=new Thickness(0,10,0,10)};
+    readonly Button apply=new(){Content="Restart to update",IsEnabled=false,Margin=new Thickness(0,6,0,6)};
     readonly Action shutdown;
     readonly StackPanel actions=new();
     string? stage;
@@ -74,7 +100,7 @@ internal sealed class UpdateDialog : Window
         channel.SelectedItem=preferences.Channel;content.Children.Add(channel);automatic.IsChecked=preferences.Automatic;content.Children.Add(automatic);
         content.Children.Add(description);content.Children.Add(actions);
         Add("Check now",Check);
-        Add("Update - download and verify to staging",StageUpdate);
+        Add("Download update now",StageUpdate);
         apply.Click+=async(_,_)=>await Run(Apply);actions.Children.Add(apply);
         Add("Open staged files (manual review)",()=>{if(stage!=null&&Directory.Exists(stage))Process.Start(new ProcessStartInfo("explorer.exe"){ArgumentList={stage},UseShellExecute=false});return Task.CompletedTask;});
         Add("Rollback to previous signed release",Rollback);
@@ -97,7 +123,16 @@ internal sealed class UpdateDialog : Window
         if(result.TryGetProperty("version",out var v))description.Text="Current "+v.GetString()+"\n"+description.Text;
         if(result.TryGetProperty("plan",out var plan))description.Text+="\nAvailable "+plan.GetProperty("tag").GetString();
     }
-    async Task Check(){Save();var result=await UpdateProcess.Call("check","--channel",preferences.Channel);Describe(result);apply.IsEnabled=false;}
+    async Task Check()
+    {
+        Save();var result=await UpdateProcess.Call("check","--channel",preferences.Channel);Describe(result);apply.IsEnabled=false;
+        stage=preferences.Stage;
+        if(stage!=null&&Directory.Exists(stage))
+        {
+            var ready=await UpdateProcess.Call("preflight","--stage",stage,"--install",Payloads.Install);
+            if(ready.GetProperty("ok").GetBoolean()){tag=ready.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString();apply.IsEnabled=true;description.Text="Update "+tag+" is downloaded and verified. Restart when you are ready.";}
+        }
+    }
     async Task StageUpdate()
     {
         Save();apply.IsEnabled=false;var result=await UpdateProcess.Call("stage","--channel",preferences.Channel);Describe(result);
@@ -110,12 +145,12 @@ internal sealed class UpdateDialog : Window
     async Task Apply()
     {
         if(stage==null||tag==null)return;
-        var result=await UpdateProcess.Call("preflight","--stage",stage,"--install",AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
+        var result=await UpdateProcess.Call("preflight","--stage",stage,"--install",Payloads.Install);
         if(!result.GetProperty("ok").GetBoolean()){Describe(result);apply.IsEnabled=false;return;}
         string restart=relaunch.IsChecked==true?"MAC-DOW will reopen in view-only mode.":"Reopen MAC-DOW yourself afterwards.";
         if(MessageBox.Show(this,"Apply "+tag+"? MAC-DOW will close. The update is reverified, the previous folder is retained for rollback, and external settings are preserved. "+restart,"Confirm update",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes){description.Text="Apply cancelled.";return;}
         preferences.Journal=Path.Combine(stage,"transaction.json");preferences.ResultFile=Path.Combine(stage,"worker-result.json");preferences.Save();
-        var args=new List<string>{"apply","--stage",stage,"--install",AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar),"--wait-pid",Environment.ProcessId.ToString(),"--confirm","APPLY "+tag,"--result-file",preferences.ResultFile!};
+        var args=new List<string>{"apply","--stage",stage,"--install",Payloads.Install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","APPLY "+tag,"--result-file",preferences.ResultFile!};
         if(relaunch.IsChecked==true)args.Add("--relaunch");
         UpdateProcess.StartDetached(args.ToArray());Close();shutdown();
     }
@@ -123,7 +158,7 @@ internal sealed class UpdateDialog : Window
     {
         string? journal=preferences.Journal;
         if(journal==null||!File.Exists(journal)){description.Text="No applied update is recorded. Nothing changed.";return;}
-        string install=AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+        string install=Payloads.Install;
         var result=await UpdateProcess.Call("rollback-preflight","--journal",journal,"--install",install);
         Describe(result);
         if(!result.GetProperty("ok").GetBoolean())return;

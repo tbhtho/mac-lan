@@ -29,6 +29,11 @@ public static class Pairing
         byte[] b=ip.GetAddressBytes();
         return b.Length==4 && (b[0]==10 || b[0]==172 && b[1]>=16 && b[1]<=31 || b[0]==192 && b[1]==168);
     }
+    public static string IdentityCode(string fingerprint)
+    {
+        if(fingerprint.Length!=64||!fingerprint.All(Uri.IsHexDigit))throw new ArgumentException("Invalid fingerprint");
+        return string.Join("-",Enumerable.Range(0,8).Select(i=>fingerprint.Substring(i*4,4).ToUpperInvariant()));
+    }
     public static bool Validate(string host,string port,string fingerprint,string token) =>
         IPAddress.TryParse(host,out var ip) && IsPrivate(ip) && int.TryParse(port,out var p) && p>0 && p<=65535 &&
         fingerprint.Length==64 && token.Length==64 && fingerprint.All(Uri.IsHexDigit) && token.All(Uri.IsHexDigit);

@@ -32,6 +32,8 @@ type Marker struct {
 	Version      string `json:"version"`
 	OS           string `json:"os"`
 	Arch         string `json:"arch"`
+	Commit       string `json:"commit,omitempty"`
+	Layout       string `json:"layout,omitempty"`
 }
 type Transaction struct {
 	Install         string            `json:"install"`
@@ -184,6 +186,9 @@ func (e *Engine) extractChecked(archive string, p Plan, dest string) error {
 	if err = CheckDigest(f, p.Asset.Size, p.Asset.Digest); err != nil {
 		return err
 	}
+	if standalonePlan(p) {
+		return copyStandalone(f, dest)
+	}
 	ext := ".zip"
 	if p.OS == "darwin" {
 		ext = ".tar.gz"
@@ -191,7 +196,13 @@ func (e *Engine) extractChecked(archive string, p Plan, dest string) error {
 	return Extract(f, p.Asset.Size, ext, dest) // same open handle used for hash and extraction
 }
 func payloadRoot(base string, p Plan) string {
+	if standalonePlan(p) {
+		return filepath.Join(base, "MAC-DOW.exe")
+	}
 	if p.OS == "darwin" {
+		if info, err := os.Lstat(appBundle(base)); err == nil && info.IsDir() {
+			return appBundle(base)
+		}
 		return filepath.Join(base, "macos-arm64")
 	}
 	return base
@@ -199,15 +210,33 @@ func payloadRoot(base string, p Plan) string {
 func (e *Engine) validatePayload(base string, p Plan) error {
 	root := payloadRoot(base, p)
 	var m Marker
-	if err := readJSON(filepath.Join(root, "MAC-DOW-INSTALL.json"), &m); err != nil {
+	if standalonePlan(p) {
+		var err error
+		m, err = ReadPackageIdentity(root)
+		if err != nil {
+			return err
+		}
+		if m.Commit != p.Commit {
+			return errors.New("payload commit mismatch")
+		}
+	} else if err := readJSON(filepath.Join(metadataRoot(root), "MAC-DOW-INSTALL.json"), &m); err != nil {
 		return errors.New("missing install identity")
 	}
 	if m.Product != "MAC-DOW" || m.RepositoryID != BuildConfig().RepositoryID || m.Version != p.Version || m.OS != e.OS || m.Arch != e.Arch {
 		return errors.New("payload identity/version/platform mismatch")
 	}
+	if standalonePlan(p) {
+		return nil
+	}
 	names := []string{"MAC-DOW.exe", "MAC-DOW-Update.exe"}
 	if e.OS == "darwin" {
 		names = []string{"MacDowHost", "MacDowCapture"}
+		if isApp(root) {
+			names = []string{"Contents/MacOS/MAC-DOW Host", "Contents/Helpers/MacDowHost", "Contents/Helpers/MacDowCapture"}
+			if i, err := os.Lstat(filepath.Join(root, "Contents", "Info.plist")); err != nil || !i.Mode().IsRegular() {
+				return errors.New("missing app Info.plist")
+			}
+		}
 	}
 	for _, n := range names {
 		i, err := os.Lstat(filepath.Join(root, n))
@@ -215,7 +244,7 @@ func (e *Engine) validatePayload(base string, p Plan) error {
 			return errors.New("missing regular platform executable")
 		}
 	}
-	b, err := os.ReadFile(filepath.Join(root, "COMMIT.txt"))
+	b, err := os.ReadFile(filepath.Join(metadataRoot(root), "COMMIT.txt"))
 	if err != nil || strings.TrimSpace(string(b)) != p.Commit {
 		return errors.New("payload commit mismatch")
 	}
@@ -306,6 +335,19 @@ func (e *Engine) installIdentity(install string) error {
 	if abs == filepath.Dir(abs) {
 		return errors.New("cannot update filesystem root")
 	}
+	if info, er := os.Lstat(abs); er == nil && info.Mode().IsRegular() && e.OS == "windows" {
+		if err = rejectLinks(filepath.Dir(abs), false); err != nil {
+			return err
+		}
+		m, er := ReadPackageIdentity(abs)
+		if er != nil {
+			return er
+		}
+		if m.Product != "MAC-DOW" || m.RepositoryID != BuildConfig().RepositoryID || m.OS != e.OS || m.Arch != e.Arch || m.Version != e.Current {
+			return errors.New("standalone product/version/platform mismatch")
+		}
+		return nil
+	}
 	if _, err = os.Lstat(filepath.Join(abs, ".git")); err == nil {
 		return errors.New("development checkout cannot be replaced")
 	}
@@ -316,7 +358,7 @@ func (e *Engine) installIdentity(install string) error {
 		}
 	}
 	var m Marker
-	if err = readJSON(filepath.Join(abs, "MAC-DOW-INSTALL.json"), &m); err != nil {
+	if err = readJSON(filepath.Join(metadataRoot(abs), "MAC-DOW-INSTALL.json"), &m); err != nil {
 		return errors.New("unrecognized portable install; use manual update")
 	}
 	if m.Product != "MAC-DOW" || m.RepositoryID != BuildConfig().RepositoryID || m.OS != e.OS || m.Arch != e.Arch || m.Version != e.Current {
@@ -426,6 +468,7 @@ func (e *Engine) Apply(ctx context.Context, dir, install, confirmation string, r
 		return "", err
 	}
 	next := payloadRoot(candidate, s.Plan)
+	if err=compatibleInstallShape(install,next,e.OS);err!=nil{return "",err}
 	hashes, err := treeHashes(install)
 	if err != nil {
 		return "", err
@@ -495,7 +538,11 @@ func (e *Engine) PrepareRollback(ctx context.Context, journal, install string) (
 	if t.State != "applied" && t.State != "prepared" && t.State != "failed-recovery-needed" {
 		return Stage{}, errors.New("transaction is not rollbackable")
 	}
-	if err = rejectLinks(abs, true); err != nil {
+	checkPath := abs
+	if info, er := os.Lstat(abs); er == nil && info.Mode().IsRegular() {
+		checkPath = filepath.Dir(abs)
+	}
+	if err = rejectLinks(checkPath, true); err != nil {
 		return Stage{}, err
 	}
 	if _, err = os.Lstat(abs); err == nil {
@@ -551,6 +598,7 @@ func (e *Engine) Rollback(ctx context.Context, journal, install, confirmation st
 		return err
 	}
 	next := payloadRoot(candidate, s.Plan)
+	if _,er:=os.Lstat(install);er==nil {if err=compatibleInstallShape(install,next,e.OS);err!=nil{return err}}
 	if _, err = os.Lstat(install); os.IsNotExist(err) {
 		err = os.Rename(next, install)
 	} else if err == nil {

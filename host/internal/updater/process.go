@@ -9,20 +9,27 @@ import (
 )
 
 func launch(root, goos string) error {
+	program, args := launchCommand(root, goos)
+	c := exec.Command(program, args...)
+	quietCommand(c)
+	return c.Start()
+}
+func launchCommand(root, goos string) (string, []string) {
+	if goos == "darwin" && isApp(root) {
+		return "/usr/bin/open", []string{root}
+	}
+	if goos == "windows" {
+		if i, err := os.Stat(root); err == nil && i.Mode().IsRegular() {
+			return root, nil
+		}
+	}
 	name := "MAC-DOW.exe"
 	var args []string
 	if goos == "darwin" {
 		name = "MacDowHost"
 		args = []string{"--updates"}
 	}
-	c := exec.Command(filepath.Join(root, name), args...)
-	quietCommand(c)
-	if goos == "darwin" {
-		c.Stdin = os.Stdin
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-	}
-	return c.Start()
+	return filepath.Join(root, name), args
 }
 func WaitParent(pid int) error {
 	if pid == 0 {

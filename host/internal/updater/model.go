@@ -179,9 +179,18 @@ func Select(releases []Release, current, channel, goos, arch string) (Plan, erro
 		}
 		var chosen *Asset
 		duplicate := false
+		selectedName := name
+		if goos == "windows" {
+			for _, a := range r.Assets {
+				if a.Name == "MAC-DOW.exe" {
+					selectedName = "MAC-DOW.exe"
+					break
+				}
+			}
+		}
 		for i := range r.Assets {
 			a := &r.Assets[i]
-			if a.Name == name {
+			if a.Name == selectedName {
 				if chosen != nil {
 					duplicate = true
 				}

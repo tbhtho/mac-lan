@@ -4,6 +4,7 @@ internal static class Program
 {
     [STAThread] static void Main(string[] args)
     {
+        if(args.Contains("--package-diagnostics")){Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Payloads.Diagnose()));return;}
         if(args.Contains("--update-check")){Console.WriteLine(UpdateProcess.Call("check","--channel","preview").GetAwaiter().GetResult().GetRawText());return;}
         if(args.Contains("--diagnostics"))
         {

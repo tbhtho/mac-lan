@@ -113,12 +113,18 @@ func identity() (tls.Certificate, string, error) {
 }
 
 type server struct {
-	token       string
-	peerAllowed func(string) bool
-	slot        chan struct{}
-	catalog     func() ([]window, error)
-	consent     func(start) bool
-	stream      func(func([]byte), func(string), <-chan input) error
+	token        string
+	peerAllowed  func(string) bool
+	slot         chan struct{}
+	catalog      func() ([]window, error)
+	consent      func(start) bool
+	pair         func(string, string) bool
+	prompts      promptLimit
+	connectionMu sync.Mutex
+	active       *websocket.Conn
+	activeDone   chan struct{}
+	stopped      bool
+	stream       func(func([]byte), func(string), <-chan input) error
 	// selected is only accessed while slot is held.
 	selected start
 }
@@ -145,11 +151,37 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer c.Close()
+	s.connectionMu.Lock()
+	if s.stopped {
+		s.connectionMu.Unlock()
+		c.Close()
+		return
+	}
+	doneConnection := make(chan struct{})
+	s.active = c
+	s.activeDone = doneConnection
+	s.connectionMu.Unlock()
+	defer func() {
+		c.Close()
+		s.connectionMu.Lock()
+		s.active = nil
+		s.activeDone = nil
+		close(doneConnection)
+		s.connectionMu.Unlock()
+	}()
 	c.SetReadLimit(4096)
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var auth struct{ Type, Token string }
-	if c.ReadJSON(&auth) != nil || auth.Type != "auth" || len(auth.Token) != 64 || subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) != 1 {
+	var auth struct{ Type, Token, Code string }
+	if c.ReadJSON(&auth) != nil {
+		return
+	}
+	authenticated := false
+	if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 {
+		authenticated = subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1
+	} else if auth.Type == "pair" && s.pair != nil && validPairNumber(auth.Code) && s.prompts.allow(time.Now()) {
+		authenticated = s.pair(peer, auth.Code)
+	}
+	if !authenticated {
 		return
 	}
 	windows, err := s.catalog()
@@ -258,5 +290,21 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = s.stream(send, report, events)
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		report("Capture stopped: " + err.Error())
+	}
+}
+
+func (s *server) stopActive() {
+	s.connectionMu.Lock()
+	s.stopped = true
+	c, done := s.active, s.activeDone
+	s.connectionMu.Unlock()
+	if c != nil {
+		c.Close()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
