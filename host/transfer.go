@@ -159,7 +159,7 @@ func (t *transferReceiver) serveHTTP(w http.ResponseWriter, r *http.Request, pee
 		cancel()
 	}
 	if err := secureTransferRoot(t.root); err != nil {
-		transferError(w, http.StatusInternalServerError, "The Mac could not prepare Downloads/MAC-DOW.")
+		transferError(w, http.StatusInternalServerError, "The Mac could not prepare Downloads/mac-lan.")
 		return
 	}
 	stage, err := os.CreateTemp(t.root, ".macdow-transfer-*")

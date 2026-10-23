@@ -104,6 +104,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var quality = 0.7
     var encodeStart: TimeInterval = 0
     var width = 0, height = 0, fps = 60, bitrate = 8
+    var forceKeyframe = false
 
     func start(id: CGWindowID, maxWidth: Int, fps: Int, quality: Int, codec: String, bitrate: Int) async throws {
         self.windowID = id; self.fps = fps; self.quality = Double(quality)/100; self.mode = codec; self.bitrate = bitrate
@@ -168,8 +169,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             kVTCompressionPropertyKey_AllowFrameReordering: false,
             kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_Baseline_AutoLevel,
             kVTCompressionPropertyKey_ExpectedFrameRate: fps,
-            kVTCompressionPropertyKey_MaxKeyFrameInterval: max(1,fps/2),
-            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 0.5,
+            // Windows requests a keyframe when it needs one; periodic keyframes are only a backup,
+            // because each one is a burst many times a normal frame.
+            kVTCompressionPropertyKey_MaxKeyFrameInterval: max(1,fps*2),
+            kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 2.0,
             kVTCompressionPropertyKey_AverageBitRate: bitrate*1_000_000,
             kVTCompressionPropertyKey_MaxFrameDelayCount: 1
         ]
@@ -206,9 +209,11 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         stateLock.lock()
         guard view, !inFlight else { stateLock.unlock(); return }
         inFlight = true; encodeStart = now()
+        let force = forceKeyframe; forceKeyframe = false
         stateLock.unlock()
         if mode == "h264", let encoder {
-            let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer), duration: .invalid, frameProperties: nil, sourceFrameRefcon: nil, infoFlagsOut: nil)
+            let options: CFDictionary? = force ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue!] as CFDictionary : nil
+            let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer), duration: .invalid, frameProperties: options, sourceFrameRefcon: nil, infoFlagsOut: nil)
             if result != noErr { stateLock.lock(); inFlight=false; stateLock.unlock(); status("Video encode failed: \(result)",paused:true) }
         } else {
             defer { stateLock.lock(); inFlight = false; stateLock.unlock() }
@@ -348,7 +353,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         lastControlState=state
         let message:String
         switch code {
-        case "accessibility-missing": message="Allow MAC-DOW in System Settings > Privacy & Security > Accessibility, then click the Mac desktop again."
+        case "accessibility-missing": message="Allow mac-lan in System Settings > Privacy & Security > Accessibility, then click the Mac desktop again."
         case "scope-blocked": message="Control paused: return to the selected Mac window, then click its view again."
         case "ready": message="Mac control active."
         case "view-only": message="Click the Mac desktop to control it."
@@ -358,6 +363,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     func input(_ m:[String:Any],received:TimeInterval) {
         guard let type=m["type"] as? String else { return }
+        if type == "keyframe" { stateLock.lock();forceKeyframe=true;stateLock.unlock();return }
         if type == "release" { revokedGeneration=currentGeneration;releaseAll();reportControl("view-only",permission:AXIsProcessTrusted());return }
         if type == "lease" {
             watchdogGrace=received
@@ -471,7 +477,7 @@ if args.contains("--self-test") {
     exit(0)
 }
 if args.contains("--check") { exit(existingPermissions() ? 0 : 2) }
-guard existingPermissions() else { die("Grant Screen Recording yourself in System Settings before starting; MAC-DOW does not request it") }
+guard existingPermissions() else { die("Grant Screen Recording yourself in System Settings before starting; mac-lan does not request it") }
 if args.contains("--list") {
     Task {
         do { let c=try await shareable();let rows:[[String:Any]]=c.windows.filter{$0.isOnScreen && $0.frame.width>40 && $0.frame.height>40 && !($0.title ?? "").isEmpty}.prefix(200).map { ["id":$0.windowID,"title":String(($0.title ?? "").prefix(160)),"app":String(($0.owningApplication?.applicationName ?? "Mac app").prefix(100))] };let data=try JSONSerialization.data(withJSONObject:rows);try FileHandle.standardOutput.write(contentsOf:data);exit(0) }

@@ -168,7 +168,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	if err != nil {
 		return errors.New("Cannot locate the Mac Downloads folder")
 	}
-	s.transfers = newTransferReceiver(filepath.Join(userHome, "Downloads", "MAC-DOW"))
+	s.transfers = newTransferReceiver(filepath.Join(userHome, "Downloads", "mac-lan"))
 	s.videoError = videoError
 	s.catalog = func() ([]window, error) {
 		if videoError != "" {
@@ -208,13 +208,13 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	}
 	if gui {
 		s.pair = func(peer, code string) bool {
-			return broker.ask("pair", map[string]any{"peer": peer, "code": code, "message": "Pairing lets this PC send files to Downloads/MAC-DOW. Viewing needs separate approval."}, 45*time.Second)
+			return broker.ask("pair", map[string]any{"peer": peer, "code": code, "message": "Allowing lets this PC send files to Downloads/mac-lan and view this screen until sharing stops. Keyboard and mouse stay off until you click the Mac view on Windows."}, 45*time.Second)
 		}
 	} else {
 		s.pair = func(peer, code string) bool {
 			fmt.Printf("Windows pairing request: %s. Compare this number on Windows.\n", code)
 			if !terminalConsent {
-				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nPairing lets this PC send files to Downloads/MAC-DOW. Only allow the request you started. Viewing needs a separate approval.")
+				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nAllowing lets this PC send files to Downloads/mac-lan and view this screen until sharing stops. Only allow the request you started.")
 			}
 			fmt.Print("Type ALLOW to approve this pairing request: ")
 			return scanner.Scan() && scanner.Text() == "ALLOW"

@@ -18,7 +18,7 @@ internal static class UpdateDownload
             var cached=await call(new[]{"preflight","--stage",existingStage,"--install",install});
             if(Ready(cached,tag))return cached;
         }
-        progress?.Invoke("Downloading "+tag+"… You can keep using MAC-DOW.");
+        progress?.Invoke("Downloading "+tag+"… You can keep using mac-lan.");
         var download=await call(new[]{"stage","--channel",channel});
         if(!IsOK(download)||!download.TryGetProperty("stage",out var stage))return download;
         string directory=stage.GetProperty("directory").GetString()??throw new InvalidOperationException("Update helper returned no download location.");

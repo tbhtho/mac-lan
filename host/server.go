@@ -25,7 +25,7 @@ import (
 
 const maxFrame = 4 << 20
 
-var errInvalidStart = errors.New("Choose a Mac desktop or window at 60 fps. Update both MAC-DOW apps if needed")
+var errInvalidStart = errors.New("Choose a Mac desktop or window at 60 fps. Update both mac-lan apps if needed")
 
 type window struct {
 	ID    uint32 `json:"id"`
@@ -109,6 +109,20 @@ type input struct {
 	Reason     string  `json:"reason,omitempty"`
 }
 
+func (s *server) approve(peer string) {
+	s.approvedMu.Lock()
+	defer s.approvedMu.Unlock()
+	if s.approved == nil {
+		s.approved = map[string]bool{}
+	}
+	s.approved[peer] = true
+}
+func (s *server) viewApproved(peer string) bool {
+	s.approvedMu.Lock()
+	defer s.approvedMu.Unlock()
+	return s.approved[peer]
+}
+
 func (e input) valid() bool {
 	if e.Reason != "" && (e.Type != "release" || !diagnostics.ValidControlReleaseReason(e.Reason)) {
 		return false
@@ -116,6 +130,8 @@ func (e input) valid() bool {
 	switch e.Type {
 	case "lease", "release":
 		return e.Generation < 9007199254740992
+	case "keyframe":
+		return true
 	case "key":
 		return e.Code >= 0 && e.Code <= 126
 	case "move":
@@ -154,11 +170,14 @@ func identity() (tls.Certificate, string, error) {
 }
 
 type server struct {
-	token        string
-	peerAllowed  func(string) bool
-	slot         chan struct{}
-	catalog      func() ([]window, error)
-	consent      func(start) bool
+	token       string
+	peerAllowed func(string) bool
+	slot        chan struct{}
+	catalog     func() ([]window, error)
+	consent     func(start) bool
+	// Peers approved during this sharing session; pairing approval also allows viewing.
+	approvedMu   sync.Mutex
+	approved     map[string]bool
 	pair         func(string, string) bool
 	prompts      promptLimit
 	connectionMu sync.Mutex
@@ -228,6 +247,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authenticated = subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1
 	} else if auth.Type == "pair" && s.pair != nil && validPairNumber(auth.Code) && s.prompts.allow(time.Now()) {
 		authenticated = s.pair(peer, auth.Code)
+		if authenticated {
+			s.approve(peer)
+		}
 	}
 	if !authenticated {
 		diagnostics.Emit("mac", "pairing-denied", "not-approved", nil)
@@ -251,12 +273,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		windows = nil
-		videoError = "Mac video is unavailable. File transfers are ready. Check the Mac's Screen Recording permission and restart MAC-DOW."
+		videoError = "Mac video is unavailable. File transfers are ready. Check the Mac's Screen Recording permission and restart mac-lan."
 	}
 	if windows == nil {
 		windows = []window{}
 	}
-	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows}
+	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows, "keyframes": true}
 	if transferToken != "" {
 		catalog["transferToken"] = transferToken
 	}
@@ -290,12 +312,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	diagnostics.Emit("mac", "stream-request", "ok", map[string]int{"width": request.Width, "fps": request.FPS})
-	if !s.consent(request) {
+	if !s.viewApproved(peer) && !s.consent(request) {
 		diagnostics.Emit("mac", "stream-denied", "not-approved", nil)
 		_ = c.WriteJSON(map[string]string{"type": "error", "message": "Mac user did not consent"})
 		return
 	}
 	diagnostics.Emit("mac", "stream-approved", "ok", map[string]int{"width": request.Width, "fps": request.FPS})
+	s.approve(peer)
 	s.selected = request
 	if err = c.WriteJSON(map[string]string{"type": "ready"}); err != nil {
 		return

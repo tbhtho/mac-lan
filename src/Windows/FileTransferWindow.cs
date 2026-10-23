@@ -27,7 +27,7 @@ internal sealed class FileTransferWindow : Window
     {
         this.session=session;Title="mac-lan · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;Glass.Apply(this);
         var layout=new Grid{Margin=new Thickness(28)};layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new());layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
-        var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Send to your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Files, ZIPs and folders go to Downloads/MAC-DOW on your Mac.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
+        var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Send to your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Files, ZIPs and folders go to Downloads/mac-lan on your Mac.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};
         Button Action(string text,Action action){var button=new Button{Content=text,Margin=new Thickness(0,0,8,0),Padding=new Thickness(14,8,14,8)};button.Click+=(_,_)=>action();return button;}
         addFiles=Action("Add files",ChooseFiles);addFolder=Action("Add folder",ChooseFolder);remove=Action("Remove",()=>{if(items.SelectedItem!=null)items.Items.Remove(items.SelectedItem);Refresh();});
@@ -90,9 +90,9 @@ internal sealed class FileTransferWindow : Window
                     if(closed)return;progress.Value=p.Total==0?100:100d*p.Sent/p.Total;
                     message.Text=$"Sending {sent+1} of {total}: {item.Name}\n{Size(p.Sent)} of {Size(p.Total)}";
                 }),cancellation.Token);
-                items.Items.RemoveAt(0);sent++;message.Text=$"Saved {receipt.Name} to Downloads/MAC-DOW on your Mac.";
+                items.Items.RemoveAt(0);sent++;message.Text=$"Saved {receipt.Name} to Downloads/mac-lan on your Mac.";
             }
-            progress.Value=100;message.Text=$"{sent} item{(sent==1?"":"s")} saved to Downloads/MAC-DOW on your Mac.";
+            progress.Value=100;message.Text=$"{sent} item{(sent==1?"":"s")} saved to Downloads/mac-lan on your Mac.";
         }
         catch(OperationCanceledException){message.Text=session.IsPaired?"Transfer cancelled. Your originals stay on this PC.":"Your Mac disconnected. Reconnect, then open Files again.";}
         catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or HttpRequestException or System.Text.Json.JsonException or ArgumentException)

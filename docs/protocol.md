@@ -16,3 +16,14 @@ One controller; private IPv4 interface/peers only; no Origin header allowed; JSO
 10. Native control status uses {"type":"controlStatus","code":"view-only","controlPermission":true,"active":false}. Codes are fixed labels for view-only, active control, missing Accessibility and revoked/expired/stale/scope-blocked leases. Permission checks continue on inactive leases, so a deliberate grant can restore the click-to-control action. Only the code and boolean permission/control counts enter Mac diagnostics. The first left click in live remote pixels requests local arming and consumes the gesture; no pointer/key data is routed before arming, fresh video and focus checks. Losing focus/cancelling the activation gesture releases control.
 
 TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmission; no claim of WebRTC/UDP behavior. Write deadlines, encoder gating, newest-frame queues and sequence recovery prevent unbounded app queues, but OS socket buffers still exist. Input travels in the opposite TCP direction; future WebRTC/DTLS-SRTP would improve behavior under loss after measured baseline. No STUN/TURN/cloud relay exists.
+
+## Alpha.22 additions
+
+- Approving a pairing request on the Mac also approves viewing for that Windows
+  address until sharing stops; a separate stream prompt appears only for a peer
+  that connected with a saved token and has not been approved in this session.
+- The catalog carries `"keyframes": true`. Windows may then send
+  `{"type":"keyframe"}` (rate-limited to one per 250 ms) when its decoder resets;
+  the capture helper forces the next encoded frame to be a keyframe. Periodic
+  keyframes are a 2-second backup. Windows never sends this to hosts without the
+  flag, because older hosts end the session on unknown input.

@@ -8,7 +8,7 @@ import (
 )
 
 const consentScript = `on run argv
- set answer to display dialog (item 1 of argv) with title "MAC-DOW" buttons {"Deny", "Allow"} default button "Deny" cancel button "Deny" giving up after 40
+ set answer to display dialog (item 1 of argv) with title "mac-lan" buttons {"Deny", "Allow"} default button "Deny" cancel button "Deny" giving up after 40
  if gave up of answer then return "Deny"
  return button returned of answer
 end run`

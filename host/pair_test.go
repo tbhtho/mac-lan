@@ -68,3 +68,33 @@ func TestMalformedPairNeverPrompts(t *testing.T) {
 		ts.Close()
 	}
 }
+
+func TestPairingApprovalAlsoAllowsViewing(t *testing.T) {
+	s := &server{token: strings.Repeat("b", 64), slot: make(chan struct{}, 1), peerAllowed: func(string) bool { return true },
+		pair:    func(string, string) bool { return true },
+		catalog: func() ([]window, error) { return []window{}, nil },
+		consent: func(start) bool { t.Error("viewing asked for a second approval after pairing"); return false },
+		stream:  func(func([]byte), func(string), <-chan input) error { return nil }}
+	ts := httptest.NewTLSServer(s)
+	defer ts.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(ts.Certificate())
+	d := websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots}}
+	c, _, err := d.Dial("wss"+strings.TrimPrefix(ts.URL, "https"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.WriteJSON(map[string]string{"type": "pair", "code": "123456"})
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, data, err := c.ReadMessage(); err != nil || !strings.Contains(string(data), `"keyframes":true`) {
+		t.Fatal("catalog must advertise keyframe requests", string(data), err)
+	}
+	c.WriteJSON(map[string]any{"type": "start", "window": 0, "fps": 60, "width": 1920, "quality": 70, "codec": "h264", "bitrate": 8})
+	if _, data, err := c.ReadMessage(); err != nil || !strings.Contains(string(data), "ready") {
+		t.Fatal("approved pairing did not start viewing", string(data), err)
+	}
+	if !s.viewApproved("127.0.0.1") {
+		t.Fatal("approval not remembered for this sharing session")
+	}
+}

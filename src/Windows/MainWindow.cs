@@ -59,7 +59,7 @@ internal sealed partial class MainWindow : Window
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
-        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");BuildSetup();
+        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;BuildSetup();
         keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
         gate.Released+=reason=>{keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
@@ -86,6 +86,13 @@ internal sealed partial class MainWindow : Window
         };
     }
     internal void Quit(){quitting=true;Close();}
+    long lastKeyframeRequest;
+    void RequestKeyframe()
+    {
+        long now=Environment.TickCount64;
+        if(session?.IsReady!=true||!session.SupportsKeyframes||now-lastKeyframeRequest<250)return;
+        lastKeyframeRequest=now;session.Send(new{type="keyframe"});
+    }
     Button MakeButton(string text,Action action){var b=new Button{Content=text,Margin=new Thickness(0,4,0,4),HorizontalAlignment=HorizontalAlignment.Left};b.Click+=(_,_)=>action();return b;}
     async void ShowFiles()
     {
@@ -170,7 +177,7 @@ internal sealed partial class MainWindow : Window
         if(connecting||paired)return;
         if(nearby.SelectedItem is not DiscoveredHost selected){pairingProgress.Text="Find and select your Mac first.";return;}
         string identity=Pairing.IdentityCode(selected.Fingerprint);
-        if(MessageBox.Show(this,"Does mac-lan Host on your Mac show this exact identity?\n\n"+identity+"\n\nCompare every group directly on the Mac before continuing. The network name alone is not proof.","Compare Mac identity",MessageBoxButton.YesNo,MessageBoxImage.Question,MessageBoxResult.No)!=MessageBoxResult.Yes)return;
+        if(!ConfirmDialog.Ask(this,"Is this your Mac?",identity,"Check that the mac-lan menu on your Mac shows this same Mac ID. The network name alone is not proof. Your Mac then asks once to allow the connection.","Continue"))return;
         connecting=true;Disconnect();
         pairButton.IsEnabled=false;pairButton.Content="Waiting for Mac...";nearby.IsEnabled=false;
         string number=System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000,1000000).ToString();
@@ -226,7 +233,7 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
-            remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");
+            remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
             appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
@@ -353,6 +360,7 @@ internal sealed class RemoteView : WebView2
     readonly Action<JsonElement> pointer;
     readonly Action<string> report;
     public event Action? VideoInvalidated;
+    public event Action? KeyframeNeeded;
     public long LastPresented{get;private set;}
     public string VideoStats{get;private set;}="waiting for video";
     public RemoteView(Action<JsonElement> pointer,Action<string> report)
@@ -401,8 +409,9 @@ internal sealed class RemoteView : WebView2
                     }
                     else if(type=="clearAck")
                     {
-                        if(MessageEpoch(m,out long epoch)&&bridge.AcknowledgeReset(epoch))PumpFrames();
+                        if(MessageEpoch(m,out long epoch)&&bridge.AcknowledgeReset(epoch)){KeyframeNeeded?.Invoke();PumpFrames();}
                     }
+                    else if(type=="keyframe"){if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch))KeyframeNeeded?.Invoke();}
                     else if(type=="stats"){VideoStats=m.GetProperty("message").GetString()??"";report(VideoStats);}
                     else if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)&&currentStream?.Invoke()==true)pointer(m);
                 }

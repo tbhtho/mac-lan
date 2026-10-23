@@ -97,10 +97,9 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     var statusText = "Starting mac-lan" { didSet { updateHeader() } }
     var identityText = "" { didSet { updateHeader() } }
     // Menu header: status dot and title, a short status line, and the Mac identity.
-    let headerDot = NSImageView()
     let headerTitle = NSTextField(labelWithString:"mac-lan")
     let headerStatus = NSTextField(wrappingLabelWithString:"")
-    let headerIdentity = NSTextField(labelWithString:"")
+    let headerIdentity = NSTextField(wrappingLabelWithString:"")
     var headerView: NSView?
     let screenAccess = NSMenuItem(title:"Allow Screen Recording…",action:#selector(screenPermission),keyEquivalent:"")
     let controlAccess = NSMenuItem(title:"Allow Keyboard & Mouse…",action:#selector(controlPermission),keyEquivalent:"")
@@ -115,7 +114,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     var errorBuffer = Data()
     var lastHostError: String?
     var publisher: NetService?
-    var consent: NSAlert?
+    var consent: NSWindow?
     var consentTimer: Timer?
     var stopTimer: Timer?
     var interfaces: [[String:String]] = []
@@ -177,8 +176,8 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         headerStatus.font = .systemFont(ofSize:12); headerStatus.textColor = .secondaryLabelColor
         headerStatus.preferredMaxLayoutWidth = 268; headerStatus.maximumNumberOfLines = 3
         headerIdentity.font = .monospacedSystemFont(ofSize:11,weight:.regular); headerIdentity.textColor = .tertiaryLabelColor
-        let title = NSStackView(views:[headerDot,headerTitle]); title.spacing = 6
-        let stack = NSStackView(views:[title,headerStatus,headerIdentity])
+        headerIdentity.preferredMaxLayoutWidth = 268
+        let stack = NSStackView(views:[headerTitle,headerStatus,headerIdentity])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 3
         stack.edgeInsets = NSEdgeInsets(top:6,left:16,bottom:8,right:16)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -193,8 +192,6 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     func updateHeader() {
         guard let header = headerView else { return }
         let sharing = process != nil
-        let color: NSColor = !sharing ? .systemGray : fingerprint.isEmpty ? .systemOrange : .systemGreen
-        headerDot.image = symbol("circle.fill",color,size:8)
         headerTitle.stringValue = !sharing ? "Not sharing" : fingerprint.isEmpty ? "Starting…" : "Sharing"
         headerStatus.stringValue = statusText; headerStatus.toolTip = statusText
         headerIdentity.stringValue = identityText; headerIdentity.isHidden = identityText.isEmpty
@@ -230,7 +227,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         func show(_ item:NSMenuItem,granted:Bool,allowed:String,missing:String) {
             item.title = granted ? allowed : missing
             item.state = .off
-            item.image = granted ? symbol("checkmark.circle.fill",.systemGreen) : symbol("exclamationmark.circle.fill",.systemOrange)
+            item.image = granted ? symbol("checkmark") : symbol("exclamationmark.triangle")
             item.isEnabled = !granted
             item.toolTip = granted ? nil : "Opens System Settings for mac-lan (\(appBundleURL.path))."
         }
@@ -387,28 +384,73 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         guard wantsSharing, !state.quitting, consent == nil, let id = object["id"] as? String, id.count == 32,
               let kind = object["kind"] as? String else { return }
         reopen()
-        let alert = NSAlert(); alert.alertStyle = .warning
+        let title: String, detail: String, code: String?
         if kind == "pair" {
-            alert.messageText = "Pair Windows \(object["peer"] as? String ?? "")?"
-            alert.informativeText = "Allow only if Windows shows this pairing number:\n\n\(object["code"] as? String ?? "")\n\nWindows must also match this Mac's identity above. Pairing lets this PC send files to Downloads/MAC-DOW. Screen sharing needs another approval."
+            title = "Connect Windows to this Mac?"
+            code = object["code"] as? String ?? ""
+            detail = "Allow only if Windows shows the same number. Windows can then send files to Downloads/mac-lan and view this screen until sharing stops. Keyboard and mouse stay off until you click the Mac view on Windows."
         } else if kind == "stream" {
-            alert.messageText = "Allow this screen stream?"
-            alert.informativeText = "\(object["scope"] as? String ?? "Unknown scope")\n\(object["width"] ?? "") px · \(object["fps"] ?? "") fps · \(object["codec"] ?? "")\n\nKeyboard/mouse stay off until you click the Mac view to activate control on Windows. Stop Sharing or Quit ends the session."
+            title = "Let Windows view this screen?"
+            code = nil
+            detail = "\(object["scope"] as? String ?? "Full desktop") · \(object["width"] ?? "") px · \(object["fps"] ?? "") fps\n\nKeyboard and mouse stay off until you click the Mac view on Windows. Stop Sharing ends the session."
         } else { return }
-        alert.addButton(withTitle:"Allow"); alert.addButton(withTitle:"Deny")
-        consent = alert
-        let expiry = Timer(timeInterval:43,repeats:false) { [weak self,weak alert] _ in
-            guard let self=self, let alert=alert, self.consent === alert else {return}
-            NSApp.abortModal(); alert.window.orderOut(nil)
+        let panel = consentPanel(title:title,detail:detail,code:code)
+        consent = panel
+        let expiry = Timer(timeInterval:43,repeats:false) { [weak self,weak panel] _ in
+            guard let self=self, let panel=panel, self.consent === panel else {return}
+            NSApp.abortModal(); panel.orderOut(nil)
         }
         consentTimer = expiry
         RunLoop.main.add(expiry,forMode:.common)
         RunLoop.main.add(expiry,forMode:.modalPanel)
-        let response = alert.runModal()
+        let response = NSApp.runModal(for:panel)
+        panel.orderOut(nil)
         expiry.invalidate(); consentTimer = nil; consent = nil
-        send(["type":"consent","id":id,"allow":response == .alertFirstButtonReturn])
-        statusText = response == .alertFirstButtonReturn ? "Approved. Windows controls the Mac only after a click there." : "Request denied or expired. The Mac is still available."
+        let allowed = response == .OK
+        send(["type":"consent","id":id,"allow":allowed])
+        statusText = allowed ? "Connected. Windows controls the Mac only after a click there." : "Request denied or expired. The Mac is still available."
     }
+    // Dark glass approval window matching the Windows app: symbol, title, optional number, detail, Deny / Allow.
+    func consentPanel(title:String,detail:String,code:String?)->NSPanel {
+        let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:400,height:220),styleMask:[.titled,.fullSizeContentView],backing:.buffered,defer:false)
+        panel.titlebarAppearsTransparent = true; panel.titleVisibility = .hidden
+        panel.isMovableByWindowBackground = true; panel.level = .floating
+        panel.appearance = NSAppearance(named:.darkAqua)
+        let glass = NSVisualEffectView(); glass.material = .hudWindow; glass.blendingMode = .behindWindow; glass.state = .active
+        panel.contentView = glass
+        let icon = NSImageView(image:symbol("display.2",nil,size:28) ?? NSImage())
+        icon.contentTintColor = .labelColor
+        let heading = NSTextField(labelWithString:title); heading.font = .systemFont(ofSize:17,weight:.semibold)
+        let body = NSTextField(wrappingLabelWithString:detail); body.font = .systemFont(ofSize:13); body.textColor = .secondaryLabelColor
+        body.preferredMaxLayoutWidth = 336
+        var views: [NSView] = [icon,heading]
+        if let code = code {
+            let number = NSTextField(labelWithString:code); number.font = .monospacedDigitSystemFont(ofSize:30,weight:.semibold)
+            views.append(number)
+        }
+        views.append(body)
+        let deny = NSButton(title:"Deny",target:self,action:#selector(consentDeny)); deny.keyEquivalent = "\u{1b}"
+        let allow = NSButton(title:"Allow",target:self,action:#selector(consentAllow)); allow.keyEquivalent = "\r"
+        for button in [deny,allow] { button.bezelStyle = .rounded; button.controlSize = .large }
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow,for:.horizontal)
+        let buttons = NSStackView(views:[spacer,deny,allow]); buttons.spacing = 10
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        views.append(buttons)
+        let stack = NSStackView(views:views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
+        stack.setCustomSpacing(20,after:body)
+        stack.edgeInsets = NSEdgeInsets(top:30,left:32,bottom:24,right:32)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        glass.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo:glass.leadingAnchor), stack.trailingAnchor.constraint(equalTo:glass.trailingAnchor),
+            stack.topAnchor.constraint(equalTo:glass.topAnchor), stack.bottomAnchor.constraint(equalTo:glass.bottomAnchor),
+            stack.widthAnchor.constraint(equalToConstant:400), buttons.widthAnchor.constraint(equalToConstant:336)])
+        panel.setContentSize(stack.fittingSize)
+        panel.center()
+        return panel
+    }
+    @objc func consentAllow() { NSApp.stopModal(withCode:.OK) }
+    @objc func consentDeny() { NSApp.stopModal(withCode:.cancel) }
     func send(_ value:[String:Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject:value) else { return }
         do { try input?.write(contentsOf:data + Data([10])) }
@@ -417,7 +459,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     @objc func stopSharing() {
         wantsSharing = false
         publisher?.stop(); publisher = nil
-        if let alert = consent { NSApp.abortModal(); alert.window.orderOut(nil) }
+        if let panel = consent { NSApp.abortModal(); panel.orderOut(nil) }
         state.receive(.stop)
         guard let child = process else { return }
         statusText = "Stopping sharing and releasing control…"
@@ -444,7 +486,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
         try? input?.close(); input = nil; process = nil; outputPipe = nil; errorPipe = nil
-        if let alert = consent { NSApp.abortModal(); alert.window.orderOut(nil) }
+        if let panel = consent { NSApp.abortModal(); panel.orderOut(nil) }
         if let message = hostMessage(errorBuffer) { lastHostError = message }
         errorBuffer.removeAll()
         state.receive(.stop); fingerprint = ""; identityText = ""
