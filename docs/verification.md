@@ -26,5 +26,3 @@ Tests never opened a visible application, installed actual input hooks, injected
 ## Remaining path
 
 Verify sufficient included Actions minutes at no cost and run manual native workflow for the release commit, or compile on an authorized Apple Silicon Mac with existing toolchains. Resolve any compiler errors before replacing the clearly labeled build-kit asset with a native binary artifact. Then the user grants required permissions, performs explicit pairing/ALLOW, and runs manual-validation.md. Do not advertise measured editing performance until that checklist produces evidence.
-
-

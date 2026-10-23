@@ -17,5 +17,3 @@ App Priority: select one specific on-screen window from authenticated catalog; S
 Input: view-only until explicit Control click while remote surface focused. Alt maps to Mac Command, Windows Control maps to Mac Control, right Alt remains Option. Ctrl+Alt+Shift+Backspace escapes. Windows security shortcuts remain OS-owned. On tab switch, focus loss, monitor change, disconnect, teardown and expired lease release all held keys/buttons and require rearming. Key code mapping covers US physical layout; other layouts need validation.
 
 Verification: pure state/layout/input/coordinate tests; local TLS/WebSocket integration with a synthetic frame source; native helper compile and non-capturing self-test on Apple Silicon runner. No hooks, capture or remote input during headless tests. The offline Mac prevents real permission/capture/control validation. CI is manual until included free Actions minutes can be verified; current credential lacks billing/user scope and must not be expanded automatically.
-
-

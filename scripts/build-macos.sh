@@ -15,4 +15,3 @@ cp -R licenses artifacts/macos-arm64/
 if command -v git >/dev/null && git rev-parse HEAD >/dev/null 2>&1; then git rev-parse HEAD > artifacts/macos-arm64/COMMIT.txt; fi
 (cd artifacts && tar -czf MAC-DOW-macos-arm64-unsigned.tar.gz macos-arm64)
 echo "Native build + non-capturing self-tests passed. This is unsigned/not notarized; real capture/control remain untested."
-

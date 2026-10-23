@@ -15,4 +15,3 @@ if($LASTEXITCODE){throw 'Commit source before packaging'}
 $commit | Set-Content artifacts/windows-x64/COMMIT.txt -Encoding ascii
 Compress-Archive -Path artifacts/windows-x64/* -DestinationPath artifacts/MAC-DOW-windows-x64-unsigned.zip -Force
 Get-FileHash artifacts/MAC-DOW-windows-x64-unsigned.zip -Algorithm SHA256
-

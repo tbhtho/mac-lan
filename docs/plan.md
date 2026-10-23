@@ -9,4 +9,3 @@ Spec: design.md. Execute inline in the dedicated new workspace; no other reposit
 - [ ] Review, private publication, prerelease: inspect staged files for secrets/generated clutter; verify authenticated identity and private visibility, non-force push, publish verified artifacts. Do not invoke billable CI when free allowance cannot be confirmed.
 
 Review focus: App Priority never exposes desktop on close; input lease is revoked before focus/tab transitions; slow links cannot queue unbounded frames; DPI handles negative-origin monitors; uncertain connection failure cannot leave hooks installed.
-

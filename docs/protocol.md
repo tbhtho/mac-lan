@@ -15,4 +15,3 @@ One controller; private IPv4 interface/peers only; no Origin header allowed; JSO
 9. Status/error messages use {"type":"status","message":"...","paused":true}. Paused tells Windows to revoke input and clear pixels. Disconnect also clears viewer and releases native held input by EOF/watchdog.
 
 TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmission; no claim of WebRTC/UDP behavior. Write deadlines, encoder gating, newest-frame queues and sequence recovery prevent unbounded app queues, but OS socket buffers still exist. Input travels in the opposite TCP direction; future WebRTC/DTLS-SRTP would improve behavior under loss after measured baseline. No STUN/TURN/cloud relay exists.
-

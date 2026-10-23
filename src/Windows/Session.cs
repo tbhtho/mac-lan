@@ -64,5 +64,3 @@ internal sealed class Session : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {Abort("Disconnected; keys released by Mac watchdog.");try{await Task.WhenAll(reader??Task.CompletedTask,writer??Task.CompletedTask);}catch(OperationCanceledException){}socket.Dispose();stop.Dispose();}
 }
-
-

@@ -44,4 +44,3 @@ canvas.addEventListener('wheel',e=>{if(armed){e.preventDefault();post({type:'scr
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
 window.addEventListener('blur',()=>{if(armed)post({type:'blur'});});
-

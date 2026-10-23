@@ -76,4 +76,3 @@ The manual [native build workflow](.github/workflows/native-build.yml) requires 
 Unsigned/developer-unsigned and not notarized. No signing identities or certificates have been configured. If OS security blocks an artifact, keep protection enabled and use a trusted source build or wait for a properly signed distribution.
 
 See [protocol](docs/protocol.md), [architecture](docs/design.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
-

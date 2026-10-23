@@ -20,5 +20,3 @@ if($LASTEXITCODE){throw 'Go vet failed'}
 dotnet build src/Windows -c Release -m:1 -p:BuildInParallel=false -p:RestoreLockedMode=true
 if($LASTEXITCODE){throw 'Windows compile failed'}
 Write-Output 'Headless suite passed. No UI, capture, OS input hooks or injection started.'
-
-

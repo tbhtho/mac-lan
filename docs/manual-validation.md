@@ -16,4 +16,3 @@ After native Apple Silicon compilation succeeds and the user explicitly grants t
 - Quit both apps; confirm no listeners/children, hooks, autostart entries, credentials or persisted screen images remain.
 
 Do not treat CI compile/self-tests as this hardware validation.
-

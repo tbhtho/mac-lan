@@ -419,6 +419,3 @@ if args.contains("--list") {
     Task { do { try await engine.start(id:id,maxWidth:width,fps:fps,quality:quality,codec:args[6],bitrate:bitrate) } catch { die("Capture setup failed: \(error)") } }
     RunLoop.main.run()
 } else { die("Usage: MacDowCapture --check | --list | --self-test | --stream WINDOW WIDTH FPS QUALITY h264|jpeg MBPS") }
-
-
-

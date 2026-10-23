@@ -66,4 +66,3 @@ internal sealed class KeyboardHook : IDisposable
     }
     public void Dispose(){if(hook!=0){UnhookWindowsHookEx(hook);hook=0;}}
 }
-
