@@ -1,0 +1,21 @@
+# MAC-DOW first prerelease
+
+Dedicated root: `C:\Users\hunnid\Documents\code\01_My_Projects\WIP\MAC-DOW`.
+
+The user authorized implementation and private publication, including unsigned Windows and Apple Silicon releases, with no desktop interaction during development. This document records implementation choices within that authorization.
+
+Windows: .NET 10 WPF, a 44 DIP top strip on the first non-primary monitor (primary fallback), desktop tab collapses to strip and reveals the local desktop. Mac tab expands within that monitor's working area. Display enumeration uses physical monitor bounds converted using the selected monitor's DPI. Display changes disarm control and reposition. App Priority uses a separate normal Windows window showing only a selected Mac window.
+
+Mac: a foreground command-line companion, Go HTTPS/WSS session server plus a Swift ScreenCaptureKit/CoreGraphics helper, macOS 14+, arm64. No Mac tabs, daemon, install, autostart, keychain credentials or permission prompts. The user runs it, selects a private LAN interface, verifies existing Screen Recording and Accessibility access, then explicitly consents to each authenticated session. A fresh in-memory TLS identity and 256-bit pairing token are printed each launch. Windows requires the SHA-256 certificate fingerprint before authentication. The endpoint rejects browser origins, non-private peers, unknown messages, oversize messages, and concurrent controllers.
+
+Transport: RFC 6455 WebSockets over TLS 1.3; Go crypto/tls and Gorilla WebSocket (BSD-2-Clause), .NET ClientWebSocket. Application messages are documented in protocol.md. No internet discovery, relay, UPnP, clipboard, file transfer or shell commands. A short control lease and native watchdog release held inputs after stalls/helper failures (simultaneous whole-process-tree hard failure remains a limitation). Disconnect tears down capture. Screens are never captured by tests.
+
+Capture: default width cap 1600 at up to 30 fps, selectable 960..1920 / 10..30 fps / 2..20 Mbit/s. Native ScreenCaptureKit plus required VideoToolbox hardware H.264 encode, with WebView2 WebCodecs hardware-preferred Windows decode. JPEG is an explicit diagnostic fallback. Single pending encoder submission, one waiting network frame and one outstanding WebView packet bound app queues. Actual codec behavior and hardware decode remain unverified until native build/hardware testing. No audio/HDR/IME/clipboard. M3 8 GB performance and end-to-end latency are unmeasured.
+
+App Priority: select one specific on-screen window from authenticated catalog; ScreenCaptureKit desktop-independent window filter never falls back to desktop. Native control checks owning foreground application and rejects control if a different layer-0 window of that app is foremost. Closing/minimizing the selected window stops capture. Child windows, menus, dialogs and multi-window composition are not included. Display this limitation before starting.
+
+Input: view-only until explicit Control click while remote surface focused. Alt maps to Mac Command, Windows Control maps to Mac Control, right Alt remains Option. Ctrl+Alt+Shift+Backspace escapes. Windows security shortcuts remain OS-owned. On tab switch, focus loss, monitor change, disconnect, teardown and expired lease release all held keys/buttons and require rearming. Key code mapping covers US physical layout; other layouts need validation.
+
+Verification: pure state/layout/input/coordinate tests; local TLS/WebSocket integration with a synthetic frame source; native helper compile and non-capturing self-test on Apple Silicon runner. No hooks, capture or remote input during headless tests. The offline Mac prevents real permission/capture/control validation. CI is manual until included free Actions minutes can be verified; current credential lacks billing/user scope and must not be expanded automatically.
+
+

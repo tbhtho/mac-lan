@@ -1,0 +1,16 @@
+{
+  "Source": "C:\\Users\\hunnid\\Documents\\Codex\\2026-10-22\\task-6",
+  "Destination": "C:\\Users\\hunnid\\Documents\\code\\01_My_Projects\\WIP\\MAC-DOW",
+  "MovedItems": [
+    ".git",
+    ".gitignore",
+    ".cache",
+    "docs",
+    "src",
+    "tests",
+    "host"
+  ],
+  "VerifiedFiles": 43,
+  "TimeUTC": "2026-10-23T01:39:29.9327316Z",
+  "Rollback": "Stop MAC-DOW writers, verify source has no collisions, then move only MovedItems back to Source."
+}

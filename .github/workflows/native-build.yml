@@ -1,0 +1,31 @@
+name: Manual native Apple Silicon verification
+on:
+  workflow_dispatch:
+    inputs:
+      free_minutes_verified:
+        description: "I verified sufficient included free Actions minutes and no charge will be incurred"
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: mac-dow-native-build
+  cancel-in-progress: false
+jobs:
+  macos:
+    if: inputs.free_minutes_verified == true
+    runs-on: macos-14
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - run: bash scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MAC-DOW-macos-arm64-unsigned-${{ github.sha }}
+          path: artifacts/MAC-DOW-macos-arm64-unsigned.tar.gz
+          if-no-files-found: error

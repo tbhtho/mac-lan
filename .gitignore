@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+artifacts/
+.cache/
+.tools/
+*.user
+*.pfx
+*.pem
+*.key
+*.log
