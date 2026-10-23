@@ -7,4 +7,5 @@ import (
 	"syscall"
 )
 
-func quietCommand(c *exec.Cmd) { c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} }
+func quietCommand(c *exec.Cmd)    { c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true} }
+func detachedCommand(c *exec.Cmd) { quietCommand(c) }

@@ -25,7 +25,7 @@ internal sealed partial class MainWindow : Window
     readonly TextBlock status=new(){Text="Ready to connect",VerticalAlignment=VerticalAlignment.Center,Foreground=new SolidColorBrush(Color.FromRgb(95,109,128)),Margin=new Thickness(20,8,20,8),FontSize=12};
     readonly Button updatesButton=new(){Content="Updates",Padding=new Thickness(12,5,12,5)};
     readonly DispatcherTimer updateTimer=new(){Interval=TimeSpan.FromHours(6)};
-    bool checkingUpdates;
+    bool checkingUpdates,showingUpdates;
     readonly Button control=new(){Content="Control Mac",Padding=new Thickness(14,5,14,5)};
     readonly ControlGate gate=new();
     readonly KeyboardHook keyboard;
@@ -205,9 +205,9 @@ internal sealed partial class MainWindow : Window
         session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
     }
-    void Arm()
+    void Arm(bool focusViewer=true)
     {
-        (appView??desktop).Focus();RefreshContext();
+        if(focusViewer)(appView??desktop).Focus();RefreshContext();
         if(!gate.Arm()){status.Text="Connect, wait for a fresh frame and focus the remote window first.";return;}
         if(!CanControlVideo()){gate.Disarm();status.Text="Waiting for fresh video; control remains off.";return;}
         try{keyboard.Install();controlIssue=null;controlGeneration++;SendLease();UpdateControl();}catch(Exception ex){gate.Disarm();status.Text="Cannot acquire keyboard: "+ex.Message;}
@@ -232,7 +232,7 @@ internal sealed partial class MainWindow : Window
         {
             // The first desktop click is an explicit local request, consumed by the viewer.
             // Never activate a window or route input from an unfocused or stale view.
-            if(session?.IsReady==true&&(remote||appWindow!=null)&&OwnerIsForeground()&&CanControlVideo())Arm();
+            if(session?.IsReady==true&&(remote||appWindow!=null)&&OwnerIsForeground()&&CanControlVideo())Arm(false);
             return;
         }
         if(!gate.CanRoute||!OwnerIsForeground())return;
@@ -270,11 +270,23 @@ internal sealed partial class MainWindow : Window
         if(msg is 0x007E or 0x02E0){gate.Disarm();Dispatcher.BeginInvoke(()=>{RefreshMonitors();Position();});}
         return 0;
     }
-    void ShowUpdates(){gate.Disarm();var dialog=new UpdateDialog(appWindow??this,()=>{Disconnect();Close();});dialog.ShowDialog();}
+    void ShowUpdates()
+    {
+        if(showingUpdates||closing||awaitingFileTransfer)return;
+        showingUpdates=true;gate.Disarm();
+        try{var dialog=new UpdateDialog(appWindow??this,PrepareUpdateRestart,()=>{Disconnect();Close();});dialog.ShowDialog();}
+        finally{showingUpdates=false;}
+    }
+    async Task PrepareUpdateRestart()
+    {
+        gate.Disarm();awaitingFileTransfer=true;
+        try{if(filesWindow?.IsBusy==true)await filesWindow.CancelAndWaitAsync();}
+        finally{awaitingFileTransfer=false;}
+    }
     async Task CheckUpdates()
     {
         if(checkingUpdates||closing)return;var preferences=UpdatePreferences.Load();if(!preferences.Automatic)return;checkingUpdates=true;
-        try {var result=await UpdateProcess.DownloadAvailable(preferences);if(result.TryGetProperty("stage",out var staged))updatesButton.Content=staged.GetProperty("canApply").GetBoolean()?"Restart to update":"Update needs attention";updatesButton.ToolTip=result.GetProperty("message").GetString();}
+        try {var result=await UpdateProcess.DownloadAvailable(preferences,text=>updatesButton.ToolTip=text);updatesButton.Content=UpdateDownload.Ready(result)?"Restart to update":"Updates";updatesButton.ToolTip=UpdateDownload.Ready(result)?"An update is downloaded and verified. Restart when you are ready.":result.GetProperty("message").GetString();}
         catch(Exception e){updatesButton.ToolTip="Update check unavailable: "+e.Message;}
         finally{checkingUpdates=false;}
     }

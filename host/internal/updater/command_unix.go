@@ -2,6 +2,10 @@
 
 package updater
 
-import "os/exec"
+import (
+	"os/exec"
+	"syscall"
+)
 
-func quietCommand(c *exec.Cmd) {}
+func quietCommand(c *exec.Cmd)    {}
+func detachedCommand(c *exec.Cmd) { c.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }

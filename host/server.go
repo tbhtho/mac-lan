@@ -161,6 +161,7 @@ type server struct {
 	active       *websocket.Conn
 	activeDone   chan struct{}
 	stopped      bool
+	updating     bool
 	stream       func(func([]byte), func(string), <-chan input) error
 	transfers    *transferReceiver
 	videoError   string
@@ -195,7 +196,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.connectionMu.Lock()
-	if s.stopped {
+	if s.stopped || s.updating {
 		s.connectionMu.Unlock()
 		c.Close()
 		return

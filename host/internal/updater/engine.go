@@ -228,6 +228,22 @@ func (e *Engine) validatePayload(base string, p Plan) error {
 	if standalonePlan(p) {
 		return nil
 	}
+	if commandlinePreviewPlan(p) {
+		if m.Layout != "commandline-preview" || m.Commit != p.Commit {
+			return errors.New("Mac preview identity/commit mismatch")
+		}
+		if err := validatePreviewDirectory(root, false); err != nil {
+			return err
+		}
+		if err := validateMacHost(filepath.Join(root, "MacDowHost"), true); err != nil {
+			return err
+		}
+		b, err := os.ReadFile(filepath.Join(root, "COMMIT.txt"))
+		if err != nil || strings.TrimSpace(string(b)) != p.Commit {
+			return errors.New("payload commit mismatch")
+		}
+		return nil
+	}
 	names := []string{"MAC-DOW.exe", "MAC-DOW-Update.exe"}
 	if e.OS == "darwin" {
 		names = []string{"MacDowHost", "MacDowCapture"}
@@ -364,6 +380,24 @@ func (e *Engine) installIdentity(install string) error {
 	if m.Product != "MAC-DOW" || m.RepositoryID != BuildConfig().RepositoryID || m.OS != e.OS || m.Arch != e.Arch || m.Version != e.Current {
 		return errors.New("installed product/version/platform mismatch")
 	}
+	if e.OS == "darwin" && m.Layout == "commandline-preview" {
+		if err = rejectBroadPreviewDirectory(abs); err != nil {
+			return err
+		}
+		if len(m.Commit) != 40 {
+			return errors.New("installed Mac preview commit missing")
+		}
+		if err = validatePreviewDirectory(abs, true); err != nil {
+			return err
+		}
+		if err = validateMacHost(filepath.Join(abs, "MacDowHost"), true); err != nil {
+			return err
+		}
+		b, er := os.ReadFile(filepath.Join(abs, "COMMIT.txt"))
+		if er != nil || strings.TrimSpace(string(b)) != m.Commit {
+			return errors.New("installed Mac preview commit mismatch")
+		}
+	}
 	return nil
 }
 func treeHashes(root string) (map[string]string, error) {
@@ -461,6 +495,7 @@ func (e *Engine) Apply(ctx context.Context, dir, install, confirmation string, r
 	if err != nil {
 		return "", err
 	}
+	defer os.RemoveAll(candidate) // only the fresh updater-owned temporary directory
 	if err = e.extractChecked(filepath.Join(dir, s.Plan.Asset.Name), s.Plan, candidate); err != nil {
 		return "", err
 	}
@@ -468,7 +503,9 @@ func (e *Engine) Apply(ctx context.Context, dir, install, confirmation string, r
 		return "", err
 	}
 	next := payloadRoot(candidate, s.Plan)
-	if err=compatibleInstallShape(install,next,e.OS);err!=nil{return "",err}
+	if err = compatibleInstallShape(install, next, e.OS); err != nil {
+		return "", err
+	}
 	hashes, err := treeHashes(install)
 	if err != nil {
 		return "", err
@@ -591,6 +628,7 @@ func (e *Engine) Rollback(ctx context.Context, journal, install, confirmation st
 	if err != nil {
 		return err
 	}
+	defer os.RemoveAll(candidate)
 	if err = e.extractChecked(filepath.Join(s.Directory, s.Plan.Asset.Name), s.Plan, candidate); err != nil {
 		return err
 	}
@@ -598,7 +636,11 @@ func (e *Engine) Rollback(ctx context.Context, journal, install, confirmation st
 		return err
 	}
 	next := payloadRoot(candidate, s.Plan)
-	if _,er:=os.Lstat(install);er==nil {if err=compatibleInstallShape(install,next,e.OS);err!=nil{return err}}
+	if _, er := os.Lstat(install); er == nil {
+		if err = compatibleInstallShape(install, next, e.OS); err != nil {
+			return err
+		}
+	}
 	if _, err = os.Lstat(install); os.IsNotExist(err) {
 		err = os.Rename(next, install)
 	} else if err == nil {
