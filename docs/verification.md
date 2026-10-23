@@ -1,5 +1,22 @@
 # Verification record
 
+## Alpha.19 - escaped Mac names and missing Mac video
+
+After installing the alpha.18 disk image, the user's Mac showed a garbled name
+on Windows and the menu still offered Allow Screen Recording; Windows returned
+to the connection page because the host reported Screen Recording missing.
+The signed disk-image app is a new code identity, so earlier grants no longer
+applied; the menu was reporting macOS's answer correctly.
+
+- Discovery decodes DNS-SD decimal escapes (`Marcel
+8ks`) and rejects
+  malformed escapes or invalid UTF-8 (new Go test).
+- The MacBook tab now shows re-grant steps when the host reports no video.
+- Full headless suite passed. Release `v0.1.0-alpha.19` binds
+  `ccf9bff2bc0b720f0b6609cd408bd2553965f7d3`; feed commit `02d536d`. All
+  checksummed downloads matched anonymously, the feed verified, and the
+  alpha.18 EXE reported alpha.19 available. Mac re-grant was not tested here.
+
 ## Alpha.18 - signed disk-image app, install window and slimmer Windows bar
 
 The user reported that the alpha.17 disk image (SHA-256 confirmed on the Mac)
