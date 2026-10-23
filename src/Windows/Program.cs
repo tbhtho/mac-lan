@@ -24,6 +24,8 @@ internal static class Program
         if(args.Length==2&&args[0]=="--layout-smoke"){LayoutSmoke.Start(app,args[1]);app.Run();return;}
         Telemetry.Report("startup");
         app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Report("fatal",e.Exception.GetType().Name);MessageBox.Show("mac-lan stopped safely. Reopen it to reconnect. A diagnostic report is queued.","mac-lan");app.Shutdown(1);e.Handled=true;};
-        app.Run(new MainWindow());
+        var main=new MainWindow();
+        app.SessionEnding+=(_,_)=>main.Quit();
+        app.Run(main);
     }
 }

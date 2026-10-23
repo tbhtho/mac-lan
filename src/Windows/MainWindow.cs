@@ -37,7 +37,7 @@ internal sealed partial class MainWindow : Window
     string appLabel="";
     bool appSized;
     FileTransferWindow? filesWindow;
-    bool remote,closing,connecting,openingFiles,awaitingFileTransfer;
+    bool remote,closing,connecting,openingFiles,awaitingFileTransfer,quitting;
     string? preferred;
     long lastLease;
     ulong controlGeneration;
@@ -56,7 +56,7 @@ internal sealed partial class MainWindow : Window
         Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Glass.Apply(this);Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");BuildSetup();
@@ -73,6 +73,8 @@ internal sealed partial class MainWindow : Window
         Closing+=async(_,e)=>
         {
             if(closing)return;
+            // The window's X only hides the connection page; Quit in the bar ends mac-lan.
+            if(!quitting){e.Cancel=true;ShowDesktop();return;}
             if(awaitingFileTransfer){e.Cancel=true;return;}
             if(filesWindow?.IsBusy==true)
             {
@@ -83,6 +85,7 @@ internal sealed partial class MainWindow : Window
             closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
         };
     }
+    internal void Quit(){quitting=true;Close();}
     Button MakeButton(string text,Action action){var b=new Button{Content=text,Margin=new Thickness(0,4,0,4),HorizontalAlignment=HorizontalAlignment.Left};b.Click+=(_,_)=>action();return b;}
     async void ShowFiles()
     {
@@ -305,7 +308,7 @@ internal sealed partial class MainWindow : Window
     {
         if(showingUpdates||closing||awaitingFileTransfer)return;
         showingUpdates=true;gate.Disarm("updates-open");
-        try{var dialog=new UpdateDialog(appWindow??this,PrepareUpdateRestart,()=>{Disconnect();Close();});dialog.ShowDialog();}
+        try{var dialog=new UpdateDialog(appWindow??this,PrepareUpdateRestart,()=>{Disconnect();Quit();});dialog.ShowDialog();}
         finally{showingUpdates=false;}
     }
     async Task PrepareUpdateRestart()

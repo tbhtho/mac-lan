@@ -17,6 +17,7 @@ The unsigned preview may be blocked by OS security. Keep those protections enabl
 
 ## In the app
 
+- **Window:** closing the connection page with its X keeps mac-lan running in the bar; **Quit** in the bar exits.
 - **Windows / MacBook tabs:** switch between your local desktop and the live Mac picture from a slim (32-pixel), dark, translucent bar (acrylic on Windows 11 22H2+, solid on older Windows). The desktop bar reserves space above maximized Windows apps, with a monitor selector and primary-monitor fallback.
 - **Full desktop:** a **1920-pixel width cap and 60 fps target**, preserving the complete Mac desktop's proportions without changing its display mode. A 16:10 desktop can stream at 1920×1200; smaller sources are not enlarged, and height is capped at 2160 pixels. Windows fits the picture with bars where needed; the bars do not activate or control the Mac. Only the immediate Windows cursor appears in the stream.
 - **App Priority:** put one selected Mac window in a movable, resizable Windows window titled with the Mac app's name, with no mac-lan bar or toolbar. It opens sized to that window's shape and preserves its aspect ratio. Click it to control; Ctrl+Alt+Shift+Backspace or switching away releases; closing it ends the stream. Menus, dialogs, and other Mac windows remain outside that view; closing, minimizing, or resizing the selected Mac window stops its stream.
