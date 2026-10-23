@@ -7,12 +7,141 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/gorilla/websocket"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+func connectFixture(t *testing.T, s *server) *websocket.Conn {
+	t.Helper()
+	ts := httptest.NewTLSServer(s)
+	t.Cleanup(ts.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(ts.Certificate())
+	d := websocket.Dialer{TLSClientConfig: &tls.Config{RootCAs: roots}}
+	c, _, err := d.Dial("wss"+strings.TrimPrefix(ts.URL, "https"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(); s.stopActive() })
+	if err := c.WriteJSON(map[string]string{"type": "auth", "token": s.token}); err != nil {
+		t.Fatal(err)
+	}
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var catalog struct{ Type string }
+	if err := c.ReadJSON(&catalog); err != nil || catalog.Type != "catalog" {
+		t.Fatalf("catalog: %+v, %v", catalog, err)
+	}
+	return c
+}
+
+func TestPairedIdleReleaseAndLeaseDoNotEndSessionOrStartCapture(t *testing.T) {
+	consentCalled := make(chan start, 1)
+	allow := make(chan bool, 1)
+	streamCalled := make(chan struct{}, 1)
+	s := &server{token: strings.Repeat("c", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+		catalog: func() ([]window, error) { return nil, nil },
+		consent: func(r start) bool { consentCalled <- r; return <-allow },
+		stream: func(send func([]byte), _ func(string), events <-chan input) error {
+			streamCalled <- struct{}{}
+			send([]byte{1, 2, 3})
+			for range events {
+			}
+			return nil
+		},
+	}
+	c := connectFixture(t, s)
+	for _, idle := range []input{{Type: "release"}, {Type: "lease", Active: true, View: true, Stamp: 10, Generation: 1}, {Type: "release", Generation: 1}} {
+		if err := c.WriteJSON(idle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-consentCalled:
+		t.Fatal("idle safety messages requested viewing consent")
+	case <-streamCalled:
+		t.Fatal("idle safety messages started capture")
+	default:
+	}
+	request := start{Type: "start", FPS: 30, Width: 1600, Quality: 70, Codec: "h264", Bitrate: 8}
+	if err := c.WriteJSON(request); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-consentCalled:
+		if got != request {
+			t.Fatalf("view consent request: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("safety release before start disconnected the paired session")
+	}
+	select {
+	case <-streamCalled:
+		t.Fatal("capture started before local viewing approval")
+	default:
+	}
+	allow <- true
+	for {
+		kind, frame, err := c.ReadMessage()
+		if err != nil {
+			t.Fatal("approved stream", err)
+		}
+		if kind == websocket.BinaryMessage {
+			if !bytes.Equal(frame, []byte{1, 2, 3}) {
+				t.Fatal("wrong fixture frame")
+			}
+			break
+		}
+	}
+}
+
+func TestPairedIdleInputCannotRequestConsentOrStartCapture(t *testing.T) {
+	for _, invalid := range []input{{Type: "key", Code: 55, Down: true}, {Type: "release", Generation: 9007199254740992}} {
+		t.Run(invalid.Type, func(t *testing.T) {
+			s := &server{token: strings.Repeat("d", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+				catalog: func() ([]window, error) { return nil, nil },
+				consent: func(start) bool { t.Error("unrequested consent"); return true },
+				stream:  func(func([]byte), func(string), <-chan input) error { t.Error("unapproved capture"); return nil },
+			}
+			c := connectFixture(t, s)
+			if err := c.WriteJSON(invalid); err != nil {
+				t.Fatal(err)
+			}
+			for {
+				_, _, err := c.ReadMessage()
+				if err != nil {
+					break
+				}
+			}
+		})
+	}
+}
+
+func TestCaptureFailureReachesClientBeforeConnectionEnds(t *testing.T) {
+	s := &server{token: strings.Repeat("e", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+		catalog: func() ([]window, error) { return nil, nil },
+		consent: func(start) bool { return true },
+		stream: func(func([]byte), func(string), <-chan input) error {
+			return errors.New("native helper fixture failure")
+		},
+	}
+	c := connectFixture(t, s)
+	if err := c.WriteJSON(start{Type: "start", FPS: 10, Width: 1280, Quality: 70}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var message struct{ Type, Message string }
+		if err := c.ReadJSON(&message); err != nil {
+			t.Fatal("capture error was lost before disconnect", err)
+		}
+		if message.Type == "error" && strings.Contains(message.Message, "native helper fixture failure") {
+			break
+		}
+	}
+}
 
 func TestPrivateLANOnly(t *testing.T) {
 	for _, s := range []string{"10.1.2.3", "172.16.1.1", "192.168.1.5"} {

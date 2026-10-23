@@ -1,16 +1,18 @@
 # MAC-DOW
 
-## Current development build (alpha.5)
+## Current development build (alpha.6)
+
+Alpha.6 fixes the paired-to-viewing transition. Clicking **MacBook** after pairing requests desktop viewing once and keeps the viewer open while waiting for Mac approval and the first frame. Changing tabs no longer sends control messages into the pre-view handshake. The Mac host also safely tolerates idle releases, and capture errors reach Windows before the connection ends. Device/display selectors show readable labels. Synthetic TLS session tests and in-memory presentation tests cover these regressions without showing windows or capturing a screen.
 
 Windows now publishes as one **MAC-DOW.exe** with its .NET runtime, native loader, viewer and discovery/updater helper bundled. Run that EXE directly; no adjacent dependency folder is needed. Internal resources extract to a private application cache. Microsoft WebView2 Runtime remains an OS prerequisite. Build with `scripts/package-windows.ps1`.
 
 Windows keeps the Windows/MacBook tabs in a dedicated desktop bar that reserves space, so maximized app title bars stay below it. The connection window now uses a consistent light theme and only offers **Find my Mac → Connect**. The manual-details connection section has been removed. Windows diagnostic logs stay local; only macOS sends bounded, sanitized reports to the privately configured destination.
 
-The Mac app source now uses a **menu-bar item only**, with no main window. It starts listening on launch when Screen Recording access already exists; pairing and viewing still require approval on the Mac. **This AppKit launcher has not yet been natively compiled or tested and is not included as a built .app in this release.** The alpha.5 Apple Silicon command-line companion adds Bonjour discovery, native Allow dialogs and Mac-only diagnostics. Its Go executable is cross-compiled; its capture helper is the unchanged alpha.2 native build. Start `MacDowHost` without arguments, then use **Find my Mac** on Windows. The earlier “No capture until pairing + ALLOW” message meant the host was waiting, not that capture had failed.
+The Mac app source now uses a **menu-bar item only**, with no main window. It starts listening on launch when Screen Recording access already exists; pairing and viewing still require approval on the Mac. **This AppKit launcher has not yet been natively compiled or tested and is not included as a built .app in this release.** The alpha.6 Apple Silicon command-line companion adds Bonjour discovery, native Allow dialogs and Mac-only diagnostics. Its Go executable is cross-compiled; its capture helper is the unchanged alpha.2 native build. Start `MacDowHost` without arguments, then use **Find my Mac** on Windows. The earlier “No capture until pairing + ALLOW” message meant the host was waiting, not that capture had failed.
 
 Both app interfaces now support automatic background checks/downloads and **Restart to update**. Updates preserve settings and replace only the Windows EXE or Mac app bundle. Restart is user-triggered and returns idle/view-only. Private download access still requires an existing authenticated GitHub CLI, and automatic replacement still requires verified signed release provenance with GitHub CLI 2.93+. Current unattested releases cannot be applied automatically. These deployment prerequisites are unresolved; this is not a claim that production auto-update is working end to end.
 
-The remainder records the earlier command-line releases and their capture/control limits; historical ZIP/manual connection instructions do not describe the alpha.5 Windows interface. Existing releases/assets remain unchanged.
+The remainder records the earlier command-line releases and their capture/control limits; historical ZIP/manual connection instructions do not describe the alpha.6 Windows interface. Existing releases/assets remain unchanged.
 
 Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream one selected Mac window in a normal Windows window with **App Priority**.
 
