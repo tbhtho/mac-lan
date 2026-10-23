@@ -31,10 +31,14 @@ $windowsPath=(Resolve-Path -LiteralPath 'artifacts/mac-lan.exe').Path
 $macPath=(Resolve-Path -LiteralPath 'artifacts/update-public/mac-lan-macos-arm64-commandline-preview.tar.gz').Path
 $appPath=(Resolve-Path -LiteralPath 'artifacts/update-public/mac-lan-macos-arm64.tar.gz').Path
 $appAliasPath=(Resolve-Path -LiteralPath 'artifacts/update-public/MAC-DOW-macos-arm64-unsigned.tar.gz').Path
+# First-install wrappers around the same packages; the signed feed never lists them.
+$setupPath=(Resolve-Path -LiteralPath 'artifacts/mac-lan-setup.exe').Path
+$dmgPath=(Resolve-Path -LiteralPath 'artifacts/update-public/mac-lan-macos-arm64.dmg').Path
 $windowsBuild=Get-Content -LiteralPath 'artifacts/standalone-build.json' -Raw | ConvertFrom-Json
 $macBuild=Get-Content -LiteralPath 'artifacts/update-public/macos-preview-build.json' -Raw | ConvertFrom-Json
 $appBuild=Get-Content -LiteralPath 'artifacts/update-public/macos-app-build.json' -Raw | ConvertFrom-Json
-foreach($build in @($windowsBuild,$macBuild,$appBuild)){
+$installerBuild=Get-Content -LiteralPath 'artifacts/installers-build.json' -Raw | ConvertFrom-Json
+foreach($build in @($windowsBuild,$macBuild,$appBuild,$installerBuild)){
     if($build.commit -ne $commit -or $build.version -ne $version -or $build.dirty -ne $false){throw 'Build metadata must match the clean current source commit and version'}
 }
 if($macBuild.publicUpdate -ne $true -or $appBuild.publicUpdate -ne $true){throw 'Only public Mac packages may be published'}
@@ -48,8 +52,8 @@ if($previous){$feedArguments.PreviousFeed=$previous}
 $sourcePath=[IO.Path]::GetFullPath("artifacts/mac-lan-source-$version.zip")
 $sumsPath=[IO.Path]::GetFullPath("artifacts/SHA256SUMS-$version.txt")
 Invoke-Checked -Command git -Arguments @('archive','--format=zip',"--output=$sourcePath",$commit) | Out-Null
-$releasePaths=@($windowsPath,$macPath,$appPath,$appAliasPath,$sourcePath,$sumsPath)
-$sumLines=foreach($path in @($windowsPath,$macPath,$appPath,$appAliasPath,$sourcePath)){
+$releasePaths=@($windowsPath,$setupPath,$macPath,$appPath,$dmgPath,$appAliasPath,$sourcePath,$sumsPath)
+$sumLines=foreach($path in @($windowsPath,$setupPath,$macPath,$appPath,$dmgPath,$appAliasPath,$sourcePath)){
     '{0}  {1}' -f (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(),[IO.Path]::GetFileName($path)
 }
 [IO.File]::WriteAllText($sumsPath,($sumLines -join "`n")+"`n",[Text.UTF8Encoding]::new($false))
