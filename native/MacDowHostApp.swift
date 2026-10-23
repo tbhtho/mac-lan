@@ -94,11 +94,17 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     var menuBar: NSStatusItem!
     var menuStatus = NSMenuItem(title: "Not sharing", action: nil, keyEquivalent: "")
     var menuStop: NSMenuItem!
-    var statusText = "Starting mac-lan" { didSet { menuStatus.title = String(statusText.prefix(72)); menuStatus.toolTip = statusText } }
+    var statusText = "Starting mac-lan" { didSet { updateHeader() } }
+    var identityText = "" { didSet { updateHeader() } }
+    // Menu header: status dot and title, a short status line, and the Mac identity.
+    let headerDot = NSImageView()
+    let headerTitle = NSTextField(labelWithString:"mac-lan")
+    let headerStatus = NSTextField(wrappingLabelWithString:"")
+    let headerIdentity = NSTextField(labelWithString:"")
+    var headerView: NSView?
     let screenAccess = NSMenuItem(title:"Allow Screen Recording…",action:#selector(screenPermission),keyEquivalent:"")
-    let controlAccess = NSMenuItem(title:"Allow Keyboard and Mouse…",action:#selector(controlPermission),keyEquivalent:"")
+    let controlAccess = NSMenuItem(title:"Allow Keyboard & Mouse…",action:#selector(controlPermission),keyEquivalent:"")
     let refreshAccess = NSMenuItem(title:"Refresh Permissions",action:#selector(refreshSetup),keyEquivalent:"")
-    let identity = NSMenuItem(title:"Mac identity available after sharing starts",action:nil,keyEquivalent:"")
     var menuStart: NSMenuItem!
     var wantsSharing = true
     var process: Process?
@@ -136,20 +142,65 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menuBar.button?.image?.isTemplate = true
         menuBar.button?.setAccessibilityLabel("mac-lan: not sharing")
         menuBar.button?.toolTip = "mac-lan"
-        let menu = NSMenu(); menu.addItem(menuStatus); menu.addItem(.separator())
-        menu.addItem(identity)
-        menu.addItem(.separator())
+        let menu = NSMenu()
+        let header = makeHeader(); headerView = header; menuStatus.view = header
+        menu.addItem(menuStatus); menu.addItem(.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title:"Permissions"))
         menu.addItem(screenAccess); menu.addItem(controlAccess); menu.addItem(refreshAccess)
+        refreshAccess.image = symbol("arrow.clockwise")
         menu.addItem(.separator())
         menuStart = menu.addItem(withTitle:"Start Sharing",action:#selector(toggleSharing),keyEquivalent:"")
-        menuStop = menu.addItem(withTitle:"Stop Sharing / Disconnect",action:#selector(stopSharing),keyEquivalent:"")
-        menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"")
+        menuStart.image = symbol("play.circle")
+        menuStop = menu.addItem(withTitle:"Stop Sharing",action:#selector(stopSharing),keyEquivalent:"")
+        menuStop.image = symbol("stop.circle")
+        menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"").image = symbol("network")
+        menu.addItem(.separator())
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
+        updateMenu.image = symbol("arrow.down.circle")
         automaticUpdates = menu.addItem(withTitle:"Download Updates Automatically",action:#selector(toggleAutomaticUpdates),keyEquivalent:"")
         automaticUpdates.state = updater.automatic ? .on : .off
-        menu.addItem(.separator()); menu.addItem(withTitle:"Quit mac-lan",action:#selector(quit),keyEquivalent:"q")
+        menu.addItem(.separator()); menu.addItem(withTitle:"Quit mac-lan",action:#selector(quit),keyEquivalent:"q").image = symbol("power")
         for item in menu.items { item.target = self }
         menu.autoenablesItems = false; menuStop.isEnabled = false; menu.delegate = self; menuBar.menu = menu
+        updateHeader()
+    }
+    func symbol(_ name:String,_ color:NSColor?=nil,size:CGFloat=13)->NSImage? {
+        guard let base = NSImage(systemSymbolName:name,accessibilityDescription:nil) else { return nil }
+        var configuration = NSImage.SymbolConfiguration(pointSize:size,weight:.regular)
+        if let color = color { configuration = configuration.applying(NSImage.SymbolConfiguration(paletteColors:[color])) }
+        let image = base.withSymbolConfiguration(configuration) ?? base
+        image.isTemplate = color == nil
+        return image
+    }
+    func makeHeader()->NSView {
+        headerTitle.font = .systemFont(ofSize:13,weight:.semibold)
+        headerStatus.font = .systemFont(ofSize:12); headerStatus.textColor = .secondaryLabelColor
+        headerStatus.preferredMaxLayoutWidth = 268; headerStatus.maximumNumberOfLines = 3
+        headerIdentity.font = .monospacedSystemFont(ofSize:11,weight:.regular); headerIdentity.textColor = .tertiaryLabelColor
+        let title = NSStackView(views:[headerDot,headerTitle]); title.spacing = 6
+        let stack = NSStackView(views:[title,headerStatus,headerIdentity])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 3
+        stack.edgeInsets = NSEdgeInsets(top:6,left:16,bottom:8,right:16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let view = NSView(frame:NSRect(x:0,y:0,width:300,height:64))
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo:view.leadingAnchor), stack.trailingAnchor.constraint(equalTo:view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo:view.topAnchor), stack.bottomAnchor.constraint(equalTo:view.bottomAnchor),
+            stack.widthAnchor.constraint(equalToConstant:300)])
+        return view
+    }
+    func updateHeader() {
+        guard let header = headerView else { return }
+        let sharing = process != nil
+        let color: NSColor = !sharing ? .systemGray : fingerprint.isEmpty ? .systemOrange : .systemGreen
+        headerDot.image = symbol("circle.fill",color,size:8)
+        headerTitle.stringValue = !sharing ? "Not sharing" : fingerprint.isEmpty ? "Starting…" : "Sharing"
+        headerStatus.stringValue = statusText; headerStatus.toolTip = statusText
+        headerIdentity.stringValue = identityText; headerIdentity.isHidden = identityText.isEmpty
+        header.setFrameSize(NSSize(width:300,height:header.fittingSize.height))
+        menuStart?.isHidden = sharing; menuStop?.isHidden = !sharing
+        menuBar?.button?.appearsDisabled = !sharing
     }
     @objc func reopen() {
         NSApp.activate(ignoringOtherApps:true)
@@ -171,19 +222,20 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
             try? child.run()
         }
     }
-    func menuWillOpen(_ menu:NSMenu) { refreshPermissions() }
+    func menuWillOpen(_ menu:NSMenu) { refreshPermissions(); updateHeader() }
     @objc func refreshPermissions() {
         let screen = CGPreflightScreenCaptureAccess()
         let control = AXIsProcessTrusted()
         // A granted permission is a checked, inactive status line; only a missing one is actionable.
         func show(_ item:NSMenuItem,granted:Bool,allowed:String,missing:String) {
             item.title = granted ? allowed : missing
-            item.state = granted ? .on : .off
+            item.state = .off
+            item.image = granted ? symbol("checkmark.circle.fill",.systemGreen) : symbol("exclamationmark.circle.fill",.systemOrange)
             item.isEnabled = !granted
             item.toolTip = granted ? nil : "Opens System Settings for mac-lan (\(appBundleURL.path))."
         }
-        show(screenAccess,granted:screen,allowed:"Screen Recording Allowed",missing:"Allow Screen Recording…")
-        show(controlAccess,granted:control,allowed:"Keyboard and Mouse Allowed",missing:"Allow Keyboard and Mouse…")
+        show(screenAccess,granted:screen,allowed:"Screen Recording",missing:"Allow Screen Recording…")
+        show(controlAccess,granted:control,allowed:"Keyboard & Mouse",missing:"Allow Keyboard & Mouse…")
         refreshAccess.isHidden = screen && control
         if process == nil { menuStart.isEnabled = !state.quitting }
     }
@@ -264,8 +316,8 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         let incoming = Pipe(); let outgoing = Pipe(); let errors = Pipe()
         child.standardInput = incoming; child.standardOutput = outgoing; child.standardError = errors
         process = child; input = incoming.fileHandleForWriting; outputPipe = outgoing; errorPipe = errors
-        buffer.removeAll(); errorBuffer.removeAll(); lastHostError = nil; fingerprint = ""; identity.title = "Mac identity available after sharing starts"
-        statusText = "Starting a private LAN host. No screen is shared until you approve."
+        buffer.removeAll(); errorBuffer.removeAll(); lastHostError = nil; fingerprint = ""; identityText = ""
+        statusText = "Starting. Nothing is shared until you approve it here."
         menuStart.title = "Start Sharing"; menuStart.isEnabled = false; menuStop.isEnabled = true
         outgoing.fileHandleForReading.readabilityHandler = { [weak self,weak child] file in
             let data = file.availableData
@@ -314,13 +366,12 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
                       (1...65535).contains(port), let fp = object["fingerprint"] as? String,
                       fp.count == 64, fp.allSatisfy({ $0.isHexDigit }) else { stopSharing(); return }
                 fingerprint = fp; state.receive(.ready)
-                identity.title = "Mac identity: \(identityCode(fp))"
+                identityText = "Mac ID  \(identityCode(fp))"
                 publisher = NetService(domain:"local.",type:"_macdow._tcp.",name:Host.current().localizedName ?? "Mac",port:Int32(port))
                 publisher?.delegate = self
                 publisher?.setTXTRecord(NetService.data(fromTXTRecord:["v":Data("2".utf8),"fp":Data(fp.utf8),"ip":Data(ip.utf8)]))
                 publisher?.publish()
-                statusText = CGPreflightScreenCaptureAccess() ? "Ready. Choose Find my Mac on Windows; pairing and viewing each need approval here." : "Ready for pairing and files. Enable Screen Recording in this menu to allow viewing."
-                menuBar.button?.contentTintColor = .systemOrange
+                statusText = CGPreflightScreenCaptureAccess() ? "Ready. Connect from Windows; you approve pairing and viewing here." : "Ready for pairing and files. Allow Screen Recording below for video."
                 menuBar.button?.setAccessibilityLabel("mac-lan: ready, approval required")
             case "consent": presentConsent(object)
             case "state": if wantsSharing && !state.quitting { statusText = hostMessage(line) ?? "Connection changed." }
@@ -356,7 +407,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         let response = alert.runModal()
         expiry.invalidate(); consentTimer = nil; consent = nil
         send(["type":"consent","id":id,"allow":response == .alertFirstButtonReturn])
-        statusText = response == .alertFirstButtonReturn ? "Approved - Windows control remains explicit" : "Request denied or expired - Mac is still available"
+        statusText = response == .alertFirstButtonReturn ? "Approved. Windows controls the Mac only after a click there." : "Request denied or expired. The Mac is still available."
     }
     func send(_ value:[String:Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject:value) else { return }
@@ -396,10 +447,9 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         if let alert = consent { NSApp.abortModal(); alert.window.orderOut(nil) }
         if let message = hostMessage(errorBuffer) { lastHostError = message }
         errorBuffer.removeAll()
-        state.receive(.stop); fingerprint = ""; identity.title = "Mac identity available after sharing starts"
-        menuBar.button?.contentTintColor = nil
+        state.receive(.stop); fingerprint = ""; identityText = ""
         menuBar.button?.setAccessibilityLabel("mac-lan: not sharing")
-        menuStatus.title = "Not sharing"; menuStop.isEnabled = false; menuStart.title = "Start sharing"
+        menuStop.isEnabled = false; menuStart.title = "Start Sharing"
         statusText = code == 0 ? "Not sharing. Start again when you want a new connection." : lastHostError ?? "Sharing stopped. Check permissions and the local network, then start again."
         refreshPermissions()
         if state.quitting { NSApp.reply(toApplicationShouldTerminate:true) }

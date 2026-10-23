@@ -33,7 +33,8 @@ internal static class UpdateProcess
     static async Task<JsonElement> CallCore(string[] arguments)
     {
         if(!File.Exists(Helper))throw new InvalidOperationException("This development build has no bundled update helper. Use a packaged mac-lan.exe.");
-        var start=new ProcessStartInfo(Helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+        // The helper writes UTF-8 JSON; the console code page would garble names such as Marcel’s MacBook.
+        var start=new ProcessStartInfo(Helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=System.Text.Encoding.UTF8,StandardErrorEncoding=System.Text.Encoding.UTF8};
         foreach(string argument in arguments)start.ArgumentList.Add(argument);
         using var process=Process.Start(start)??throw new IOException("Cannot start update helper.");
         using var timeout=new CancellationTokenSource(TimeSpan.FromMinutes(5));
