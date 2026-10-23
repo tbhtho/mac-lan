@@ -12,7 +12,7 @@ import (
 // screen, permissions, listener, webhook or OS input APIs are exercised.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("MACDOW_CAPTURE_FIXTURE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "--stream" {
-		if strings.Join(os.Args[1:], " ") != "--stream 0 1600 30 70 h264 8" {
+		if strings.Join(os.Args[1:], " ") != "--stream 0 1600 60 70 h264 8" {
 			fmt.Fprintln(os.Stderr, "unexpected capture helper arguments")
 			os.Exit(3)
 		}
@@ -32,7 +32,7 @@ func TestCaptureFailurePreservesNativeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runCapture(helper, start{Width: 1600, FPS: 30, Quality: 70}, func([]byte) { t.Error("failure fixture sent a video frame") }, func(string) {}, make(chan input))
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) { t.Error("failure fixture sent a video frame") }, func(string) {}, make(chan input))
 	if err == nil || !strings.Contains(err.Error(), "Hardware H.264 unavailable (-12908)") {
 		t.Fatalf("native failure was replaced by a generic process exit: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCaptureFailureDiagnosticExcludesNativePrivateDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runCapture(helper, start{Width: 1600, FPS: 30, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input))
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input))
 	if err == nil || !strings.Contains(err.Error(), "/Users/private-name") {
 		t.Fatalf("authenticated LAN error must retain the native setup reason: %v", err)
 	}

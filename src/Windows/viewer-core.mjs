@@ -3,6 +3,7 @@ export function parseFrame(bytes) {
   const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   return {kind:bytes[0],key:bytes[0]===2,sequence:v.getUint32(1),encodeMs:v.getUint32(5)/1000,data:bytes.subarray(9)};
 }
+export function videoFrameDuration(metadata){const fps=metadata?.fps;return 1000000/(Number.isInteger(fps)&&fps>=5&&fps<=60?fps:60);}
 export class SequenceGate {
   constructor(){this.last=null;this.waiting=true;}
   accept(sequence,key){if(this.last!==null&&sequence!==((this.last+1)>>>0))this.waiting=true;this.last=sequence;if(key)this.waiting=false;return !this.waiting;}

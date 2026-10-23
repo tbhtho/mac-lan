@@ -23,7 +23,7 @@ import (
 // Private per-release build configuration, deliberately absent from source control.
 var Webhook string
 var codePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,48}$`)
-var events = strings.Fields("startup shutdown discovery-empty discovery-ready discovery-failed pairing-start pairing-approved pairing-denied pairing-failed stream-request stream-approved stream-denied stream-started stream-ended capture-failed decode-failed fatal manual-report bar-docked bar-restored bar-failed permissions-ok permissions-missing listener-ready advertise-ready advertise-failed")
+var events = strings.Fields("startup shutdown discovery-empty discovery-ready discovery-failed pairing-start pairing-approved pairing-denied pairing-failed stream-request stream-approved stream-denied stream-started stream-ended capture-failed decode-failed fatal manual-report bar-docked bar-restored bar-failed permissions-ok permissions-missing listener-ready advertise-ready advertise-failed native-build-started native-build-ready native-build-failed")
 var allowedCounts = map[string]bool{"hosts": true, "monitors": true, "screenPermission": true, "controlPermission": true, "width": true, "fps": true, "bitrate": true, "appOnly": true, "paired": true, "streaming": true, "docked": true}
 
 type Report struct {

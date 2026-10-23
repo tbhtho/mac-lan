@@ -19,6 +19,7 @@ internal sealed class Session : IAsyncDisposable
     readonly object lifecycle=new();
     const int New=0,Authenticating=1,Paired=2,Starting=3,Ready=4,Stopped=5;
     int phase;
+    int maxFPS=30;
     string? remoteError;
     Task? reader,writer;
     public event Action<byte[]>? Frame;
@@ -27,6 +28,7 @@ internal sealed class Session : IAsyncDisposable
     public bool IsReady => Volatile.Read(ref phase)==Ready;
     public bool IsPaired { get { int current=Volatile.Read(ref phase);return current is Paired or Starting or Ready; } }
     public bool IsStarting => Volatile.Read(ref phase)==Starting;
+    public int MaxFPS => Volatile.Read(ref maxFPS);
     public long NativeAlive {get;private set;}
     public long LastFrame {get;private set;}
     public Task Connect(string host,string port,string fingerprint,string token)
@@ -64,6 +66,10 @@ internal sealed class Session : IAsyncDisposable
             if(type=="start")
             {
                 if(phase!=Paired)return;
+                if(!message.TryGetProperty("fps",out var requestedFPS)||requestedFPS.ValueKind!=JsonValueKind.Number||!requestedFPS.TryGetInt32(out var requested)||requested<60)
+                    throw new InvalidOperationException("Video requires at least 60 fps. Update both MAC-DOW apps if needed.");
+                if(requested>maxFPS)
+                    throw new InvalidOperationException($"Update MAC-DOW on your Mac to stream at {requested} fps. This Mac host supports up to {maxFPS} fps.");
                 phase=Starting;
             }
             else if(phase!=Ready||type is not ("release" or "lease" or "key" or "move" or "button" or "scroll"))return;
@@ -94,7 +100,12 @@ internal sealed class Session : IAsyncDisposable
                         lock(lifecycle)
                         {
                             if(phase==Stopped)return;
-                            if(t.GetString()=="catalog"){if(phase!=Authenticating)throw new InvalidDataException("Unexpected pairing response.");phase=Paired;}
+                            if(t.GetString()=="catalog")
+                            {
+                                if(phase!=Authenticating)throw new InvalidDataException("Unexpected pairing response.");
+                                maxFPS=value.TryGetProperty("maxFps",out var advertised)&&advertised.ValueKind==JsonValueKind.Number&&advertised.TryGetInt32(out var maximum)&&maximum is >=5 and <=60?maximum:30;
+                                phase=Paired;
+                            }
                             if(t.GetString()=="ready"){if(phase!=Starting)throw new InvalidDataException("Unexpected stream response.");phase=Ready;}
                             if(t.GetString()=="captureAlive"&&phase==Ready)NativeAlive=Stopwatch.GetTimestamp();
                             if(t.GetString()=="error"&&value.TryGetProperty("message",out var error)&&error.ValueKind==JsonValueKind.String)
