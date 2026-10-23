@@ -143,6 +143,35 @@ func TestCaptureFailureReachesClientBeforeConnectionEnds(t *testing.T) {
 	}
 }
 
+func TestNativeStatusBurstDoesNotDisconnectApprovedCapture(t *testing.T) {
+	s := &server{token: strings.Repeat("f", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+		catalog: func() ([]window, error) { return nil, nil },
+		consent: func(start) bool { return true },
+		stream: func(send func([]byte), status func(string), events <-chan input) error {
+			for i := 0; i < 1000; i++ {
+				status(`{"type":"status","paused":false,"message":"Encoder property fixture unsupported"}`)
+			}
+			send([]byte{1, 2, 3})
+			for range events {
+			}
+			return nil
+		},
+	}
+	c := connectFixture(t, s)
+	if err := c.WriteJSON(start{Type: "start", FPS: 10, Width: 1280, Quality: 70}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		kind, _, err := c.ReadMessage()
+		if err != nil {
+			t.Fatal("native status burst disconnected the approved capture", err)
+		}
+		if kind == websocket.BinaryMessage {
+			return
+		}
+	}
+}
+
 func TestPrivateLANOnly(t *testing.T) {
 	for _, s := range []string{"10.1.2.3", "172.16.1.1", "192.168.1.5"} {
 		if !privateIP(s) {

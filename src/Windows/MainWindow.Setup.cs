@@ -28,9 +28,9 @@ internal sealed partial class MainWindow
 
         streamSection.Margin=new Thickness(0,24,0,0);
         streamSection.Children.Add(new Border{Height=1,Background=new SolidColorBrush(Color.FromRgb(220,227,237)),Margin=new Thickness(0,0,0,20)});
-        streamSection.Children.Add(new TextBlock{Text="What would you like to view?",FontSize=19,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,12)});
-        var full=MakeButton("View Mac desktop",()=>Start(false));full.Style=(Style)FindResource("PrimaryButton");streamSection.Children.Add(full);
-        Field(streamSection,"Or choose one Mac window",windows);windows.Width=double.NaN;
+        streamSection.Children.Add(new TextBlock{Text="App Priority",FontSize=19,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,8)});
+        streamSection.Children.Add(new TextBlock{Text="Use the MacBook tab for the desktop. You can also open one Mac window separately.",Foreground=Muted,Margin=new Thickness(0,0,0,8)});
+        Field(streamSection,"Choose one Mac window",windows);windows.Width=double.NaN;
         streamSection.Children.Add(MakeButton("Open in App Priority",()=>Start(true)));
         streamSection.Children.Add(new TextBlock{Text="App Priority shows the selected window. Separate menus and dialogs stay on your Mac.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
         codec.ItemsSource=new[]{"H.264 (recommended)","JPEG diagnostic"};codec.SelectedIndex=0;
@@ -45,6 +45,6 @@ internal sealed partial class MainWindow
         options.Children.Add(new TextBlock{Text="The tab strip reserves its own space. App title bars stay below it.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,8,0,10)});
         options.Children.Add(new TextBlock{Text="Mac diagnostics are sent automatically. Windows diagnostics stay on this PC.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,4,0,8)});
         setup.Children.Add(new Expander{Header="Display and diagnostics",Content=options});
-        setup.Children.Add(new TextBlock{Text="Keyboard and mouse stay local until you choose Control Mac.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,24,0,0)});
+        setup.Children.Add(new TextBlock{Text="To use keyboard and mouse on the Mac, choose Control Mac from the Connection menu. Ctrl+Alt+Shift+Backspace releases control.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,24,0,0)});
     }
 }

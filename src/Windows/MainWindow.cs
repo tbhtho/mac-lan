@@ -51,7 +51,7 @@ internal sealed partial class MainWindow : Window
         Title="MAC-DOW - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo());
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm();tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);BuildSetup();
@@ -70,6 +70,7 @@ internal sealed partial class MainWindow : Window
     void ShowSetup()
     {
         gate.Disarm();remote=false;if(appWindow!=null){appWindow.Activate();return;}
+        status.Visibility=Visibility.Visible;body.Background=new SolidColorBrush(Color.FromRgb(243,245,249));
         Title=paired?"MAC-DOW - Connected to your Mac":"MAC-DOW - Connect your Mac";
         WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;WindowState=WindowState.Normal;Width=840;Height=720;
         if(setup.Parent is ScrollViewer old)old.Content=null;body.Child=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
@@ -84,9 +85,12 @@ internal sealed partial class MainWindow : Window
         if(!session.IsReady&&!session.IsStarting){Start(false);return;}
         remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();RefreshContext();UpdateControl();
     }
-    DockPanel RemotePanel(RemoteView view)
+    FrameworkElement RemotePanel(RemoteView view)
     {
         if(view.Parent is Panel previous)previous.Children.Remove(view);
+        if(view.Parent is Border previousBorder)previousBorder.Child=null;
+        status.Visibility=Visibility.Collapsed;
+        if(ReferenceEquals(view,desktop)){body.Background=Brushes.Black;return view;}
         var panel=new DockPanel{Background=Brushes.White};var toolbar=new StackPanel{Orientation=Orientation.Horizontal,Background=Brushes.White,Margin=new Thickness(12,4,12,4)};
         // A single control button is reparented only after the previous surface has been detached.
         if(control.Parent is Panel old)old.Children.Remove(control);toolbar.Children.Add(control);
@@ -176,6 +180,7 @@ internal sealed partial class MainWindow : Window
         if(!CanControlVideo()){gate.Disarm();status.Text="Waiting for fresh video; control remains off.";return;}
         try{keyboard.Install();controlGeneration++;UpdateControl();}catch(Exception ex){gate.Disarm();status.Text="Cannot acquire keyboard: "+ex.Message;}
     }
+    void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
     void RefreshContext()=>gate.SetContext(session?.IsReady==true,remote||appWindow!=null,OwnerIsForeground());
     void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Brushes.DarkOrange:Brushes.White;control.Foreground=gate.CanRoute?Brushes.White:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
@@ -183,7 +188,7 @@ internal sealed partial class MainWindow : Window
     bool CanControlVideo() {long shown=(appView??desktop).LastPresented;return shown>0&&session!=null&&session.NativeAlive>0&&Stopwatch.GetElapsedTime(session.NativeAlive).TotalSeconds<1.5&&(session.LastFrame<=shown||Stopwatch.GetElapsedTime(shown).TotalSeconds<1);}
     void Tick()
     {
-        RefreshContext();if(gate.CanRoute&&!CanControlVideo())gate.Disarm();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute);
+        RefreshContext();if(gate.CanRoute&&!CanControlVideo())gate.Disarm();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(session?.IsReady==true){lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=gate.CanRoute,generation=controlGeneration,view=remote||appWindow!=null,stamp=lastLease});}
     }
