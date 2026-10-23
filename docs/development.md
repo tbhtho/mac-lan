@@ -2,6 +2,8 @@
 
 The README describes the current preview workflow. This document keeps build instructions and earlier development context out of that introduction. Verify the exact downloaded version against [validation status](verification.md); an older release does not gain a feature just because it appears on the development branch.
 
+Distribution now uses manual reinstalls from the existing `tbhtho/MAC-DOW` releases. The separate public update feed is withdrawn; references below to that distribution describe earlier development.
+
 ## Local builds
 
 Windows requires .NET SDK 10, Go 1.24+, and Node 22+:

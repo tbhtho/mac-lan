@@ -16,9 +16,9 @@ Read the actual `LICENSE` before describing it. Do not change license terms as p
 
 ## Downloads and updates
 
-Keep source visibility separate from the public `tbhtho/MAC-DOW-Downloads` binary repository. Verify the public release destination, exact asset names, anonymous access, and signed feed before advertising a new release as available. Source commits and release artifacts must identify the same intended commit; package provenance must truthfully distinguish native execution from cross-compilation and headless tests from real hardware checks.
+Publish downloads only through the existing `tbhtho/MAC-DOW` repository's releases. The user chose manual reinstalls and rejected the separate distribution repository. Do not recreate that repository, publish a replacement update feed, or change source visibility without a new explicit user request. Do not promise automatic updates while the feed is withdrawn.
 
-Publish an update's immutable binaries and matching signed feed as one coordinated release. Verify the signature, byte counts, hashes, platform, architecture, version, source commit, and final public download URLs. Keep the Ed25519 private key, private bootstrap, diagnostic destination, tokens, and all credentials out of the public repository and public artifacts. Follow `docs/update-feed-publishing.md`; no signing key or credential may be printed in logs.
+Verify the release destination, exact asset names, byte counts, hashes, platform, architecture, version, and source commit before advertising a new release as available. Source commits and release artifacts must identify the same intended commit; package provenance must truthfully distinguish native execution from cross-compilation and headless tests from real hardware checks. Keep the Ed25519 private key, diagnostic destination, tokens, and all credentials out of version control and public artifacts. No signing key or credential may be printed in logs.
 
 A configured 60 fps target is not proof of measured throughput or responsiveness. Keep the command-line Mac preview distinct from the unfinished menu-bar `.app`. Preserve macOS permission requirements and OS security protections. Do not start paid CI, install toolchains, bypass OS protections, or change account permissions as incidental verification.
 
