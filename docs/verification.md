@@ -1,5 +1,34 @@
 # Verification record
 
+## Alpha.16 - Windows glass interface, Windows-key routing and App Priority
+
+The full Windows headless suite passed: 59 core (including 11 new key-routing
+checks), 28 encoded-video, 34 session, 9 update-workflow and 46 transfer
+checks, presentation, viewer tests, all Go package tests, `go vet`, and Windows
+Release compilation. The dark theme was rendered offscreen once for inspection;
+the acrylic backdrop, Windows-key suppression, App Priority sizing, and Swift
+menu changes were not run on real hardware or compiled natively.
+
+Packaging and publishing ran in Windows PowerShell 5.1 for the first time. Two
+PowerShell 7-only calls were made portable (commits `79852d8`, `c94f48d`). A
+zero-byte `C:\Windows\System32\python` file shadows Python inside PowerShell
+on the publishing PC and silently skips the scripts' Python packaging and
+verification steps; this release ran with `python` aliased to `python.exe`, and
+the archive and package verifiers printed their success lines.
+
+- Release `v0.1.0-alpha.16` binds source commit
+  `c94f48d32da933a8dc455149083c152aab4b21e5`; feed commit `6af8204` follows it.
+  All six downloads were read anonymously and matched `SHA256SUMS` and the
+  local artifacts. The canonical app and alias are identical: 7,308,967 bytes,
+  SHA-256 `f08fc14917dfaddc5395c07eeee4570709d3117caf4bf418d6f8628f900b1fe5`.
+  Windows is 149,679,650 bytes, SHA-256
+  `7b6774732b356ed496df4ffb9b83667809ed503d70c2811b4d6e4085f8ce40da`.
+- The anonymously fetched raw feed equals the committed feed and its signature
+  and bindings verified; it expires 2026-11-22.
+- The actual public alpha.15 Windows EXE reported alpha.16 available from the
+  live feed; the alpha.16 EXE reported current. Mac update application was not
+  exercised.
+
 ## Alpha.15 - proportional desktop and Mac menu-bar app
 
 The full Windows headless suite passed: 49 core, 28 encoded-video, 34 session,
