@@ -1,14 +1,16 @@
 # MAC-DOW
 
-## Current development build (alpha.4)
+## Current development build (alpha.5)
 
 Windows now publishes as one **MAC-DOW.exe** with its .NET runtime, native loader, viewer and discovery/updater helper bundled. Run that EXE directly; no adjacent dependency folder is needed. Internal resources extract to a private application cache. Microsoft WebView2 Runtime remains an OS prerequisite. Build with `scripts/package-windows.ps1`.
 
-The new Mac interface is **MAC-DOW Host.app**: open it, grant viewing access when you choose, click **Start sharing**, then **Find my Mac** on Windows. LAN address selection is automatic; normal setup has no Terminal or manual `--listen` command. The native build script now assembles this bundle. **This new AppKit launcher has not yet been natively compiled or tested.** Do not confuse the older released command-line companion below with the new app.
+Windows keeps the Windows/MacBook tabs in a dedicated desktop bar that reserves space, so maximized app title bars stay below it. The connection window now uses a consistent light theme and only offers **Find my Mac → Connect**. The manual-details connection section has been removed. Windows diagnostic logs stay local; only macOS sends bounded, sanitized reports to the privately configured destination.
+
+The Mac app source now uses a **menu-bar item only**, with no main window. It starts listening on launch when Screen Recording access already exists; pairing and viewing still require approval on the Mac. **This AppKit launcher has not yet been natively compiled or tested and is not included as a built .app in this release.** The alpha.5 Apple Silicon command-line companion adds Bonjour discovery, native Allow dialogs and Mac-only diagnostics. Its Go executable is cross-compiled; its capture helper is the unchanged alpha.2 native build. Start `MacDowHost` without arguments, then use **Find my Mac** on Windows. The earlier “No capture until pairing + ALLOW” message meant the host was waiting, not that capture had failed.
 
 Both app interfaces now support automatic background checks/downloads and **Restart to update**. Updates preserve settings and replace only the Windows EXE or Mac app bundle. Restart is user-triggered and returns idle/view-only. Private download access still requires an existing authenticated GitHub CLI, and automatic replacement still requires verified signed release provenance with GitHub CLI 2.93+. Current unattested releases cannot be applied automatically. These deployment prerequisites are unresolved; this is not a claim that production auto-update is working end to end.
 
-The remainder describes the earlier command-line releases and their capture/control limits. Existing releases/assets remain unchanged.
+The remainder records the earlier command-line releases and their capture/control limits; historical ZIP/manual connection instructions do not describe the alpha.5 Windows interface. Existing releases/assets remain unchanged.
 
 Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream one selected Mac window in a normal Windows window with **App Priority**.
 
@@ -79,7 +81,7 @@ Windows: .NET SDK 10, Go 1.24+, Node 22+.
 .\scripts\package-windows.ps1
 ```
 
-Native Apple Silicon from a full checkout with existing Go and Swift toolchains:
+Native Apple Silicon from a full checkout with existing Go and Swift toolchains: provide the private diagnostic destination through `MACDOW_DIAGNOSTICS_WEBHOOK` or the ignored `.cache/discord-webhook.txt` file before running the script. The endpoint is embedded only in the Mac helper, never in the Windows package or tracked source.
 
 ```sh
 bash scripts/build-macos.sh

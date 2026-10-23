@@ -11,10 +11,13 @@ export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$CLANG_MODULE_CACHE_PAT
 export GOCACHE="${GOCACHE:-$PWD/.cache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-$PWD/.cache/go-mod}"
 mkdir -p "$CLANG_MODULE_CACHE_PATH" "$GOCACHE" "$GOMODCACHE"
+diagnostic_destination="${MACDOW_DIAGNOSTICS_WEBHOOK:-}"
+if [[ -z "$diagnostic_destination" && -f .cache/discord-webhook.txt ]]; then diagnostic_destination="$(cat .cache/discord-webhook.txt)"; fi
+[[ "$diagnostic_destination" =~ ^https://discord\.com/api/webhooks/[0-9]{17,22}/[A-Za-z0-9_-]+$ ]] || { echo "Private Mac diagnostic destination missing/invalid. Set MACDOW_DIAGNOSTICS_WEBHOOK for this build; it is never saved in tracked source." >&2; exit 1; }
 app="$PWD/artifacts/macos-app-arm64/MAC-DOW Host.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Helpers" "$app/Contents/Resources" .cache/mac-app-build
 swiftc -swift-version 5 -O -target arm64-apple-macos14.0 native/MacDowCapture.swift -o "$app/Contents/Helpers/MacDowCapture" -framework ApplicationServices -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework CoreGraphics -framework CoreMedia -framework CoreImage -framework VideoToolbox -framework ImageIO -framework UniformTypeIdentifiers
-(cd host && go test -p 1 ./... && go build -trimpath -o "$app/Contents/Helpers/MacDowHost" .)
+(cd host && go test -p 1 ./... && go build -trimpath -ldflags "-X github.com/tbhtho/MAC-DOW/host/internal/diagnostics.Webhook=$diagnostic_destination" -o "$app/Contents/Helpers/MacDowHost" .)
 cp native/MacDowHostApp.swift .cache/mac-app-build/main.swift
 swiftc -swift-version 5 -O -target arm64-apple-macos14.0 .cache/mac-app-build/main.swift native/HostUpdater.swift -o "$app/Contents/MacOS/MAC-DOW Host" -framework AppKit -framework Foundation -framework ApplicationServices -framework CoreGraphics
 "$app/Contents/Helpers/MacDowCapture" --self-test

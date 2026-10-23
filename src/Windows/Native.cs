@@ -13,6 +13,7 @@ internal static class Native
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(nint monitor,ref Info info);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(nint monitor,int type,out uint x,out uint y);
     [DllImport("user32.dll")] internal static extern nint GetForegroundWindow();
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(nint hwnd,uint attribute,out Rect bounds,uint size);
     [DllImport("user32.dll")] static extern bool SetWindowPos(nint hwnd,nint after,int x,int y,int cx,int cy,uint flags);
     [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll",SetLastError=true)] internal static extern bool RegisterHotKey(nint hwnd,int id,uint modifiers,uint key);
@@ -26,7 +27,18 @@ internal static class Native
     public static void Position(Window window,MonitorArea m,bool strip)
     {
         var hwnd=new WindowInteropHelper(window).Handle;
-        SetWindowPos(hwnd,-1,m.Left,m.Top,m.Width,strip?(int)Math.Ceiling(44*m.Dpi/96.0):m.Height,0x0010|0x0040);
+        SetWindowPos(hwnd,0,m.Left,m.Top,m.Width,strip?TabBarLayout.HeightPixels(m.Dpi):m.Height,0x0010|0x0040|0x0004);
+    }
+    public static (int Left,int Top,int Width,int Height)? ScreenBounds(string id)
+    {
+        (int,int,int,int)? result=null;
+        EnumDisplayMonitors(0,0,(m,_,__,___)=>{var i=new Info{Size=Marshal.SizeOf<Info>(),Device=""};if(GetMonitorInfo(m,ref i)&&i.Device==id)result=(i.Monitor.Left,i.Monitor.Top,i.Monitor.Right-i.Monitor.Left,i.Monitor.Bottom-i.Monitor.Top);return true;},0);
+        return result;
+    }
+    public static int VisibleWindowTop(Window window)
+    {
+        if(DwmGetWindowAttribute(new WindowInteropHelper(window).Handle,9,out var rect,(uint)Marshal.SizeOf<Rect>())!=0)throw new InvalidOperationException("Cannot read visible window frame.");
+        return rect.Top;
     }
 }
 

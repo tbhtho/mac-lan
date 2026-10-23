@@ -124,7 +124,7 @@ func Browse(ctx context.Context) ([]Host, error) {
 			}
 		case err := <-result:
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				return nil, errors.New("Local discovery is unavailable. Refresh after starting sharing on the Mac, or use Advanced connection")
+				return nil, errors.New("Local discovery is unavailable. Keep MAC-DOW open on the Mac, check that both devices use the same network, then try again")
 			}
 			// Drain already received records, bounded and nonblocking.
 			for entries != nil {
