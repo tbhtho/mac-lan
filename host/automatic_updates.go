@@ -15,7 +15,7 @@ import (
 )
 
 const updateOfferScript = `on run argv
- set answer to display dialog (item 1 of argv) with title "MAC-DOW Update" buttons {"Later", "Restart to update"} default button "Later" cancel button "Later" giving up after 90
+ set answer to display dialog (item 1 of argv) with title "mac-lan Update" buttons {"Later", "Restart to update"} default button "Later" cancel button "Later" giving up after 90
  if gave up of answer then return "Later"
  return button returned of answer
 end run`
@@ -23,7 +23,7 @@ end run`
 func updateOffer(ctx context.Context, version string) bool {
 	child, cancel := context.WithTimeout(ctx, 95*time.Second)
 	defer cancel()
-	message := "MAC-DOW " + version + " is downloaded and its publisher signature is verified.\n\nRestart to install it? Your settings stay in place. Reconnect from Windows afterwards; control stays off until you activate it."
+	message := "mac-lan " + version + " is downloaded and its publisher signature is verified.\n\nRestart to install it? Your settings stay in place. Reconnect from Windows afterwards; control stays off until you activate it."
 	output, err := exec.CommandContext(child, "/usr/bin/osascript", "-e", updateOfferScript, "--", message).Output()
 	return err == nil && len(output) < 64 && strings.TrimSpace(string(output)) == "Restart to update"
 }
@@ -77,7 +77,7 @@ func startHostUpdates(ctx context.Context, stop context.CancelFunc, s *server) {
 	}
 	install := filepath.Dir(executable)
 	updater.StartBackgroundUpdates(ctx, install, func(stage updater.Stage) {
-		fmt.Fprintln(os.Stdout, "A verified MAC-DOW update is downloaded. A Restart to update choice will appear when the connection is idle.")
+		fmt.Fprintln(os.Stdout, "A verified mac-lan update is downloaded. A Restart to update choice will appear when the connection is idle.")
 		accepted, err := offerWhenIdle(ctx, s, func() bool { return updateOffer(ctx, stage.Plan.Version) }, func() error {
 			// Public updates omit the private endpoint; retain it locally first.
 			if err := diagnostics.InitMacDestination(); err != nil {

@@ -49,7 +49,7 @@ internal sealed partial class MainWindow : Window
     bool paired;
     public MainWindow()
     {
-        Title="MAC-DOW - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
+        Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
@@ -97,7 +97,7 @@ internal sealed partial class MainWindow : Window
     {
         gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
         status.Visibility=Visibility.Visible;body.Background=new SolidColorBrush(Color.FromRgb(243,245,249));
-        Title=paired?"MAC-DOW - Connected to your Mac":"MAC-DOW - Connect your Mac";
+        Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
         WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;WindowState=WindowState.Normal;Width=840;Height=720;
         if(setup.Parent is ScrollViewer old)old.Content=null;body.Child=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
         tabBar.SetMode(true);Show();
@@ -150,7 +150,7 @@ internal sealed partial class MainWindow : Window
         if(connecting||paired)return;
         if(nearby.SelectedItem is not DiscoveredHost selected){pairingProgress.Text="Find and select your Mac first.";return;}
         string identity=Pairing.IdentityCode(selected.Fingerprint);
-        if(MessageBox.Show(this,"Does MAC-DOW Host on your Mac show this exact identity?\n\n"+identity+"\n\nCompare every group directly on the Mac before continuing. The network name alone is not proof.","Compare Mac identity",MessageBoxButton.YesNo,MessageBoxImage.Question,MessageBoxResult.No)!=MessageBoxResult.Yes)return;
+        if(MessageBox.Show(this,"Does mac-lan Host on your Mac show this exact identity?\n\n"+identity+"\n\nCompare every group directly on the Mac before continuing. The network name alone is not proof.","Compare Mac identity",MessageBoxButton.YesNo,MessageBoxImage.Question,MessageBoxResult.No)!=MessageBoxResult.Yes)return;
         connecting=true;Disconnect();
         pairButton.IsEnabled=false;pairButton.Content="Waiting for Mac...";nearby.IsEnabled=false;
         string number=System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000,1000000).ToString();
@@ -159,7 +159,7 @@ internal sealed partial class MainWindow : Window
         var s=CreateSession();
         Telemetry.Report("pairing-start");
         try{await s.ConnectGuided(selected,number);}
-        catch(Exception e){connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;Telemetry.Report("pairing-failed",e.GetType().Name);s.Abort(e.Message);pairingProgress.Text=status.Text="Pairing failed. Keep MAC-DOW running on the Mac and approve the matching request there.";}
+        catch(Exception e){connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;Telemetry.Report("pairing-failed",e.GetType().Name);s.Abort(e.Message);pairingProgress.Text=status.Text="Pairing failed. Keep mac-lan running on the Mac and approve the matching request there.";}
     }
     Session CreateSession()
     {
@@ -180,7 +180,7 @@ internal sealed partial class MainWindow : Window
                 else frames.Clear();
             },DispatcherPriority.Background);
         };
-        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title="MAC-DOW - disconnected / view only";}});
+        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title="mac-lan - disconnected / view only";}});
         return s;
     }
     void HandleMessage(Session s,JsonElement m)
@@ -188,9 +188,9 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":paired=true;connecting=false;Title="MAC-DOW - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString())).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
+            case "catalog":paired=true;connecting=false;Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString())).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
-            case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=$"MAC-DOW | {(gate.CanRoute?"CONTROLLING":"VIEW ONLY")} | RTT {ms:F0} ms | Ctrl+Alt+Shift+Backspace releases";}}break;
+            case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=$"mac-lan | {(gate.CanRoute?"CONTROLLING":"VIEW ONLY")} | RTT {ms:F0} ms | Ctrl+Alt+Shift+Backspace releases";}}break;
             case "video":(appView??desktop).Configure(m);break;
             case "controlStatus":HandleControlStatus(m);break;
             case "error":case "status":var msg=m.TryGetProperty("message",out var v)?v.GetString():"Mac status changed";status.Text=msg;if(t.GetString()=="error"){Telemetry.Report("capture-failed","host-error");viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}if(m.TryGetProperty("paused",out var paused)&&paused.GetBoolean()){gate.Disarm("mac-paused");(appView??desktop).Clear();viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}break;
@@ -201,13 +201,13 @@ internal sealed partial class MainWindow : Window
         if(session==null||!session.IsPaired){status.Text="Connect to your Mac first, then choose what to view.";return;}
         if(session.VideoError is string videoError){ShowSetup();status.Text=pairingProgress.Text="Connected for files. Video is unavailable on your Mac: "+videoError;return;}
         if(session.IsReady||session.IsStarting){ShowRemote();return;}
-        if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update MAC-DOW on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
+        if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update mac-lan on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
         uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;}
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
             remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");
-            appWindow=new Window{Title="MAC-DOW App Priority - View only",Width=1100,Height=740,MinWidth=400,MinHeight=300,Background=Brushes.Black,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};
+            appWindow=new Window{Title="mac-lan App Priority - View only",Width=1100,Height=740,MinWidth=400,MinHeight=300,Background=Brushes.Black,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
@@ -228,7 +228,7 @@ internal sealed partial class MainWindow : Window
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
     void RefreshContext()=>gate.SetContext(session?.IsReady==true,remote||appWindow!=null,OwnerIsForeground());
     void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Brushes.DarkOrange:Brushes.White;control.Foreground=gate.CanRoute?Brushes.White:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
-    void Escape(){gate.Disarm("manual");if(appWindow==null)ShowDesktop();else{appWindow.Title="MAC-DOW App Priority | VIEW ONLY | control released";UpdateControl();}}
+    void Escape(){gate.Disarm("manual");if(appWindow==null)ShowDesktop();else{appWindow.Title="mac-lan App Priority | VIEW ONLY | control released";UpdateControl();}}
     string? ControlVideoBlockReason()=>session==null?"disconnected":VideoFreshness.BlockReason(controlPermission,(appView??desktop).LastPresented,session.NativeAlive,session.LastFrame,Stopwatch.GetTimestamp(),Stopwatch.Frequency);
     bool CanControlVideo()=>ControlVideoBlockReason()==null;
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
@@ -261,13 +261,13 @@ internal sealed partial class MainWindow : Window
         {
             controlIssue="Allow Accessibility on your Mac to control";
             if(gate.CanRoute)gate.Disarm("mac-permission");
-            status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow MAC-DOW. Then click the Mac desktop again.";
+            status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";
             UpdateControl();return;
         }
         switch(code.GetString())
         {
             case "ready":controlIssue=null;break;
-            case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow MAC-DOW. Then click the Mac desktop again.";break;
+            case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";break;
             case "scope-blocked":controlIssue="Control paused: refocus the selected Mac window";gate.Disarm("mac-scope");break;
             case "lease-expired":case "stale-input":case "generation-revoked":controlIssue="Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
         }
@@ -339,7 +339,7 @@ internal sealed class RemoteView : WebView2
         if(CoreWebView2!=null)return;
         try{
             _=CoreWebView2Environment.GetAvailableBrowserVersionString();
-            string cache=Path.Combine(Path.GetTempPath(),"MAC-DOW-WebView",Environment.ProcessId.ToString());
+            string cache=Path.Combine(Path.GetTempPath(),"mac-lan-WebView",Environment.ProcessId.ToString());
             var env=await CoreWebView2Environment.CreateAsync(null,cache);
             await EnsureCoreWebView2Async(env);
             if(CoreWebView2==null)throw new InvalidOperationException("WebView2 initialization did not produce a runtime.");

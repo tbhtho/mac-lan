@@ -124,12 +124,70 @@ func TestManifestUsesArtifactBytesAndVerifiesPrevious(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parsed.Releases) != 2 || parsed.Releases[0].Assets[0].Size != 3 {
+	if len(parsed.Releases) != 2 || parsed.Releases[0].Assets[0].Size != 3 || parsed.Releases[0].Assets[0].Name != "mac-lan.exe" || parsed.Releases[0].Assets[1].Name != "mac-lan-macos-arm64-commandline-preview.tar.gz" || parsed.Releases[1].Assets[0].Name != "MAC-DOW.exe" {
 		t.Fatal("missing current artifact metadata or previous history")
 	}
 	previous[len(previous)/2] ^= 1
 	if _, err := makeManifest(options, previous, public, now); err == nil {
 		t.Fatal("merged untrusted previous feed")
+	}
+}
+func TestPublisherAcceptsRenamedAssetsAndRetainsLegacyHistory(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	for _, name := range []string{"mac-lan.exe", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW.exe", "MAC-DOW-macos-arm64-commandline-preview.tar.gz"} {
+		raw := bytes.Replace(testPayload(t), []byte("MAC-DOW.exe"), []byte(name), 1)
+		if _, err := validatePayload(raw, now); err != nil {
+			t.Fatalf("supported asset %s refused: %v", name, err)
+		}
+	}
+}
+
+func TestRenamedMacArtifactStillRequiresPublicProvenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mac-lan-macos-arm64-commandline-preview.tar.gz")
+	if err := os.WriteFile(path, macArchiveFixture(t, []byte("host"), []byte(`{"publicUpdate":false}`)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifactMetadata(path, "mac-lan-macos-arm64-commandline-preview.tar.gz", 1); err == nil {
+		t.Fatal("renamed Mac archive bypassed public provenance gate")
+	}
+}
+
+func TestManifestRenewsExpiredAuthenticatedHistory(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "key")
+	var keyOutput bytes.Buffer
+	if err := generateKey(key, &keyOutput); err != nil {
+		t.Fatal(err)
+	}
+	public := strings.TrimSpace(keyOutput.String())
+	oldTime := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	now := oldTime.Add(40 * 24 * time.Hour)
+	previous, err := signPayload(key, testPayload(t), public, oldTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyEnvelope(previous, public, now); err == nil {
+		t.Fatal("expired feed accepted for current verification")
+	}
+	windows, mac := filepath.Join(dir, "mac-lan.exe"), filepath.Join(dir, "mac.tar.gz")
+	if err := os.WriteFile(windows, []byte("win"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mac, macArchiveFixture(t, []byte("mac"), []byte(`{"publicUpdate":true}`)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	options := manifestOptions{Windows: windows, Mac: mac, Tag: "v0.1.0-alpha.14", Commit: strings.Repeat("c", 40), ReleaseID: 4, WindowsID: 5, MacID: 6}
+	payload, err := makeManifest(options, previous, public, now)
+	if err != nil {
+		t.Fatal("authenticated history could not be renewed", err)
+	}
+	parsed, err := validatePayload(payload, now)
+	if err != nil || len(parsed.Releases) != 2 || parsed.Releases[1].Tag != "v0.1.0-alpha.12" {
+		t.Fatal("renewed feed lost history", parsed, err)
+	}
+	previous[len(previous)/2] ^= 1
+	if _, err := makeManifest(options, previous, public, now); err == nil {
+		t.Fatal("renewal accepted forged expired history")
 	}
 }
 

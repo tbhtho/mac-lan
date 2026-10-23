@@ -20,7 +20,7 @@ internal static class LayoutSmoke
                 bar=new TabBar(()=>{},()=>{},()=>{},()=>{},()=>{},new ComboBox(),new Button{Content="Updates"});
                 bar.DockTo(before);await Task.Delay(350);
                 var during=DisplayLayout.Select(Native.Monitors(),before.Id);
-                probe=new Window{Title="MAC-DOW title-bar layout check",Width=700,Height=400,Left=(during.Left+100)*96.0/during.Dpi,Top=(during.Top+100)*96.0/during.Dpi,Content=new TextBlock{Text="Checking that a maximized app starts below the MAC-DOW tabs.",Margin=new Thickness(24)}};
+                probe=new Window{Title="mac-lan title-bar layout check",Width=700,Height=400,Left=(during.Left+100)*96.0/during.Dpi,Top=(during.Top+100)*96.0/during.Dpi,Content=new TextBlock{Text="Checking that a maximized app starts below the mac-lan tabs.",Margin=new Thickness(24)}};
                 probe.Show();probe.WindowState=WindowState.Maximized;await Task.Delay(350);
                 int titleTop=Native.VisibleWindowTop(probe);
                 bool reserved=during.Top-before.Top==TabBarLayout.HeightPixels(before.Dpi),uncovered=titleTop>=during.Top;

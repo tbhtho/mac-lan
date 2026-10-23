@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><RuntimeIdentifiers>win-x64</RuntimeIdentifiers><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><ApplicationManifest>app.manifest</ApplicationManifest><AssemblyName>MAC-DOW</AssemblyName><Version>0.1.0</Version><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup>
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><RuntimeIdentifiers>win-x64</RuntimeIdentifiers><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><ApplicationManifest>app.manifest</ApplicationManifest><AssemblyName>mac-lan</AssemblyName><Version>0.1.0</Version><Product>mac-lan</Product><Title>mac-lan</Title><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup>
   <PropertyGroup><DebugType>embedded</DebugType><PublishSingleFile>true</PublishSingleFile><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Core/Core.csproj"/><PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31"/></ItemGroup>
   <ItemGroup>

@@ -47,6 +47,36 @@ func TestSemanticVersionsAndChannels(t *testing.T) {
 func fixtureRelease(tag string, pre bool) Release {
 	return Release{ID: 10, Tag: tag, Prerelease: pre, Assets: []Asset{{ID: 11, Name: "MAC-DOW-windows-x64-unsigned.zip", Size: 10, Digest: "sha256:" + string(bytes.Repeat([]byte{'a'}, 64))}}}
 }
+func TestSelectPrefersRenamedAssetsAndRetainsLegacyFallback(t *testing.T) {
+	for _, platform := range []struct{ os, arch, renamed, legacy string }{
+		{"windows", "amd64", "mac-lan.exe", "MAC-DOW.exe"},
+		{"darwin", "arm64", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz"},
+	} {
+		t.Run(platform.os, func(t *testing.T) {
+			r := fixtureRelease("v0.2.0", false)
+			r.Assets[0].Name = platform.legacy
+			legacy := r.Assets[0]
+			renamed := legacy
+			renamed.ID++
+			renamed.Name = platform.renamed
+			for _, assets := range [][]Asset{{legacy, renamed}, {renamed, legacy}, {legacy}} {
+				r.Assets = assets
+				want := platform.renamed
+				if len(assets) == 1 {
+					want = platform.legacy
+				}
+				p, err := Select([]Release{r}, "0.1.0", "stable", platform.os, platform.arch)
+				if err != nil || p.Asset.Name != want {
+					t.Fatalf("selected %q, want %q: %v", p.Asset.Name, want, err)
+				}
+			}
+			r.Assets = []Asset{legacy, renamed, renamed}
+			if _, err := Select([]Release{r}, "0.1.0", "stable", platform.os, platform.arch); !errors.Is(err, ErrNoUpdate) {
+				t.Fatal("duplicate preferred asset was accepted", err)
+			}
+		})
+	}
+}
 func TestMetadataRejectsUnsafeAssets(t *testing.T) {
 	for _, mutate := range []func(*Release){
 		func(r *Release) { r.Draft = true }, func(r *Release) { r.Assets[0].Digest = "" }, func(r *Release) { r.Assets[0].Size = 1 << 40 }, func(r *Release) { r.Assets = append(r.Assets, r.Assets[0]) },

@@ -24,7 +24,7 @@ internal sealed class TabBar : Window,IDisposable
     HwndSource? source;
     public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
     {
-        Title="MAC-DOW Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=48;
+        Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=48;
         Background=new SolidColorBrush(Color.FromRgb(19,32,51));Foreground=Brushes.White;
         var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(12,5,12,5)};
         var right=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(right,Dock.Right);
@@ -57,7 +57,7 @@ internal sealed class TabBar : Window,IDisposable
         updateButton.Foreground=Brushes.White;updateButton.Background=Brushes.Transparent;updateButton.BorderBrush=Brushes.Transparent;updateButton.MinHeight=32;updateButton.FontSize=12;
         right.Children.Add(updateButton);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);
         var left=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(left,Dock.Left);
-        left.Children.Add(new TextBlock{Text="MAC-DOW",Foreground=Brushes.White,FontWeight=FontWeights.SemiBold,FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,24,0)});
+        left.Children.Add(new TextBlock{Text="mac-lan",Foreground=Brushes.White,FontWeight=FontWeights.SemiBold,FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,24,0)});
         local=ActionButton("Windows",windows);mac=ActionButton("MacBook",macbook);local.MinWidth=108;mac.MinWidth=108;left.Children.Add(local);left.Children.Add(mac);grid.Children.Add(left);grid.Children.Add(connection);
         Content=grid;SetMode(true);
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(Hook);};

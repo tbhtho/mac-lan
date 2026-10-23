@@ -1,4 +1,6 @@
-param([switch]$PublicUpdate)
+param([switch]$PublicUpdate,[switch]$PrivateBootstrap)
+if($PublicUpdate -and $PrivateBootstrap){throw 'Choose a public build or a private bootstrap, not both'}
+$PublicUpdate=-not $PrivateBootstrap
 $ErrorActionPreference='Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 $env:GOCACHE=Join-Path $PWD '.cache/go-build'
@@ -10,7 +12,7 @@ $env:GOARCH='arm64'
 $diagnosticDestination=$env:MACDOW_DIAGNOSTICS_WEBHOOK
 if(-not $diagnosticDestination -and (Test-Path -LiteralPath '.cache/discord-webhook.txt')){$diagnosticDestination=[IO.File]::ReadAllText((Join-Path $PWD '.cache/discord-webhook.txt')).Trim()}
 if(-not $PublicUpdate -and $diagnosticDestination -notmatch '^https://discord\.com/api/webhooks/[0-9]{17,22}/[A-Za-z0-9_-]+$'){throw 'Private Mac diagnostic destination missing or invalid'}
-$outputRoot=if($PublicUpdate){Join-Path $PWD 'artifacts/update-public'}else{Join-Path $PWD 'artifacts'}
+$outputRoot=if($PublicUpdate){Join-Path $PWD 'artifacts/update-public'}else{Join-Path $PWD 'artifacts/private-bootstrap'}
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $captureSource=[IO.File]::ReadAllBytes((Join-Path $PWD 'native/MacDowCapture.swift'))
 $sourceHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($captureSource)).ToLowerInvariant()
@@ -41,7 +43,7 @@ $binaryText=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path 
 if(-not $binaryText.Contains($encodedSource) -or -not $binaryText.Contains($sourceHash)){throw 'Mac embedded build configuration missing'}
 if($PublicUpdate){if($diagnosticDestination -and $binaryText.Contains($diagnosticDestination)){throw 'Public Mac update contains the private diagnostic destination'}}
 elseif(-not $binaryText.Contains($diagnosticDestination)){throw 'Private bootstrap diagnostic configuration missing'}
-python scripts/package-macos-preview.py $macRoot (Join-Path $outputRoot 'MAC-DOW-macos-arm64-commandline-preview.tar.gz')
+python scripts/package-macos-preview.py $macRoot (Join-Path $outputRoot 'mac-lan-macos-arm64-commandline-preview.tar.gz')
 if($LASTEXITCODE){throw 'Mac archive verification failed'}
 @{version=$config.version;commit=$sourceCommit;dirty=$isDirty;nativeMacValidated=$false;captureSourceSha256=$sourceHash;packageRoot=$macRoot;publicUpdate=[bool]$PublicUpdate} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'macos-preview-build.json')
 Write-Output "Mac preview packaged with verified embedded source $sourceHash. Native build and 60 fps still require validation on the Mac."

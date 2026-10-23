@@ -77,14 +77,14 @@ func (g *GH) Releases(ctx context.Context) ([]Release, error) {
 		FullName string `json:"full_name"`
 		Private  bool
 	}
-	if e := g.api(ctx, "repos/tbhtho/MAC-DOW", &repo); e != nil {
+	if e := g.api(ctx, "repos/"+BuildConfig().Repository, &repo); e != nil {
 		return nil, e
 	}
-	if repo.ID != BuildConfig().RepositoryID || repo.FullName != "tbhtho/MAC-DOW" || !repo.Private {
+	if repo.ID != BuildConfig().RepositoryID || repo.FullName != BuildConfig().Repository || repo.Private {
 		return nil, errors.New("repository identity/visibility changed; updates refused")
 	}
 	var rs []Release
-	e := g.api(ctx, "repos/tbhtho/MAC-DOW/releases?per_page=100", &rs)
+	e := g.api(ctx, "repos/"+BuildConfig().Repository+"/releases?per_page=100", &rs)
 	return rs, e
 }
 func (g *GH) Commit(ctx context.Context, tag string) (string, error) {
@@ -95,7 +95,7 @@ func (g *GH) Commit(ctx context.Context, tag string) (string, error) {
 		return "", errors.New("invalid release tag")
 	}
 	var c struct{ SHA string }
-	if e := g.api(ctx, "repos/tbhtho/MAC-DOW/commits/"+tag, &c); e != nil {
+	if e := g.api(ctx, "repos/"+BuildConfig().Repository+"/commits/"+tag, &c); e != nil {
 		return "", e
 	}
 	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(c.SHA) {
@@ -108,7 +108,7 @@ func (g *GH) Download(ctx context.Context, p Plan, path string) error {
 	if e != nil {
 		return e
 	}
-	e = g.run(ctx, f, p.Asset.Size, "api", "--hostname", "github.com", "-H", "Accept: application/octet-stream", "repos/tbhtho/MAC-DOW/releases/assets/"+strconv.FormatInt(p.Asset.ID, 10))
+	e = g.run(ctx, f, p.Asset.Size, "api", "--hostname", "github.com", "-H", "Accept: application/octet-stream", "repos/"+BuildConfig().Repository+"/releases/assets/"+strconv.FormatInt(p.Asset.ID, 10))
 	closeErr := f.Close()
 	if e != nil {
 		return e
@@ -134,7 +134,7 @@ func (g *GH) Verify(ctx context.Context, tag, path string) error {
 	}
 	var b bytes.Buffer
 	// Supported GitHub/Sigstore release attestation verification, never a home-grown signature.
-	if g.run(ctx, &b, 2<<20, "release", "verify-asset", tag, path, "--repo", "github.com/tbhtho/MAC-DOW", "--format", "json") != nil {
+	if g.run(ctx, &b, 2<<20, "release", "verify-asset", tag, path, "--repo", "github.com/"+BuildConfig().Repository, "--format", "json") != nil {
 		return ErrProvenance
 	}
 	if !json.Valid(b.Bytes()) || len(bytes.TrimSpace(b.Bytes())) < 3 {

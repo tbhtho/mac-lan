@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	publicFeedBase     = "https://raw.githubusercontent.com/tbhtho/MAC-DOW-Downloads/main/updates/"
-	publicDownloadBase = "https://github.com/tbhtho/MAC-DOW-Downloads/releases/download/"
+	publicFeedBase     = "https://raw.githubusercontent.com/tbhtho/mac-lan/main/updates/"
+	publicDownloadBase = "https://github.com/tbhtho/mac-lan/releases/download/"
 	maxSignedFeed      = 2 << 20
 )
 
@@ -102,7 +102,7 @@ func decodeFeedJSON(data []byte, dest any) error {
 
 func knownFeedAsset(name string) bool {
 	switch name {
-	case "MAC-DOW.exe", "MAC-DOW-windows-x64-unsigned.zip", "MAC-DOW-macos-arm64-unsigned.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz":
+	case "mac-lan.exe", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW.exe", "MAC-DOW-windows-x64-unsigned.zip", "MAC-DOW-macos-arm64-unsigned.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz":
 		return true
 	}
 	return false
@@ -256,17 +256,18 @@ func (s *SignedFeed) Download(ctx context.Context, p Plan, path string) error {
 	if !ok || p.RepositoryID != 1430459188 || p.ReleaseID != r.ID || p.Commit != r.Commit {
 		return ErrSignedFeed
 	}
-	name, err := assetName(p.OS, p.Arch)
+	names, err := assetNames(p.OS, p.Arch)
 	if err != nil {
 		return err
 	}
-	if p.OS == "windows" && p.Asset.Name == "MAC-DOW.exe" {
-		name = p.Asset.Name
+	compatible := false
+	for _, name := range names {
+		if p.Asset.Name == name {
+			compatible = true
+			break
+		}
 	}
-	if p.OS == "darwin" && p.Asset.Name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
-		name = p.Asset.Name
-	}
-	if p.Asset.Name != name {
+	if !compatible {
 		return ErrSignedFeed
 	}
 	matched := false

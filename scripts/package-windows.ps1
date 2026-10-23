@@ -23,7 +23,7 @@ $sourceCommit=git rev-parse HEAD
 if($LASTEXITCODE){throw 'Cannot identify source commit'}
 $isDirty=[bool](git status --porcelain)
 $identity=@{product='MAC-DOW';repositoryId=$config.repositoryId;version=$config.version;os='windows';arch='amd64';commit=$sourceCommit;layout='single-exe';dirty=$isDirty} | ConvertTo-Json -Compress
-$packageExe=Join-Path $packagePath 'MAC-DOW.exe'
+$packageExe=Join-Path $packagePath 'mac-lan.exe'
 $identityBytes=[Text.Encoding]::UTF8.GetBytes($identity)
 $stream=[IO.File]::Open($packageExe,[IO.FileMode]::Append,[IO.FileAccess]::Write)
 try {
@@ -34,8 +34,8 @@ try {
     $stream.Write($magicBytes,0,$magicBytes.Length)
 } finally {$stream.Dispose()}
 $visibleFiles=@(Get-ChildItem -LiteralPath $packagePath -File -Recurse)
-if($visibleFiles.Count -ne 1 -or $visibleFiles[0].Name -ne 'MAC-DOW.exe'){throw 'Package must contain exactly one EXE with no loose dependencies'}
-Copy-Item -LiteralPath $packageExe -Destination 'artifacts/MAC-DOW.exe' -Force
+if($visibleFiles.Count -ne 1 -or $visibleFiles[0].Name -ne 'mac-lan.exe'){throw 'Package must contain exactly one EXE with no loose dependencies'}
+Copy-Item -LiteralPath $packageExe -Destination 'artifacts/mac-lan.exe' -Force
 @{version=$config.version;commit=$sourceCommit;dirty=$isDirty;format='single-exe';nativeMacValidated=$false} | ConvertTo-Json | Set-Content -LiteralPath 'artifacts/standalone-build.json'
-Get-FileHash -LiteralPath 'artifacts/MAC-DOW.exe' -Algorithm SHA256
-Write-Output 'Single EXE: artifacts/MAC-DOW.exe. Existing ZIP/old builds were preserved. Dirty builds are local candidates, not published releases.'
+Get-FileHash -LiteralPath 'artifacts/mac-lan.exe' -Algorithm SHA256
+Write-Output 'Single EXE: artifacts/mac-lan.exe. Existing ZIP/old builds were preserved. Dirty builds are local candidates, not published releases.'

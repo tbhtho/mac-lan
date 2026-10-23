@@ -50,9 +50,11 @@ func ReadPackageIdentity(path string) (Marker, error) {
 	}
 	return m, nil
 }
-func standalonePlan(p Plan) bool { return p.OS == "windows" && p.Asset.Name == "MAC-DOW.exe" }
+func standalonePlan(p Plan) bool {
+	return p.OS == "windows" && (p.Asset.Name == "mac-lan.exe" || p.Asset.Name == "MAC-DOW.exe")
+}
 func commandlinePreviewPlan(p Plan) bool {
-	return p.OS == "darwin" && p.Asset.Name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz"
+	return p.OS == "darwin" && (p.Asset.Name == "mac-lan-macos-arm64-commandline-preview.tar.gz" || p.Asset.Name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz")
 }
 
 // A preview is a dedicated package directory, never the surrounding Downloads
@@ -142,8 +144,8 @@ func metadataRoot(root string) string {
 	}
 	return root
 }
-func copyStandalone(src *os.File, dest string) error {
-	out, err := os.OpenFile(filepath.Join(dest, "MAC-DOW.exe"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
+func copyStandalone(src *os.File, dest, name string) error {
+	out, err := os.OpenFile(filepath.Join(dest, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
 	if err != nil {
 		return err
 	}
