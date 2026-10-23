@@ -338,8 +338,20 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case status <- statusMessage{line: line}:
+			return
 		case <-done:
+			return
 		default:
+		}
+		// Native startup can emit a short burst of encoder capabilities before
+		// the first frame. Backpressure this bounded queue instead of treating
+		// routine status output as a dead viewer and killing capture.
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		select {
+		case status <- statusMessage{line: line}:
+		case <-done:
+		case <-deadline.C:
 			stop()
 		}
 	}

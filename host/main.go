@@ -181,7 +181,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) e
 		}
 		err := runCapture(helper, s.selected, send, status, events)
 		if err != nil {
-			diagnostics.Emit("mac", "capture-failed", "native-helper", nil)
+			diagnostics.Emit("mac", "capture-failed", captureFailureCode(err), nil)
 		} else {
 			diagnostics.Emit("mac", "stream-ended", "ok", nil)
 		}
@@ -275,17 +275,21 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 		return err
 	}
 	if err = cmd.Start(); err != nil {
-		return err
+		return &captureFailure{reason: "Cannot start Mac capture helper: " + err.Error(), code: "helper-start", cause: err}
 	}
 	done := make(chan struct{})
 	defer close(done)
 	var held heldState
 	var heldMu sync.Mutex
 	stderrDone := make(chan struct{})
+	var nativeFailure *captureFailure // Written by stderr reader; read after stderrDone.
 	go func() {
 		defer close(stderrDone)
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
+			if failure := nativeFailureStatus(sc.Bytes()); failure != nil {
+				nativeFailure = failure
+			}
 			if h, ok := parseHeld(sc.Bytes()); ok {
 				heldMu.Lock()
 				held = h
@@ -341,8 +345,12 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 	if recoveryErr := recoverHeld(helper, snapshot); recoveryErr != nil {
 		status("Native recovery could not confirm release; stop control and release modifiers on Mac: " + recoveryErr.Error())
 	}
+	if nativeFailure != nil {
+		nativeFailure.cause = waitErr
+		return nativeFailure
+	}
 	if waitErr != nil {
-		return waitErr
+		return &captureFailure{reason: waitErr.Error(), code: "helper-exit", cause: waitErr}
 	}
 	if errors.Is(frameErr, io.EOF) {
 		return nil
