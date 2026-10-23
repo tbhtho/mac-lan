@@ -170,7 +170,8 @@ internal sealed partial class MainWindow : Window
             Hide();tabBar.Suspend();appWindow.Show();
         }
         else{remote=true;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
-        session.Send(new{type="start",window=id,width=(int)resolution.SelectedItem,fps=(int)fps.SelectedItem,quality=70,codec=codec.SelectedIndex==0?"h264":"jpeg",bitrate=(int)bitrate.SelectedItem});
+        var profile=codec.SelectedItem as StreamProfile??StreamProfile.Compatible;
+        session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
     }
     void Arm()

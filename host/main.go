@@ -175,7 +175,11 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) e
 		}
 	}
 	s.stream = func(send func([]byte), status func(string), events <-chan input) error {
-		diagnostics.Emit("mac", "stream-started", "ok", map[string]int{"width": s.selected.Width, "fps": s.selected.FPS})
+		codec := s.selected.Codec
+		if codec == "" {
+			codec = "h264"
+		}
+		diagnostics.Emit("mac", "stream-started", codec, map[string]int{"width": s.selected.Width, "fps": s.selected.FPS})
 		if gui {
 			broker.emit(map[string]any{"type": "state", "message": "Sharing active. Windows control remains explicit."})
 		}
