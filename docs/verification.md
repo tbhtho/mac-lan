@@ -1,5 +1,19 @@
 # Verification record
 
+## Alpha.22 - single approval, keyframes on request, matching approval UI
+
+Pairing approval now also approves viewing for that peer until sharing stops
+(new host test). The catalog advertises `keyframes`; Windows requests a
+keyframe on decoder reset and the Mac forces one, with periodic keyframes at
+2 s instead of 0.5 s. Mac approval is a dark glass panel and Windows confirms
+the Mac ID with the same layout; visible MAC-DOW text and the Downloads folder
+are now mac-lan. The embedded Mac source budget rose to 31,500 characters
+(Windows' command-line limit is 32,767). Headless suite passed. Release
+`v0.1.0-alpha.22` binds `3a99594`; all checksummed downloads matched
+anonymously, the feed verified, and the alpha.21 EXE reported alpha.22
+available. Not verified here: Swift compilation, the panel's appearance, and
+measured latency.
+
 ## Alpha.21 - Mac menu polish, hide-on-close, UTF-8 discovery names
 
 The user confirmed alpha.20 shows both permissions as allowed. Alpha.21 adds a
