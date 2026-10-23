@@ -33,12 +33,14 @@ internal sealed partial class MainWindow
         Field(streamSection,"Choose one Mac window",windows);windows.Width=double.NaN;
         streamSection.Children.Add(MakeButton("Open in App Priority",()=>Start(true)));
         streamSection.Children.Add(new TextBlock{Text="App Priority shows the selected window. Separate menus and dialogs stay on your Mac.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
-        codec.ItemsSource=new[]{"H.264 (recommended)","JPEG diagnostic"};codec.SelectedIndex=0;
-        resolution.ItemsSource=new[]{960,1280,1600,1920};resolution.SelectedItem=1600;
-        fps.ItemsSource=new[]{10,15,30};fps.SelectedItem=30;bitrate.ItemsSource=new[]{2,4,8,12,20};bitrate.SelectedItem=8;
+        codec.DisplayMemberPath="Label";codec.ItemsSource=StreamProfile.Options;codec.SelectedItem=StreamProfile.Compatible;
+        resolution.ItemsSource=new[]{960,1280,1600,1920};resolution.SelectedItem=1280;
+        fps.ItemsSource=new[]{10,15,30};fps.SelectedItem=15;bitrate.ItemsSource=new[]{2,4,8,12,20};bitrate.SelectedItem=8;
         var quality=new StackPanel();var qualityRow=new WrapPanel();
         foreach(var option in new[]{("Video",codec),("Width",resolution),("Frames / sec",fps),("Mbit / sec",bitrate)}){var column=new StackPanel{Margin=new Thickness(0,0,12,0)};Field(column,option.Item1,option.Item2);qualityRow.Children.Add(column);}
-        codec.Width=196;quality.Children.Add(qualityRow);streamSection.Children.Add(new Expander{Header="Streaming quality",Content=quality});
+        codec.Width=252;quality.Children.Add(qualityRow);
+        quality.Children.Add(new TextBlock{Text="Compatible avoids the Mac helper's H.264 startup check. It uses more bandwidth; H.264 remains experimental until the Mac helper is rebuilt.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
+        streamSection.Children.Add(new Expander{Header="Streaming quality",Content=quality});
         streamSection.Children.Add(MakeButton("Disconnect",()=>Disconnect()));setup.Children.Add(streamSection);
 
         var options=new StackPanel{Margin=new Thickness(0,8,0,8)};monitors.Width=double.NaN;monitors.DisplayMemberPath="DisplayName";Field(options,"Display for Windows / Mac tabs",monitors);

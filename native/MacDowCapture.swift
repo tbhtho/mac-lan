@@ -135,8 +135,8 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func setupEncoder() {
-        let spec: [CFString:Any] = [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true,
-                                  kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true]
+        let spec: [CFString:Any] = [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: kCFBooleanTrue!,
+                                  kVTVideoEncoderSpecification_EnableLowLatencyRateControl: kCFBooleanTrue!]
         let result = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264, encoderSpecification: spec as CFDictionary, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { ref, _, result, flags, sample in
             guard let ref else { return }
             let engine = Unmanaged<Engine>.fromOpaque(ref).takeUnretainedValue()
@@ -165,7 +165,16 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         var hardware: Unmanaged<CFTypeRef>?
         let hardwareResult = VTSessionCopyProperty(encoder, key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder, allocator: nil, valueOut: &hardware)
         let hardwareValue = hardware?.takeRetainedValue()
-        guard hardwareResult == noErr, (hardwareValue as? Bool) == true else { shutdown("Hardware encoder not active; use explicit JPEG diagnostic if needed") }
+        // RequireHardwareAcceleratedVideoEncoder makes creation fail if hardware is unavailable.
+        // This redundant property query is diagnostic; it must not abort a prepared session.
+        if hardwareResult != noErr {
+            status("Encoder hardware property unavailable (\(hardwareResult)); required-hardware session prepared")
+        } else if let hardwareValue, CFGetTypeID(hardwareValue) == CFBooleanGetTypeID() {
+            let active = CFBooleanGetValue(unsafeBitCast(hardwareValue, to: CFBoolean.self))
+            status("Encoder hardware property reported \(active); required-hardware session prepared")
+        } else {
+            status("Encoder hardware property returned no Boolean; required-hardware session prepared")
+        }
         status("VideoToolbox hardware H.264; realtime, no B frames; bounded encoder submissions")
     }
     func shutdown(_ message: String) -> Never {

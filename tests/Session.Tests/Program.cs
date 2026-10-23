@@ -9,6 +9,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using MacDow.Core;
 using MacDow.Windows;
 
 int checks=0;
@@ -36,10 +37,11 @@ await using(var session=new Session())
     await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
     Check(session.IsPaired&&!session.IsStarting&&!session.IsReady,"catalog establishes pairing without implying an active stream");
     session.Send(new{type="release"});
-    session.Send(new{type="start",window=0,width=1600,fps=30,quality=70,codec="h264",bitrate=8});
+    session.Send(StreamProfile.Compatible.CreateStart(0));
     Check(session.IsPaired&&session.IsStarting&&!session.IsReady,"start stays pending while Mac approval is awaited");
     var first=await peer.Next();
     Check(first.GetProperty("type").GetString()=="start","focus release and input never replace the pending stream start");
+    Check(first.GetProperty("codec").GetString()=="jpeg"&&first.GetProperty("width").GetInt32()==1280&&first.GetProperty("fps").GetInt32()==15&&first.GetProperty("quality").GetInt32()==70,"default stream requests compatible JPEG before Mac approval instead of the failing hardware encoder");
     Parallel.For(0,20,_=>{session.Send(new{type="release"});session.Send(new{type="start",window=0});});
     await peer.Send(new{type="ready"});
     await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
