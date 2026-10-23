@@ -83,3 +83,10 @@ func TestCompilerReportAllowsOnlyBoundedNumericLocations(t *testing.T) {
 		t.Fatalf("unbounded compiler counters: %+v", invalid.Counts)
 	}
 }
+
+func TestControlReportRetainsOnlyPermissionAndActiveCounts(t *testing.T) {
+	r := NewReport("mac", "control-state", "accessibility-missing", map[string]int{"controlPermission": 0, "controlActive": 0, "keyCode": 55, "pointerX": 99, "token": 1})
+	if r.Event != "control-state" || len(r.Counts) != 2 || r.Counts["controlPermission"] != 0 || r.Counts["controlActive"] != 0 {
+		t.Fatalf("unexpected control diagnostic: %+v", r)
+	}
+}

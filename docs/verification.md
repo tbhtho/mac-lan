@@ -1,5 +1,41 @@
 # Verification record
 
+## Alpha.11 - click control, single cursor and filled 1080p stream
+
+The user reported alpha.10 native-build-ready/compiled, Screen Recording granted,
+successful pairing/viewing approval and visible H.264 video. This is user-reported
+Mac execution evidence, not a measured 60 fps result. The user confirmed that
+input attempts were direct clicks into the view-only desktop, without using the
+hidden Connection → Control Mac action. Alpha.11 makes the first desktop click
+an explicit activation gesture and consumes its press/release.
+
+Fresh headless checks pass: 33 core assertions, 34 actual TLS session checks
+including the 1920/60 default request, 46 TLS transfer checks, in-memory
+presentation checks, pointer geometry and six viewer race/activation groups,
+all Go packages, Go vet and Windows Release build with zero warnings/errors.
+Tests exercise activation without click-through; pending/armed gesture cancel,
+blur and capture loss; fit letterbox rejection versus filled desktop targeting;
+clean helper EOF; original fatal reason surviving secondary pipe teardown;
+strict control-state codes/booleans and sanitized Mac diagnostic counts.
+Independent review found no outstanding blocker after cancellation fixes.
+
+Native desktop dimensions now map width 1920 to 1920×1080, with complete-content
+stretching, a fill presentation and matching normalized input mapping. App
+Priority retains fit. Apple documents
+[`preservesAspectRatio`](https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration/preservesaspectratio)
+for macOS 14+, and cursor omission uses the existing ScreenCaptureKit
+[`showsCursor`](https://developer.apple.com/documentation/screencapturekit/scstreamconfiguration/showscursor)
+property. No Mac display mode or physical cursor setting is changed. Pure
+native dimension/mailbox self-checks are included in the source; they have not
+been executed for alpha.11 on a Mac.
+
+All local checks remain headless. Actual alpha.11 Swift compilation, cursor
+appearance, CGEvent input, 1080p/60 delivery and responsiveness require Mac
+validation. No computer-use test, native capture/input, permission prompt,
+webhook test send or paid CI was performed. Alpha.10 package/OS symlink/race
+detector limitations below still apply; updater and built .app delivery remain
+unresolved.
+
 ## Alpha.10 - Windows to Mac file transfer and native build diagnostics
 
 Fresh Windows headless suite passes: 33 core assertions, 34 session checks,

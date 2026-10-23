@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The subprocess is this Go test binary, never the native capture helper. No
@@ -20,10 +21,48 @@ func TestMain(m *testing.M) {
 		if mode == "setup" {
 			message = "Capture setup failed: fixture error /Users/private-name secret-token 192.168.1.2"
 		}
+		if mode == "disconnect" {
+			var e input
+			dec := json.NewDecoder(os.Stdin)
+			for dec.Decode(&e) == nil {
+			}
+			json.NewEncoder(os.Stderr).Encode(map[string]any{"type": "status", "paused": false, "message": "Windows disconnected; capture stopped"})
+			os.Stdout.Close()
+			time.Sleep(100 * time.Millisecond) // Supervisor must allow a clean helper exit.
+			os.Exit(0)
+		}
 		json.NewEncoder(os.Stderr).Encode(map[string]any{"type": "status", "paused": true, "message": message})
+		if mode == "secondary-pipe" {
+			json.NewEncoder(os.Stderr).Encode(map[string]any{"type": "status", "paused": true, "message": "Native input mailbox overflow/EOF"})
+		}
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
+}
+
+func TestCaptureFailurePreservesFirstNativeReason(t *testing.T) {
+	t.Setenv("MACDOW_CAPTURE_FIXTURE", "secondary-pipe")
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input))
+	if err == nil || captureFailureCode(err) != "h264-unavailable.-12908" {
+		t.Fatalf("secondary input pipe shutdown hid the original native error: %v", err)
+	}
+}
+
+func TestCaptureDisconnectAllowsCleanNativeExit(t *testing.T) {
+	t.Setenv("MACDOW_CAPTURE_FIXTURE", "disconnect")
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan input)
+	close(events)
+	if err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events); err != nil {
+		t.Fatalf("normal viewer disconnect must not become capture-failed: %v", err)
+	}
 }
 
 func TestCaptureFailurePreservesNativeReason(t *testing.T) {
@@ -91,6 +130,48 @@ func TestCaptureSetupNSErrorDiagnosticIsFrameworkAndIntegerOnly(t *testing.T) {
 		failure := nativeFailureStatus(line)
 		if failure == nil || captureFailureCode(failure) != item.want {
 			t.Fatalf("framework diagnostic: got %+v, want %q", failure, item.want)
+		}
+	}
+}
+
+func TestNativeControlStatusOnlyAllowsFixedLabelsAndBooleans(t *testing.T) {
+	missing, ok := nativeControlStatus([]byte(`{"type":"controlStatus","code":"view-only","controlPermission":false,"active":false}`))
+	if !ok || missing.Permission || missing.Active {
+		t.Fatal("view-only must retain missing Accessibility permission")
+	}
+	for _, code := range []string{"view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked"} {
+		line, _ := json.Marshal(map[string]any{"type": "controlStatus", "code": code, "controlPermission": true, "active": code == "ready", "message": "/Users/private-name secret-token 192.168.1.2", "x": 0.23})
+		state, ok := nativeControlStatus(line)
+		if !ok || state.Code != code || !state.Permission || state.Active != (code == "ready") {
+			t.Fatalf("fixed state not retained: %+v, %v", state, ok)
+		}
+		encoded, _ := json.Marshal(state)
+		if strings.Contains(string(encoded), "private-name") || strings.Contains(string(encoded), "secret-token") {
+			t.Fatal("private detail entered control diagnostic")
+		}
+	}
+	for _, line := range []string{
+		`{"type":"controlStatus","code":"ready","controlPermission":1,"active":true}`,
+		`{"type":"controlStatus","code":"ready","active":true}`,
+		`{"type":"controlStatus","code":"private-name","controlPermission":true,"active":true}`,
+		`{"type":"status","code":"ready","controlPermission":true,"active":true}`,
+		strings.Repeat("x", 2049),
+	} {
+		if state, ok := nativeControlStatus([]byte(line)); ok {
+			t.Fatalf("invalid control diagnostic accepted: %+v", state)
+		}
+	}
+}
+
+func TestNativeInputFailureStagesDistinguishLegacyEOFAndOverflow(t *testing.T) {
+	for _, item := range []struct{ message, code string }{
+		{"Native input mailbox overflow/EOF", "input-pipe"},
+		{"Native input mailbox overflow", "input-overflow"},
+		{"Native input message invalid", "input-invalid"},
+		{"Windows disconnected; capture stopped", ""},
+	} {
+		if got := nativeFailureCode(item.message); got != item.code {
+			t.Fatalf("%q: got %q want %q", item.message, got, item.code)
 		}
 	}
 }

@@ -34,12 +34,12 @@ internal sealed partial class MainWindow
         streamSection.Children.Add(MakeButton("Open in App Priority",()=>Start(true)));
         streamSection.Children.Add(new TextBlock{Text="App Priority shows the selected window. Separate menus and dialogs stay on your Mac.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
         codec.DisplayMemberPath="Label";codec.ItemsSource=StreamProfile.Options;codec.SelectedItem=StreamProfile.DefaultHardware;
-        resolution.ItemsSource=new[]{960,1280,1600,1920};resolution.SelectedItem=1280;
+        resolution.ItemsSource=new[]{960,1280,1600,1920};resolution.SelectedItem=1920;
         fps.ItemsSource=new[]{60};fps.SelectedItem=60;bitrate.ItemsSource=new[]{2,4,8,12,20};bitrate.SelectedItem=8;
         var quality=new StackPanel();var qualityRow=new WrapPanel();
         foreach(var option in new[]{("Video",codec),("Width",resolution),("Frames / sec",fps),("Mbit / sec",bitrate)}){var column=new StackPanel{Margin=new Thickness(0,0,12,0)};Field(column,option.Item1,option.Item2);qualityRow.Children.Add(column);}
         codec.Width=252;quality.Children.Add(qualityRow);
-        quality.Children.Add(new TextBlock{Text="60 fps uses hardware H.264 by default. Compatible JPEG also requests 60 fps and uses more network bandwidth.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
+        quality.Children.Add(new TextBlock{Text="The desktop defaults to 1920 x 1080 at 60 fps and fills the MacBook tab. The full desktop stays visible. Compatible JPEG uses more network bandwidth.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
         streamSection.Children.Add(new Expander{Header="Streaming quality",Content=quality});
         streamSection.Children.Add(MakeButton("Disconnect",()=>Disconnect()));setup.Children.Add(streamSection);
 
@@ -47,6 +47,6 @@ internal sealed partial class MainWindow
         options.Children.Add(new TextBlock{Text="The tab strip reserves its own space. App title bars stay below it.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,8,0,10)});
         options.Children.Add(new TextBlock{Text="Mac diagnostics are sent automatically. Windows diagnostics stay on this PC.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,4,0,8)});
         setup.Children.Add(new Expander{Header="Display and diagnostics",Content=options});
-        setup.Children.Add(new TextBlock{Text="To use keyboard and mouse on the Mac, choose Control Mac from the Connection menu. Ctrl+Alt+Shift+Backspace releases control.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,24,0,0)});
+        setup.Children.Add(new TextBlock{Text="Click the Mac desktop once to enable keyboard and mouse control. That first click only activates control. Ctrl+Alt+Shift+Backspace releases it. Control Mac is also available in the Connection menu.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,24,0,0)});
     }
 }

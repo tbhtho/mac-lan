@@ -29,6 +29,10 @@ func jsonStatus(_ value: [String: Any]) {
 func die(_ message: String) -> Never { status(message, paused: true); exit(1) }
 func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 func validCaptureFPS(_ value: Int) -> Bool { value == 60 }
+func desktopCaptureDimensions(width: Int) -> (width: Int, height: Int) {
+    let evenWidth = max(2, width / 2 * 2)
+    return (evenWidth, max(2, Int(Double(evenWidth) * 9 / 16) / 2 * 2))
+}
 func existingPermissions() -> Bool {
     let screen = CGPreflightScreenCaptureAccess(), input = AXIsProcessTrusted()
     status("Existing permissions: Screen Recording \(screen ? "granted" : "missing"); Accessibility \(input ? "granted" : "missing - viewing only"). No permission request made.")
@@ -40,26 +44,28 @@ func shareable() async throws -> SCShareableContent {
 
 // At most one scheduled main-queue drain and 32 pending input messages.
 // Lease time starts on receipt, never when a delayed main queue processes it.
+enum InputFailure { case overflow, invalid, closed }
 final class InputMailbox {
     let lock=NSLock()
     var messages:[([String:Any],TimeInterval)]=[]
     var scheduled=false,failed=false
+    var failureReason=InputFailure.invalid
     let receive:([String:Any],TimeInterval)->Void
-    let failure:()->Void
-    init(receive:@escaping([String:Any],TimeInterval)->Void,failure:@escaping()->Void){self.receive=receive;self.failure=failure}
+    let failure:(InputFailure)->Void
+    init(receive:@escaping([String:Any],TimeInterval)->Void,failure:@escaping(InputFailure)->Void){self.receive=receive;self.failure=failure}
     func push(_ message:[String:Any],received:TimeInterval) {
         lock.lock()
         if failed { lock.unlock();return }
         if message["type"] as? String == "release" { messages.removeAll() }
-        if messages.count>=32 { failed=true;messages.removeAll() } else { messages.append((message,received)) }
+        if messages.count>=32 { failed=true;failureReason = .overflow;messages.removeAll() } else { messages.append((message,received)) }
         let schedule = !scheduled
         scheduled=true;lock.unlock()
         if schedule { DispatchQueue.main.async { self.drain() } }
     }
-    func fail(){lock.lock();failed=true;messages.removeAll();let schedule = !scheduled;scheduled=true;lock.unlock();if schedule { DispatchQueue.main.async { self.drain() } }}
+    func fail(_ reason:InputFailure){lock.lock();if !failed {failed=true;failureReason=reason};messages.removeAll();let schedule = !scheduled;scheduled=true;lock.unlock();if schedule { DispatchQueue.main.async { self.drain() } }}
     func drain(){
-        lock.lock();let bad=failed;let batch=messages;messages.removeAll();lock.unlock()
-        if bad { failure();return }
+        lock.lock();let bad=failed;let reason=failureReason;let batch=messages;messages.removeAll();lock.unlock()
+        if bad { failure(reason);return }
         for (message,received) in batch { receive(message,received) }
         lock.lock();let again=failed || !messages.isEmpty;if !again { scheduled=false };lock.unlock()
         if again { DispatchQueue.main.async { self.drain() } }
@@ -79,6 +85,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var watchdog: Timer?
     var watchdogGrace = now()
     var paused = false
+    var lastControlState = ""
     var currentGeneration: UInt64 = 0
     var revokedGeneration: UInt64 = 0
     var mailbox: InputMailbox?
@@ -111,19 +118,27 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             frame = window.frame
             filter = SCContentFilter(desktopIndependentWindow: window)
         }
-        let pixels = Double(filter.pointPixelScale)
-        let ratio = min(1.0,min(Double(maxWidth)/max(1,frame.width*pixels),2160/max(1,frame.height*pixels)))
-        width = max(2,Int(frame.width*pixels*ratio)/2*2); height = max(2,Int(frame.height*pixels*ratio)/2*2)
+        if id == 0 {
+            // Scale the whole Mac desktop into the requested 16:9 output, including menu and Dock.
+            let dimensions = desktopCaptureDimensions(width: maxWidth)
+            width = dimensions.width; height = dimensions.height
+        } else {
+            let pixels = Double(filter.pointPixelScale)
+            let ratio = min(1.0,min(Double(maxWidth)/max(1,frame.width*pixels),2160/max(1,frame.height*pixels)))
+            width = max(2,Int(frame.width*pixels*ratio)/2*2); height = max(2,Int(frame.height*pixels*ratio)/2*2)
+        }
         guard height <= 2160, width <= 1920 else { shutdown("Capture dimensions exceed resource limit") }
         let config = SCStreamConfiguration()
         config.width = width; config.height = height
+        config.preservesAspectRatio = id != 0
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
-        config.queueDepth = 3; config.showsCursor = true
+        // Keep the immediate Windows pointer; omit the delayed duplicate from video only.
+        config.queueDepth = 3; config.showsCursor = false
         config.pixelFormat = codec == "h264" ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA
         config.capturesAudio = false
         config.ignoreShadowsSingleWindow = true
         if codec == "h264" { setupEncoder() }
-        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps]) }
+        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps,"presentation":id == 0 ? "fill" : "fit"]) }
         stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream!.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "MAC-DOW.capture", qos: .userInteractive))
         try await stream!.startCapture()
@@ -219,7 +234,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
                     let parameter = Data(bytes:pointer,count:size)
                     if index == 0 && size >= 4 {
                         let codec = String(format:"avc1.%02X%02X%02X",pointer[1],pointer[2],pointer[3])
-                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"fps":fps,"hardware":true]) }
+                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"fps":fps,"hardware":true,"presentation":windowID == 0 ? "fill" : "fit"]) }
                     }
                     data.append(contentsOf:[0,0,0,1]);data.append(parameter)
                 }
@@ -249,21 +264,27 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         do { try FileHandle.standardOutput.write(contentsOf:framed) } catch { shutdown("Viewer transport pipe closed") }
     }
     func readInput() {
-        let inbox = InputMailbox(receive: { [weak self] message, received in self?.input(message,received:received) }, failure: { [weak self] in self?.shutdown("Native input mailbox overflow/EOF") })
+        let inbox = InputMailbox(receive: { [weak self] message, received in self?.input(message,received:received) }, failure: { [weak self] reason in
+            guard let self else { return }
+            if reason == .closed {
+                self.releaseAll();status("Windows disconnected; capture stopped");exit(0)
+            }
+            self.shutdown(reason == .overflow ? "Native input mailbox overflow" : "Native input message invalid")
+        })
         mailbox = inbox
         DispatchQueue.global(qos:.userInteractive).async {
             while let line = readLine(strippingNewline:true) {
                 let received = now()
-                if line.utf8.count>4096 { inbox.fail();return }
-                guard let data=line.data(using:.utf8),let message=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else { inbox.fail();return }
+                if line.utf8.count>4096 { inbox.fail(.invalid);return }
+                guard let data=line.data(using:.utf8),let message=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] else { inbox.fail(.invalid);return }
                 inbox.push(message,received:received)
             }
-            inbox.fail()
+            inbox.fail(.closed)
         }
     }
     @objc func tick() {
         if now()-lastAlive>0.5 {lastAlive=now();jsonStatus(["type":"captureAlive"])}
-        if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll() }
+        if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll();reportControl("lease-expired",permission:AXIsProcessTrusted()) }
         if now()-watchdogGrace>2 {
             // Stop capture after a dead viewer, even if parent host was killed.
             shutdown("Viewer heartbeat expired")
@@ -276,7 +297,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             if abs(frame.width-rect.width)>2 || abs(frame.height-rect.height)>2 { shutdown("Selected Mac window resized; reconnect to renegotiate capture geometry") }
             frame=rect
         }
-        if lease.active && !scopeAllowsInput() { revokedGeneration=currentGeneration;releaseAll();if !paused {status("Control paused: selected app/window is not foremost. Return to the selected Mac window and explicitly rearm.",paused:true);paused=true} }
+        if lease.active && !scopeAllowsInput() { revokedGeneration=currentGeneration;releaseAll();reportControl("scope-blocked",permission:AXIsProcessTrusted());paused=true }
     }
     func scopeAllowsInput() -> Bool {
         if windowID == 0 { return true }
@@ -319,28 +340,46 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         return false
     }
     func revoke(_ message:String) { revokedGeneration=currentGeneration;releaseAll();if !paused{status(message,paused:true);paused=true} }
+    func reportControl(_ code:String,permission:Bool,active:Bool=false) {
+        let state="\(code):\(permission):\(active)"
+        guard state != lastControlState else { return }
+        lastControlState=state
+        let message:String
+        switch code {
+        case "accessibility-missing": message="Allow MAC-DOW in System Settings > Privacy & Security > Accessibility, then click the Mac desktop again."
+        case "scope-blocked": message="Control paused: return to the selected Mac window, then click its view again."
+        case "ready": message="Mac control active."
+        case "view-only": message="Click the Mac desktop to control it."
+        default: message="Control released. Click the Mac desktop again to resume."
+        }
+        jsonStatus(["type":"controlStatus","code":code,"controlPermission":permission,"active":active,"message":message])
+    }
     func input(_ m:[String:Any],received:TimeInterval) {
         guard let type=m["type"] as? String else { return }
-        if type == "release" { revokedGeneration=currentGeneration;releaseAll();return }
+        if type == "release" { revokedGeneration=currentGeneration;releaseAll();reportControl("view-only",permission:AXIsProcessTrusted());return }
         if type == "lease" {
             watchdogGrace=received
             stateLock.lock();view=(m["view"] as? Bool)==true;stateLock.unlock()
             let requested=(m["active"] as? Bool)==true
             let generation=(m["generation"] as? UInt64) ?? 0
-            if !requested { revokedGeneration=currentGeneration;releaseAll();return }
-            guard generation>0,generation != revokedGeneration,received+0.85>now() else { releaseAll();return }
+            let permission=AXIsProcessTrusted()
+            if !requested { revokedGeneration=currentGeneration;releaseAll();reportControl("view-only",permission:permission);return }
+            guard generation>0,generation != revokedGeneration else { releaseAll();reportControl("generation-revoked",permission:permission);return }
+            guard received+0.85>now() else { releaseAll();reportControl("stale-input",permission:permission);return }
             if generation != currentGeneration {
                 currentGeneration=generation
                 if windowID != 0 { NSRunningApplication(processIdentifier:owner)?.activate(options:[]) }
             }
-            let allowed=AXIsProcessTrusted() && scopeAllowsInput()
+            let allowed=permission && scopeAllowsInput()
             if !allowed {
                 revokedGeneration=currentGeneration;releaseAll()
-                if !paused {status("Control paused: Accessibility missing or selected app/window not foremost; explicitly rearm",paused:true);paused=true}
-            } else { lease.update(true,now:received);paused=false }
+                reportControl(permission ? "scope-blocked" : "accessibility-missing",permission:permission);paused=true
+            } else { lease.update(true,now:received);reportControl("ready",permission:permission,active:true);paused=false }
             return
         }
-        guard received+0.85>now(),lease.valid(now:now()),scopeAllowsInput(),AXIsProcessTrusted() else { revokedGeneration=currentGeneration;releaseAll();return }
+        let permission=AXIsProcessTrusted()
+        let reason = !permission ? "accessibility-missing" : received+0.85<=now() ? "stale-input" : !lease.valid(now:now()) ? "lease-expired" : !scopeAllowsInput() ? "scope-blocked" : ""
+        guard reason.isEmpty else { revokedGeneration=currentGeneration;releaseAll();reportControl(reason,permission:permission);return }
         switch type {
         case "key":
             guard let c=m["code"] as? Int,c>=0,c<=126 else { return };let code=CGKeyCode(c),down=(m["down"] as? Bool)==true
@@ -408,14 +447,18 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
+    precondition(desktopCaptureDimensions(width: 1920) == (1920, 1080) && desktopCaptureDimensions(width: 1280) == (1280, 720))
     precondition(validCaptureFPS(60) && !validCaptureFPS(30) && !validCaptureFPS(15) && !validCaptureFPS(61))
     var l=Lease();precondition(!l.valid(now:0));l.update(true,now:1);precondition(l.valid(now:1.5));precondition(!l.valid(now:2));l.release();precondition(!l.valid(now:1))
     var delivered=0,failed=false
-    let mailbox=InputMailbox(receive:{_,_ in delivered += 1},failure:{failed=true})
+    let mailbox=InputMailbox(receive:{_,_ in delivered += 1},failure:{_ in failed=true})
     for _ in 0..<32 {mailbox.push(["type":"key","code":55],received:1)}
     mailbox.push(["type":"release"],received:2);mailbox.drain();precondition(delivered==1 && !failed)
-    let overflowing=InputMailbox(receive:{_,_ in preconditionFailure("overflow must not deliver input")},failure:{failed=true})
+    let overflowing=InputMailbox(receive:{_,_ in preconditionFailure("overflow must not deliver input")},failure:{reason in precondition(reason == .overflow);failed=true})
     for _ in 0..<33 {overflowing.push(["type":"key"],received:1)};overflowing.drain();precondition(failed)
+    var closed=false
+    let closing=InputMailbox(receive:{_,_ in preconditionFailure("closed input must not deliver messages")},failure:{reason in precondition(reason == .closed);closed=true})
+    closing.push(["type":"key"],received:1);closing.fail(.closed);closing.drain();precondition(closed)
     print("PASS native 60 fps bounds, lease expiration/release and bounded/urgent mailbox; no permission checks, capture or input")
     exit(0)
 }

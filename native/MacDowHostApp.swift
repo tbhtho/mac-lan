@@ -261,7 +261,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
             alert.informativeText = "Allow only if Windows shows this pairing number:\n\n\(object["code"] as? String ?? "")\n\nWindows must also match this Mac's identity above. Pairing lets this PC send files to Downloads/MAC-DOW. Screen sharing needs another approval."
         } else if kind == "stream" {
             alert.messageText = "Allow this screen stream?"
-            alert.informativeText = "\(object["scope"] as? String ?? "Unknown scope")\n\(object["width"] ?? "") px · \(object["fps"] ?? "") fps · \(object["codec"] ?? "")\n\nKeyboard/mouse remain off until explicitly armed on focused Windows. Stop Sharing or Quit ends the session."
+            alert.informativeText = "\(object["scope"] as? String ?? "Unknown scope")\n\(object["width"] ?? "") px · \(object["fps"] ?? "") fps · \(object["codec"] ?? "")\n\nKeyboard/mouse stay off until you click the Mac view to activate control on Windows. Stop Sharing or Quit ends the session."
         } else { return }
         alert.addButton(withTitle:"Allow"); alert.addButton(withTitle:"Deny")
         consent = alert
