@@ -89,13 +89,15 @@ func onHostRunLoop(_ block:@escaping()->Void) {
     CFRunLoopWakeUp(loop)
 }
 
-final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
+final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenuDelegate {
     var state = HostLifecycle()
     var menuBar: NSStatusItem!
     var menuStatus = NSMenuItem(title: "Not sharing", action: nil, keyEquivalent: "")
     var menuStop: NSMenuItem!
     var statusText = "Starting mac-lan" { didSet { menuStatus.title = String(statusText.prefix(72)); menuStatus.toolTip = statusText } }
-    let permissionMenu = NSMenuItem(title:"Checking viewing access",action:nil,keyEquivalent:"")
+    let screenAccess = NSMenuItem(title:"Allow Screen Recording…",action:#selector(screenPermission),keyEquivalent:"")
+    let controlAccess = NSMenuItem(title:"Allow Keyboard and Mouse…",action:#selector(controlPermission),keyEquivalent:"")
+    let refreshAccess = NSMenuItem(title:"Refresh Permissions",action:#selector(refreshSetup),keyEquivalent:"")
     let identity = NSMenuItem(title:"Mac identity available after sharing starts",action:nil,keyEquivalent:"")
     var menuStart: NSMenuItem!
     var wantsSharing = true
@@ -135,13 +137,11 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
         menuBar.button?.setAccessibilityLabel("mac-lan: not sharing")
         menuBar.button?.toolTip = "mac-lan"
         let menu = NSMenu(); menu.addItem(menuStatus); menu.addItem(.separator())
-        menu.addItem(permissionMenu)
         menu.addItem(identity)
         menu.addItem(.separator())
+        menu.addItem(screenAccess); menu.addItem(controlAccess); menu.addItem(refreshAccess)
+        menu.addItem(.separator())
         menuStart = menu.addItem(withTitle:"Start Sharing",action:#selector(toggleSharing),keyEquivalent:"")
-        menu.addItem(withTitle:"Screen Recording Access…",action:#selector(screenPermission),keyEquivalent:"")
-        menu.addItem(withTitle:"Keyboard and Mouse Access…",action:#selector(controlPermission),keyEquivalent:"")
-        menu.addItem(withTitle:"Refresh Permissions",action:#selector(refreshSetup),keyEquivalent:"")
         menuStop = menu.addItem(withTitle:"Stop Sharing / Disconnect",action:#selector(stopSharing),keyEquivalent:"")
         menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"")
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
@@ -149,7 +149,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
         automaticUpdates.state = updater.automatic ? .on : .off
         menu.addItem(.separator()); menu.addItem(withTitle:"Quit mac-lan",action:#selector(quit),keyEquivalent:"q")
         for item in menu.items { item.target = self }
-        menu.autoenablesItems = false; menuStop.isEnabled = false; menuBar.menu = menu
+        menu.autoenablesItems = false; menuStop.isEnabled = false; menu.delegate = self; menuBar.menu = menu
     }
     @objc func reopen() {
         NSApp.activate(ignoringOtherApps:true)
@@ -171,11 +171,20 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
             try? child.run()
         }
     }
+    func menuWillOpen(_ menu:NSMenu) { refreshPermissions() }
     @objc func refreshPermissions() {
         let screen = CGPreflightScreenCaptureAccess()
         let control = AXIsProcessTrusted()
-        permissionMenu.title = "Viewing: \(screen ? "allowed" : "needs Screen Recording")    Control: \(control ? "allowed" : "optional Accessibility")"
-        permissionMenu.toolTip = "mac-lan: \(appBundleURL.path)\nUse the access items below to open macOS permission settings."
+        // A granted permission is a checked, inactive status line; only a missing one is actionable.
+        func show(_ item:NSMenuItem,granted:Bool,allowed:String,missing:String) {
+            item.title = granted ? allowed : missing
+            item.state = granted ? .on : .off
+            item.isEnabled = !granted
+            item.toolTip = granted ? nil : "Opens System Settings for mac-lan (\(appBundleURL.path))."
+        }
+        show(screenAccess,granted:screen,allowed:"Screen Recording Allowed",missing:"Allow Screen Recording…")
+        show(controlAccess,granted:control,allowed:"Keyboard and Mouse Allowed",missing:"Allow Keyboard and Mouse…")
+        refreshAccess.isHidden = screen && control
         if process == nil { menuStart.isEnabled = !state.quitting }
     }
     @objc func refreshSetup() {

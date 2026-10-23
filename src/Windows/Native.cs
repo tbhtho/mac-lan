@@ -54,27 +54,34 @@ internal sealed class KeyboardHook : IDisposable
     readonly Func<bool> allowed;
     readonly Action<int,bool> send;
     readonly Action escape;
+    readonly KeyRouter router=new(v=>(Native.GetAsyncKeyState(v)&0x8000)!=0);
     nint hook;
+    bool releasing;
     public KeyboardHook(Func<bool> allowed,Action<int,bool> send,Action escape)
     {this.allowed=allowed;this.send=send;this.escape=escape;callback=Handle;}
     public void Install()
     {
-        if(hook!=0)return;hook=SetWindowsHookEx(13,callback,GetModuleHandle(null),0);
+        releasing=false;
+        if(hook!=0)return;router.Reset();hook=SetWindowsHookEx(13,callback,GetModuleHandle(null),0);
         if(hook==0)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
     nint Handle(int code,nint message,nint data)
     {
-        if(code>=0&&allowed())
+        if(code<0)return CallNextHookEx(hook,code,message,data);
+        var key=Marshal.PtrToStructure<KeyInfo>(data);bool down=message==0x100||message==0x104;
+        var decision=router.Route((int)key.Vk,down,!releasing&&allowed());
+        if(releasing&&!router.OwnsKeys)System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(()=>{if(releasing)Dispose();});
+        switch(decision.Route)
         {
-            var key=Marshal.PtrToStructure<KeyInfo>(data);int vk=(int)key.Vk;bool down=message==0x100||message==0x104;
-            bool pressed(int v)=>(Native.GetAsyncKeyState(v)&0x8000)!=0;
-            if(vk==8&&pressed(0x11)&&pressed(0x12)&&pressed(0x10)){escape();return 1;}
-            // Windows shell/security combinations stay local, and immediately revoke remote ownership.
-            if(vk is 0x5B or 0x5C || pressed(0x5B)||pressed(0x5C)||vk==0x2E&&pressed(0x11)&&pressed(0x12))
-            {escape();return CallNextHookEx(hook,code,message,data);}
-            if(KeyMap.MacCode(vk) is int mac){send(mac,down);return 1;}
+            case KeyRoute.Remote:send(decision.MacCode,down);return 1;
+            case KeyRoute.Swallow:return 1;
+            case KeyRoute.Release:escape();return 1;
+            case KeyRoute.ReleaseLocal:escape();break;
         }
         return CallNextHookEx(hook,code,message,data);
     }
-    public void Dispose(){if(hook!=0){UnhookWindowsHookEx(hook);hook=0;}}
+    // Control ended: keep swallowing releases of keys the Mac received, so Windows never
+    // sees a stray Windows-key or Alt release, then remove the hook once they are all up.
+    public void Release(){if(hook==0)return;if(router.OwnsKeys)releasing=true;else Dispose();}
+    public void Dispose(){releasing=false;if(hook!=0){UnhookWindowsHookEx(hook);hook=0;}}
 }

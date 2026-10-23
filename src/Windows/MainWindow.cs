@@ -14,15 +14,15 @@ namespace MacDow.Windows;
 internal sealed partial class MainWindow : Window
 {
     readonly DockPanel root=new();
-    readonly Border body=new(){Background=new SolidColorBrush(Color.FromRgb(243,245,249))};
+    readonly Border body=new(){Background=Brushes.Transparent};
     readonly StackPanel setup=new(){Margin=new Thickness(32,28,32,24),MaxWidth=720,HorizontalAlignment=HorizontalAlignment.Stretch};
-    readonly ComboBox nearby=new(){Width=440,DisplayMemberPath="Label"};
+    readonly ListBox nearby=new();
     readonly TextBlock pairingProgress=new(){TextWrapping=TextWrapping.Wrap,MaxWidth=570,Margin=new Thickness(0,10,0,12)};
     bool discovering;
     readonly ComboBox windows=new(){Width=340,DisplayMemberPath="Label"};
     readonly ComboBox monitors=new(){Width=140,DisplayMemberPath="Id"};
     readonly ComboBox codec=new(){Width=160},resolution=new(){Width=110},fps=new(){Width=80},bitrate=new(){Width=100};
-    readonly TextBlock status=new(){Text="Ready to connect",VerticalAlignment=VerticalAlignment.Center,Foreground=new SolidColorBrush(Color.FromRgb(95,109,128)),Margin=new Thickness(20,8,20,8),FontSize=12};
+    readonly TextBlock status=new(){Text="Ready to connect",VerticalAlignment=VerticalAlignment.Center,Foreground=Glass.Muted,Margin=new Thickness(20,8,20,10),FontSize=12};
     readonly Button updatesButton=new(){Content="Updates",Padding=new Thickness(12,5,12,5)};
     readonly DispatcherTimer updateTimer=new(){Interval=TimeSpan.FromHours(6)};
     bool checkingUpdates,showingUpdates;
@@ -34,6 +34,8 @@ internal sealed partial class MainWindow : Window
     Session? session;
     RemoteView? appView;
     Window? appWindow;
+    string appLabel="";
+    bool appSized;
     FileTransferWindow? filesWindow;
     bool remote,closing,connecting,openingFiles,awaitingFileTransfer;
     string? preferred;
@@ -45,21 +47,24 @@ internal sealed partial class MainWindow : Window
     readonly TabBar tabBar;
     readonly StackPanel streamSection=new(){Visibility=Visibility.Collapsed};
     readonly TextBlock viewProgress=new(){Text="Waiting for Mac video...",Foreground=Ink,FontSize=15,Margin=new Thickness(16,12,16,12)};
-    Button findButton=null!,pairButton=null!;
+    Button pairButton=null!;
+    readonly DispatcherTimer discoveryTimer=new(){Interval=TimeSpan.FromSeconds(8)};
+    int lastFound=-1;
     bool paired;
     public MainWindow()
     {
         Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
-        Content=root;
+        Glass.Apply(this);Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Close,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");BuildSetup();
         keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
-        gate.Released+=reason=>{keyboard.Dispose();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
+        gate.Released+=reason=>{keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
-        Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();};
+        Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
+        discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
         Deactivated+=(_,_)=>{if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");};
         Activated+=(_,_)=>RefreshContext();
@@ -75,7 +80,7 @@ internal sealed partial class MainWindow : Window
                 e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed");
                 await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
             }
-            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");timer.Stop();updateTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
         };
     }
     Button MakeButton(string text,Action action){var b=new Button{Content=text,Margin=new Thickness(0,4,0,4),HorizontalAlignment=HorizontalAlignment.Left};b.Click+=(_,_)=>action();return b;}
@@ -96,7 +101,7 @@ internal sealed partial class MainWindow : Window
     void ShowSetup()
     {
         gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
-        status.Visibility=Visibility.Visible;body.Background=new SolidColorBrush(Color.FromRgb(243,245,249));
+        status.Visibility=Visibility.Visible;body.Background=Brushes.Transparent;
         Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
         WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;WindowState=WindowState.Normal;Width=840;Height=720;
         if(setup.Parent is ScrollViewer old)old.Content=null;body.Child=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
@@ -117,33 +122,33 @@ internal sealed partial class MainWindow : Window
         if(view.Parent is Border previousBorder)previousBorder.Child=null;
         status.Visibility=Visibility.Collapsed;
         if(ReferenceEquals(view,desktop)){body.Background=Brushes.Black;return view;}
-        var panel=new DockPanel{Background=Brushes.White};var toolbar=new StackPanel{Orientation=Orientation.Horizontal,Background=Brushes.White,Margin=new Thickness(12,4,12,4)};
-        // A single control button is reparented only after the previous surface has been detached.
-        if(control.Parent is Panel old)old.Children.Remove(control);toolbar.Children.Add(control);
-        toolbar.Children.Add(MakeButton("Updates",ShowUpdates));
-        toolbar.Children.Add(MakeButton("Release",Escape));toolbar.Children.Add(MakeButton("Disconnect",()=>Disconnect()));
-        toolbar.Children.Add(new TextBlock{Text="  Ctrl+Alt+Shift+Backspace releases control",FontSize=12,VerticalAlignment=VerticalAlignment.Center});
-        DockPanel.SetDock(toolbar,Dock.Top);panel.Children.Add(toolbar);
+        // App Priority is the Mac app's own window on Windows: no mac-lan chrome inside it.
+        // Click to control; Ctrl+Alt+Shift+Backspace or focus loss releases; closing disconnects.
+        var panel=new DockPanel{Background=Brushes.Black};
         if(viewProgress.Parent is Panel previousNotice)previousNotice.Children.Remove(viewProgress);
         viewProgress.Visibility=view.LastPresented>0?Visibility.Collapsed:Visibility.Visible;
         DockPanel.SetDock(viewProgress,Dock.Top);panel.Children.Add(viewProgress);panel.Children.Add(view);return panel;
     }
+    // Discovery runs by itself while the setup page is open and nothing is paired; a refresh keeps the chosen Mac.
     async Task FindMac()
     {
-        if(discovering)return;discovering=true;findButton.IsEnabled=false;findButton.Content="Searching...";nearby.IsEnabled=false;pairButton.IsEnabled=false;pairingProgress.Text="Looking for your Mac on this Wi-Fi or Ethernet network...";
+        if(discovering||paired||connecting||closing)return;discovering=true;
+        if(nearby.Items.Count==0)pairingProgress.Text="Looking for your Mac on this Wi-Fi or Ethernet network...";
         try
         {
             var result=await UpdateProcess.Call("discover");
-            pairingProgress.Text=result.GetProperty("message").GetString();
             var found=new List<DiscoveredHost>();
             if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("hosts",out var hosts)&&hosts.ValueKind==JsonValueKind.Array)
                 foreach(var h in hosts.EnumerateArray().Take(32))
                     if(DiscoveredHost.TryCreate(h.GetProperty("name").GetString()??"",h.GetProperty("address").GetString()??"",h.GetProperty("port").GetInt32(),h.GetProperty("fingerprint").GetString()??"",out var valid))found.Add(valid!);
-            nearby.ItemsSource=found;if(found.Count==1)nearby.SelectedIndex=0;
-            Telemetry.Report(found.Count==0?"discovery-empty":"discovery-ready","ok",found.Count);
+            if(paired||connecting)return;
+            string? previous=(nearby.SelectedItem as DiscoveredHost)?.Fingerprint;
+            nearby.ItemsSource=found;nearby.SelectedItem=found.FirstOrDefault(h=>h.Fingerprint==previous)??(found.Count==1?found[0]:null);
+            pairingProgress.Text=found.Count==0?(result.GetProperty("message").GetString()??"")+" This list refreshes automatically.":found.Count==1?"Found your Mac. Choose Connect.":"Choose your Mac, then Connect.";
+            if(found.Count!=lastFound){lastFound=found.Count;Telemetry.Report(found.Count==0?"discovery-empty":"discovery-ready","ok",found.Count);}
         }
-        catch(Exception e){Telemetry.Report("discovery-failed",e.GetType().Name);pairingProgress.Text="Could not search this network. Keep the Mac app open, check that both devices use the same network, then try again.";}
-        finally{discovering=false;nearby.IsEnabled=!connecting&&nearby.Items.Count>0;findButton.IsEnabled=true;findButton.Content="Find my Mac";pairButton.IsEnabled=!paired&&!connecting&&nearby.SelectedItem is DiscoveredHost;}
+        catch(Exception e){Telemetry.Report("discovery-failed",e.GetType().Name);if(!paired&&!connecting)pairingProgress.Text="Could not search this network yet. Keep the Mac app open on the same network; mac-lan keeps looking.";}
+        finally{discovering=false;nearby.IsEnabled=!connecting&&!paired&&nearby.Items.Count>0;pairButton.IsEnabled=!paired&&!connecting&&nearby.SelectedItem is DiscoveredHost;}
     }
     async Task ConnectNearby()
     {
@@ -180,7 +185,7 @@ internal sealed partial class MainWindow : Window
                 else frames.Clear();
             },DispatcherPriority.Background);
         };
-        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title="mac-lan - disconnected / view only";}});
+        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
         return s;
     }
     void HandleMessage(Session s,JsonElement m)
@@ -188,10 +193,10 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":paired=true;connecting=false;Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString())).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
+            case "catalog":paired=true;connecting=false;Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString(),w.GetProperty("app").GetString()??"Mac app")).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
-            case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=$"mac-lan | {(gate.CanRoute?"CONTROLLING":"VIEW ONLY")} | RTT {ms:F0} ms | Ctrl+Alt+Shift+Backspace releases";}}break;
-            case "video":(appView??desktop).Configure(m);break;
+            case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=AppTitle();}}break;
+            case "video":(appView??desktop).Configure(m);if(appView!=null&&!appSized)FitAppWindow(m);break;
             case "controlStatus":HandleControlStatus(m);break;
             case "error":case "status":var msg=m.TryGetProperty("message",out var v)?v.GetString():"Mac status changed";status.Text=msg;if(t.GetString()=="error"){Telemetry.Report("capture-failed","host-error");viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}if(m.TryGetProperty("paused",out var paused)&&paused.GetBoolean()){gate.Disarm("mac-paused");(appView??desktop).Clear();viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}break;
         }
@@ -202,12 +207,12 @@ internal sealed partial class MainWindow : Window
         if(session.VideoError is string videoError){ShowSetup();status.Text=pairingProgress.Text="Connected for files. Video is unavailable on your Mac: "+videoError;return;}
         if(session.IsReady||session.IsStarting){ShowRemote();return;}
         if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update mac-lan on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
-        uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;}
+        uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;appLabel=selected.App;appSized=false;}
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
             remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");
-            appWindow=new Window{Title="mac-lan App Priority - View only",Width=1100,Height=740,MinWidth=400,MinHeight=300,Background=Brushes.Black,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};
+            appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
@@ -227,8 +232,8 @@ internal sealed partial class MainWindow : Window
     void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
     void RefreshContext()=>gate.SetContext(session?.IsReady==true,remote||appWindow!=null,OwnerIsForeground());
-    void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Brushes.DarkOrange:Brushes.White;control.Foreground=gate.CanRoute?Brushes.White:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
-    void Escape(){gate.Disarm("manual");if(appWindow==null)ShowDesktop();else{appWindow.Title="mac-lan App Priority | VIEW ONLY | control released";UpdateControl();}}
+    void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Glass.Warn:Glass.Fill;control.Foreground=gate.CanRoute?Brushes.Black:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
+    void Escape(){gate.Disarm("manual");if(appWindow==null)ShowDesktop();else{appWindow.Title=AppTitle();UpdateControl();}}
     string? ControlVideoBlockReason()=>session==null?"disconnected":VideoFreshness.BlockReason(controlPermission,(appView??desktop).LastPresented,session.NativeAlive,session.LastFrame,Stopwatch.GetTimestamp(),Stopwatch.Frequency);
     bool CanControlVideo()=>ControlVideoBlockReason()==null;
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
@@ -236,6 +241,7 @@ internal sealed partial class MainWindow : Window
     {
         RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":"Click Mac to control"):null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
+        if(appWindow!=null)appWindow.Title=AppTitle();
         SendLease();
     }
     void HandlePointer(JsonElement m)
@@ -303,7 +309,20 @@ internal sealed partial class MainWindow : Window
         catch(Exception e){updatesButton.ToolTip="Update check unavailable: "+e.Message;}
         finally{checkingUpdates=false;}
     }
-    record WindowChoice(uint ID,string Label);
+    string AppTitle()=>appLabel+(session?.IsReady!=true?" (disconnected)":gate.CanRoute?"":" (click to control)");
+    // Size the App Priority window once per stream so it matches the Mac window's shape.
+    void FitAppWindow(JsonElement m)
+    {
+        if(appWindow?.Content is not FrameworkElement content||content.ActualWidth<=0||!m.TryGetProperty("width",out var w)||!m.TryGetProperty("height",out var h)||!w.TryGetDouble(out double vw)||!h.TryGetDouble(out double vh)||vw<=0||vh<=0)return;
+        appSized=true;
+        if(appWindow.WindowState!=WindowState.Normal)return;
+        var area=SystemParameters.WorkArea;double chromeW=appWindow.ActualWidth-content.ActualWidth,chromeH=appWindow.ActualHeight-content.ActualHeight;
+        double width=Math.Min(vw,area.Width*0.9-chromeW),height=width*vh/vw;
+        if(height>area.Height*0.9-chromeH){height=area.Height*0.9-chromeH;width=height*vw/vh;}
+        appWindow.Width=width+chromeW;appWindow.Height=height+chromeH;
+        appWindow.Left=area.Left+(area.Width-appWindow.Width)/2;appWindow.Top=area.Top+(area.Height-appWindow.Height)/2;
+    }
+    record WindowChoice(uint ID,string Label,string App);
 }
 
 internal sealed class RemoteView : WebView2
