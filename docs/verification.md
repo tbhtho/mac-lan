@@ -1,5 +1,34 @@
 # Verification record
 
+## Alpha.17 - Windows setup and Mac disk image
+
+The application source is unchanged from alpha.16 apart from its version. New
+first-install downloads wrap the same verified packages.
+
+- Release `v0.1.0-alpha.17` binds source commit
+  `d23c77b8cd2e6982790e8ee6c6cb2cab4862bded`; feed commit `a93856d` follows it.
+  All eight downloads were read anonymously and matched `SHA256SUMS`. The
+  feed lists only the existing three update assets; its signature verified and
+  it expires 2026-11-22.
+- `mac-lan-setup.exe` is 45,967,492 bytes, SHA-256
+  `fc86c98b350ea0e2e4376f14537fb93ccd3ca3055833ec8ead0de4c0169f8b06`. The
+  downloaded setup ran a silent per-user install into a temporary folder:
+  the installed EXE matched the released `mac-lan.exe`, Start menu, desktop
+  shortcut and the Apps entry (version 0.1.0-alpha.17) appeared, its update
+  check reported current, and the silent uninstall removed files, an updater
+  backup placeholder, shortcuts and the registry entry. No interactive wizard
+  page was viewed.
+- `mac-lan-macos-arm64.dmg` is 18,055,168 bytes, SHA-256
+  `29d01c35c4f4558a6c0a3cc8a1881cdca5232df65d7a4928a94879560e1bf135`, an
+  ISO 9660/Rock Ridge image written on Windows. Its writer read every entry,
+  mode and the `/Applications` link back against the app archive, and the
+  Windows ISO driver mounted an identical earlier image read-only with
+  matching executable hashes. It has not been mounted on macOS.
+- The actual alpha.16 EXE and the bundled alpha.14/15/16 update helpers reported
+  alpha.17 available. Right after publishing, some raw.githubusercontent.com
+  edge nodes served the previous feed for up to five minutes, so early checks
+  reported "current".
+
 ## Alpha.16 - Windows glass interface, Windows-key routing and App Priority
 
 The full Windows headless suite passed: 59 core (including 11 new key-routing
