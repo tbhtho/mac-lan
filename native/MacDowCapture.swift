@@ -29,9 +29,11 @@ func jsonStatus(_ value: [String: Any]) {
 func die(_ message: String) -> Never { status(message, paused: true); exit(1) }
 func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 func validCaptureFPS(_ value: Int) -> Bool { value == 60 }
-func desktopCaptureDimensions(width: Int) -> (width: Int, height: Int) {
-    let evenWidth = max(2, width / 2 * 2)
-    return (evenWidth, max(2, Int(Double(evenWidth) * 9 / 16) / 2 * 2))
+func desktopCaptureDimensions(width: Int, sourceWidth: Double, sourceHeight: Double, pointPixelScale: Double) -> (width: Int, height: Int) {
+    let sourcePixelsWide = max(1, sourceWidth * pointPixelScale)
+    let sourcePixelsHigh = max(1, sourceHeight * pointPixelScale)
+    let ratio = min(1.0, min(Double(min(1920, width)) / sourcePixelsWide, 2160 / sourcePixelsHigh))
+    return (max(2, Int(sourcePixelsWide * ratio) / 2 * 2), max(2, Int(sourcePixelsHigh * ratio) / 2 * 2))
 }
 func existingPermissions() -> Bool {
     let screen = CGPreflightScreenCaptureAccess(), input = AXIsProcessTrusted()
@@ -119,8 +121,8 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             filter = SCContentFilter(desktopIndependentWindow: window)
         }
         if id == 0 {
-            // Scale the whole Mac desktop into the requested 16:9 output, including menu and Dock.
-            let dimensions = desktopCaptureDimensions(width: maxWidth)
+            // Preserve the full display's proportions, including menu and Dock; never upscale source pixels.
+            let dimensions = desktopCaptureDimensions(width: maxWidth, sourceWidth: Double(frame.width), sourceHeight: Double(frame.height), pointPixelScale: Double(filter.pointPixelScale))
             width = dimensions.width; height = dimensions.height
         } else {
             let pixels = Double(filter.pointPixelScale)
@@ -130,7 +132,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard height <= 2160, width <= 1920 else { shutdown("Capture dimensions exceed resource limit") }
         let config = SCStreamConfiguration()
         config.width = width; config.height = height
-        config.preservesAspectRatio = id != 0
+        config.preservesAspectRatio = true
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         // Keep the immediate Windows pointer; omit the delayed duplicate from video only.
         config.queueDepth = 3; config.showsCursor = false
@@ -138,7 +140,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         config.capturesAudio = false
         config.ignoreShadowsSingleWindow = true
         if codec == "h264" { setupEncoder() }
-        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps,"presentation":id == 0 ? "fill" : "fit"]) }
+        else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps,"presentation":"fit"]) }
         stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream!.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "MAC-DOW.capture", qos: .userInteractive))
         try await stream!.startCapture()
@@ -234,7 +236,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
                     let parameter = Data(bytes:pointer,count:size)
                     if index == 0 && size >= 4 {
                         let codec = String(format:"avc1.%02X%02X%02X",pointer[1],pointer[2],pointer[3])
-                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"fps":fps,"hardware":true,"presentation":windowID == 0 ? "fill" : "fit"]) }
+                        if announcedCodec != codec { announcedCodec = codec; jsonStatus(["type":"video","codec":codec,"width":width,"height":height,"fps":fps,"hardware":true,"presentation":"fit"]) }
                     }
                     data.append(contentsOf:[0,0,0,1]);data.append(parameter)
                 }
@@ -447,7 +449,13 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
-    precondition(desktopCaptureDimensions(width: 1920) == (1920, 1080) && desktopCaptureDimensions(width: 1280) == (1280, 720))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 2560, sourceHeight: 1600, pointPixelScale: 1) == (1920, 1200))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 2) == (1920, 1200))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 1) == (1280, 800))
+    precondition(desktopCaptureDimensions(width: 1280, sourceWidth: 2560, sourceHeight: 1600, pointPixelScale: 1) == (1280, 800))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1920, sourceHeight: 1080, pointPixelScale: 1) == (1920, 1080))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1440, sourceHeight: 2880, pointPixelScale: 1) == (1080, 2160))
+    precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1281, sourceHeight: 801, pointPixelScale: 1) == (1280, 800))
     precondition(validCaptureFPS(60) && !validCaptureFPS(30) && !validCaptureFPS(15) && !validCaptureFPS(61))
     var l=Lease();precondition(!l.valid(now:0));l.update(true,now:1);precondition(l.valid(now:1.5));precondition(!l.valid(now:2));l.release();precondition(!l.valid(now:1))
     var delivered=0,failed=false

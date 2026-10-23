@@ -30,6 +30,13 @@ import (
 )
 
 func main() {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" && len(os.Args) == 1 {
+		if err := launchMacMenu(); err != nil {
+			showMenuFailure(err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--diagnose" {
 		event, code := "manual-report", "ok"
 		if len(os.Args) > 2 {

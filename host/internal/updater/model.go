@@ -169,7 +169,9 @@ func assetNames(goos, arch string) ([]string, error) {
 	if goos == "windows" {
 		return []string{"mac-lan.exe", "MAC-DOW.exe", legacy}, nil
 	}
-	return []string{"mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz", legacy}, nil
+	// Keep the established signed app asset alias: alpha.14's strict feed parser
+	// already knows it, so the same feed can migrate old preview installations.
+	return []string{legacy, "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW-macos-arm64-commandline-preview.tar.gz"}, nil
 }
 func Select(releases []Release, current, channel, goos, arch string) (Plan, error) {
 	var result Plan

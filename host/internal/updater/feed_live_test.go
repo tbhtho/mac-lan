@@ -15,7 +15,7 @@ import (
 )
 
 // TestLiveSignedUpdates deliberately opts into the production HTTPS feed. It
-// never executes downloaded programs: only a temporary copy of an alpha.13
+// never executes downloaded programs: only a temporary copy of an alpha.14
 // executable is replaced, and Mac validation stops at archive/identity/Mach-O.
 // The ordinary suite skips before reading a local binary or making a request.
 func TestLiveSignedUpdates(t *testing.T) {
@@ -25,10 +25,10 @@ func TestLiveSignedUpdates(t *testing.T) {
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		t.Fatal("this live updater verification expects a Windows x64 test runner")
 	}
-	const previous = "0.1.0-alpha.13"
+	const previous = "0.1.0-alpha.14"
 	oldPath := os.Getenv("MACDOW_LIVE_OLD_EXE")
 	if !filepath.IsAbs(oldPath) {
-		t.Fatal("MACDOW_LIVE_OLD_EXE must be an absolute path to the real alpha.13 standalone EXE")
+		t.Fatal("MACDOW_LIVE_OLD_EXE must be an absolute path to the real alpha.14 standalone EXE")
 	}
 	oldInfo, err := os.Lstat(oldPath)
 	if err != nil || !oldInfo.Mode().IsRegular() || oldInfo.Size() <= 0 || oldInfo.Size() > MaxArchive {
@@ -36,7 +36,7 @@ func TestLiveSignedUpdates(t *testing.T) {
 	}
 	oldMarker, err := ReadPackageIdentity(oldPath)
 	if err != nil || oldMarker.Product != "MAC-DOW" || oldMarker.RepositoryID != BuildConfig().RepositoryID || oldMarker.Version != previous || oldMarker.OS != "windows" || oldMarker.Arch != "amd64" {
-		t.Fatal("old executable is not the expected alpha.13 Windows standalone release", oldMarker, err)
+		t.Fatal("old executable is not the expected alpha.14 Windows standalone release", oldMarker, err)
 	}
 	originalHash := liveFileHash(t, oldPath)
 	root := t.TempDir()
@@ -99,7 +99,7 @@ func TestLiveSignedUpdates(t *testing.T) {
 	}
 	mac.Root, mac.Current, mac.OS, mac.Arch = filepath.Join(root, "mac-cache"), previous, "darwin", "arm64"
 	macPlan, err := mac.Check(ctx, BuildConfig().DefaultChannel)
-	if err != nil || macPlan.Version != BuildConfig().Version || macPlan.Asset.Name != "mac-lan-macos-arm64-commandline-preview.tar.gz" {
+	if err != nil || macPlan.Version != BuildConfig().Version || macPlan.Asset.Name != "MAC-DOW-macos-arm64-unsigned.tar.gz" {
 		t.Fatal("published Mac update did not match this build", macPlan, err)
 	}
 	macStage, err := mac.Stage(ctx, BuildConfig().DefaultChannel)
@@ -111,24 +111,24 @@ func TestLiveSignedUpdates(t *testing.T) {
 		t.Fatal("production Mac package signature/digest verification failed", err)
 	}
 	macRoot := payloadRoot(filepath.Join(macStage.Directory, "preview"), macStage.Plan)
-	if err = validatePreviewDirectory(macRoot, false); err != nil {
+	if filepath.Base(macRoot) != "mac-lan.app" {
+		t.Fatal("Mac payload is not the menu-bar app bundle", macRoot)
+	}
+	if err = ValidateMacAppBundle(macRoot, false); err != nil {
 		t.Fatal("Mac package contains an unexpected path or layout", err)
 	}
-	if err = validateMacHost(filepath.Join(macRoot, "MacDowHost"), false); err != nil {
-		t.Fatal("Mac package host is not an Apple Silicon Mach-O executable", err)
-	}
 	var marker Marker
-	if err = readJSON(filepath.Join(macRoot, "MAC-DOW-INSTALL.json"), &marker); err != nil {
+	if err = readJSON(filepath.Join(metadataRoot(macRoot), "MAC-DOW-INSTALL.json"), &marker); err != nil {
 		t.Fatal(err)
 	}
-	if marker.Product != "MAC-DOW" || marker.RepositoryID != BuildConfig().RepositoryID || marker.Version != BuildConfig().Version || marker.Commit != macStage.Plan.Commit || marker.OS != "darwin" || marker.Arch != "arm64" || marker.Layout != "commandline-preview" {
+	if marker.Product != "MAC-DOW" || marker.RepositoryID != BuildConfig().RepositoryID || marker.Version != BuildConfig().Version || marker.Commit != macStage.Plan.Commit || marker.OS != "darwin" || marker.Arch != "arm64" || marker.Layout != "app-bundle" {
 		t.Fatal("Mac package identity differs from signed release", marker)
 	}
-	commitBytes, err := os.ReadFile(filepath.Join(macRoot, "COMMIT.txt"))
+	commitBytes, err := os.ReadFile(filepath.Join(metadataRoot(macRoot), "COMMIT.txt"))
 	if err != nil || strings.TrimSpace(string(commitBytes)) != marker.Commit {
 		t.Fatal("Mac commit marker differs from signed release", err)
 	}
-	t.Logf("Verified public signed Mac %s archive, exact preview layout, commit and arm64 Mach-O header; no Darwin execution", marker.Version)
+	t.Logf("Verified public signed Mac %s archive, menu-bar bundle layout, commit and arm64 Mach-O headers; no Darwin execution", marker.Version)
 }
 
 func liveFileHash(t *testing.T, path string) string {

@@ -36,6 +36,7 @@ const nativeBinaryLimit = 64 * 1024 * 1024
 type nativeCommand func(context.Context, string, []string, []string) ([]byte, error)
 type nativeBuilder struct {
 	encoded, sourceSHA, cacheBase, goos, goarch string
+	menu                                        bool
 	run                                         nativeCommand
 	emit                                        func(string, string, map[string]int)
 }
@@ -123,7 +124,11 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 		return "", err
 	}
 	cleanupNativeTemps(root)
-	helper := filepath.Join(root, "MacDowCapture")
+	binaryName, sourceName := "MacDowCapture", "MacDowCapture.swift"
+	if b.menu {
+		binaryName, sourceName = "MacLanMenu", "main.swift"
+	}
+	helper := filepath.Join(root, binaryName)
 	manifestPath := filepath.Join(root, "manifest.json")
 	if validNativeCache(helper, manifestPath, b.sourceSHA) {
 		stage = "self-test-failed"
@@ -168,7 +173,7 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 		return "", err
 	}
 	defer os.RemoveAll(temp) // Only the directory created by this invocation.
-	sourcePath, temporaryHelper := filepath.Join(temp, "MacDowCapture.swift"), filepath.Join(temp, "MacDowCapture")
+	sourcePath, temporaryHelper := filepath.Join(temp, sourceName), filepath.Join(temp, binaryName)
 	moduleCache := filepath.Join(temp, "modules")
 	if err = os.Mkdir(moduleCache, 0700); err != nil {
 		return "", err

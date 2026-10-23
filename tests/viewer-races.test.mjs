@@ -210,10 +210,19 @@ const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
  console.log('PASS stream clearing cannot leave activation stuck');
 }
 {
- const h=runtime();h.canvas.width=1920;h.canvas.height=1080;await h.send({type:'video',codec:'jpeg',presentation:'fit'});h.state.messages.length=0;
- assert.equal(h.canvas.style.objectFit,'contain');h.pointer('pointerdown',{clientY:10});
- assert.equal(h.state.messages.length,0,'App Priority letterboxes cannot activate control');
- await h.send({type:'video',codec:'jpeg',presentation:'fill'});assert.equal(h.canvas.style.objectFit,'fill');h.pointer('pointerdown',{clientY:10});h.pointer('pointerup',{clientY:10});
- assert.deepEqual(h.state.messages.map(m=>m.type),['requestControl'],'the full desktop fills the picture and accepts clicks there');
- console.log('PASS App Priority preserves aspect fit; full desktop fills and uses matching pointer mapping');
+ for(const metadata of [{presentation:'fit'},{presentation:'fill'},{}]){
+  const h=runtime();h.canvas.width=1920;h.canvas.height=1080;await h.send({type:'video',codec:'jpeg',...metadata});h.state.messages.length=0;
+  assert.equal(h.canvas.style.objectFit,'contain','all desktop and window metadata must preserve picture geometry');
+  h.pointer('pointerdown',{clientY:10});h.pointer('pointerup',{clientY:10});
+  assert.equal(h.state.messages.length,0,'letterbox clicks cannot activate control, including legacy fill hosts');
+  h.pointer('pointerdown');h.pointer('pointerup');
+  assert.deepEqual(h.state.messages.map(m=>m.type),['requestControl'],'only a click inside the picture can request control');
+  await h.send({type:'armed',active:true});h.state.messages.length=0;
+  h.pointer('pointermove',{clientY:10});h.pointer('wheel',{clientY:10});h.pointer('pointerdown',{clientY:10});h.pointer('pointerup',{clientY:10});
+  assert.equal(h.state.messages.length,0,'letterbox bars do not send pointer buttons, moves, or scrolls while armed');
+  h.pointer('pointerdown');h.pointer('pointerup',{clientY:10});
+  assert.deepEqual(h.state.messages.map(m=>m.type),['move','button','button'],'a captured drag released over a bar still releases its held Mac button');
+  assert.deepEqual(h.state.messages.filter(m=>m.type==='button').map(m=>m.down),[true,false]);
+ }
+ console.log('PASS desktop, App Priority and legacy metadata preserve aspect fit with noninteractive bars');
 }

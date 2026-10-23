@@ -55,6 +55,8 @@ type feedAsset struct {
 type manifestOptions struct {
 	Windows, Mac, Tag, Commit   string
 	ReleaseID, WindowsID, MacID int64
+	MacApp                      string
+	MacAppID                    int64
 }
 
 func main() {
@@ -78,11 +80,13 @@ func run(args []string, out io.Writer) error {
 	public := f.String("public-key", "", "trusted public key; defaults to embedded build config")
 	windows := f.String("windows", "", "Windows EXE")
 	mac := f.String("mac", "", "public Mac archive")
+	macApp := f.String("mac-app", "", "optional public Mac menu-bar app archive")
 	tag := f.String("tag", "", "v-prefixed SemVer")
 	commit := f.String("commit", "", "source commit")
 	releaseID := f.Int64("release-id", 0, "release identifier")
 	windowsID := f.Int64("windows-id", 0, "Windows asset identifier")
 	macID := f.Int64("mac-id", 0, "Mac asset identifier")
+	macAppID := f.Int64("mac-app-id", 0, "optional Mac app asset identifier")
 	if err := f.Parse(args[1:]); err != nil || f.NArg() != 0 {
 		return errors.New("invalid command arguments")
 	}
@@ -145,7 +149,7 @@ func run(args []string, out io.Writer) error {
 				return err
 			}
 		}
-		payload, err := makeManifest(manifestOptions{*windows, *mac, *tag, *commit, *releaseID, *windowsID, *macID}, previous, *public, now)
+		payload, err := makeManifest(manifestOptions{Windows: *windows, Mac: *mac, Tag: *tag, Commit: *commit, ReleaseID: *releaseID, WindowsID: *windowsID, MacID: *macID, MacApp: *macApp, MacAppID: *macAppID}, previous, *public, now)
 		if err != nil {
 			return err
 		}
@@ -352,7 +356,7 @@ func validatePayload(raw []byte, now time.Time) (feedPayload, error) {
 
 func publisherAssetName(name string) bool {
 	switch name {
-	case "mac-lan.exe", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW.exe", "MAC-DOW-macos-arm64-commandline-preview.tar.gz":
+	case "mac-lan.exe", "mac-lan-macos-arm64-commandline-preview.tar.gz", "MAC-DOW.exe", "MAC-DOW-macos-arm64-commandline-preview.tar.gz", "MAC-DOW-macos-arm64-unsigned.tar.gz":
 		return true
 	}
 	return false
@@ -362,17 +366,27 @@ func makeManifest(o manifestOptions, previous []byte, trusted string, now time.T
 	if o.Windows == "" || o.Mac == "" {
 		return nil, errors.New("manifest requires --windows and --mac")
 	}
+	if (o.MacApp == "") != (o.MacAppID == 0) || o.MacAppID < 0 {
+		return nil, errors.New("--mac-app and a positive --mac-app-id must be provided together")
+	}
 	p := feedPayload{Schema: 1, Product: "MAC-DOW", SourceRepositoryID: 1430459188, PublishedAt: now.UTC().Format(time.RFC3339), ExpiresAt: now.UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)}
 	version, err := updater.ParseVersion(strings.TrimPrefix(o.Tag, "v"))
 	if err != nil || !strings.HasPrefix(o.Tag, "v") {
 		return nil, errors.New("manifest requires a v-prefixed canonical SemVer tag")
 	}
 	r := feedRelease{ID: o.ReleaseID, Tag: o.Tag, Commit: o.Commit, Prerelease: len(version.Pre) != 0}
-	for _, file := range []struct {
+	files := []struct {
 		path, name string
 		id         int64
-	}{{o.Windows, "mac-lan.exe", o.WindowsID}, {o.Mac, "mac-lan-macos-arm64-commandline-preview.tar.gz", o.MacID}} {
-		a, err := artifactMetadata(file.path, file.name, file.id)
+	}{{o.Windows, "mac-lan.exe", o.WindowsID}, {o.Mac, "mac-lan-macos-arm64-commandline-preview.tar.gz", o.MacID}}
+	if o.MacApp != "" {
+		files = append(files, struct {
+			path, name string
+			id         int64
+		}{o.MacApp, "MAC-DOW-macos-arm64-unsigned.tar.gz", o.MacAppID})
+	}
+	for _, file := range files {
+		a, err := artifactMetadataBound(file.path, file.name, file.id, strings.TrimPrefix(o.Tag, "v"), o.Commit)
 		if err != nil {
 			return nil, err
 		}
@@ -402,6 +416,10 @@ func makeManifest(o manifestOptions, previous []byte, trusted string, now time.T
 }
 
 func artifactMetadata(path, name string, id int64) (feedAsset, error) {
+	return artifactMetadataBound(path, name, id, "", "")
+}
+
+func artifactMetadataBound(path, name string, id int64, version, commit string) (feedAsset, error) {
 	var a feedAsset
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
@@ -416,8 +434,12 @@ func artifactMetadata(path, name string, id int64) (feedAsset, error) {
 	if err != nil || !os.SameFile(info, opened) {
 		return a, errors.New("artifact changed while opening")
 	}
-	if name == "mac-lan-macos-arm64-commandline-preview.tar.gz" || name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
-		if err = validatePublicMacArchive(f); err != nil {
+	if name == "mac-lan-macos-arm64-commandline-preview.tar.gz" || name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" || name == "MAC-DOW-macos-arm64-unsigned.tar.gz" {
+		root := "macos-arm64"
+		if name == "MAC-DOW-macos-arm64-unsigned.tar.gz" {
+			root = "mac-lan.app"
+		}
+		if err = validatePublicMacArchiveBound(f, root, version, commit); err != nil {
 			return a, err
 		}
 		if _, err = f.Seek(0, io.SeekStart); err != nil {

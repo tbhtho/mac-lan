@@ -9,9 +9,9 @@ export class SequenceGate {
   accept(sequence,key){if(this.last!==null&&sequence!==((this.last+1)>>>0))this.waiting=true;this.last=sequence;if(key)this.waiting=false;return !this.waiting;}
   reset(){this.last=null;this.waiting=true;}
 }
-// Match the displayed desktop fill or individual-window fit before normalizing pointer coordinates.
-export function mapPointer(x,y,w,h,iw,ih,presentation='fill'){
+// Match the complete aspect-fit picture; bars never address the remote desktop.
+export function mapPointer(x,y,w,h,iw,ih){
   if(![x,y,w,h,iw,ih].every(Number.isFinite)||w<=0||h<=0||iw<=0||ih<=0)return null;
-  if(presentation==='fit'){const scale=Math.min(w/iw,h/ih),cw=iw*scale,ch=ih*scale;x-=(w-cw)/2;y-=(h-ch)/2;w=cw;h=ch;}
+  const scale=Math.min(w/iw,h/ih),cw=iw*scale,ch=ih*scale;x-=(w-cw)/2;y-=(h-ch)/2;w=cw;h=ch;
   return x<0||y<0||x>=w||y>=h?null:{x:x/w,y:y/h};
 }

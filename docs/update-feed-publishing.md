@@ -8,21 +8,23 @@ manual-only decision.
 
 ## Local release workflow
 
-Build both packages from clean, committed source using the existing toolchains,
+Build Windows and both Mac layouts from clean, committed source using existing toolchains,
 then run the publisher from the repository root with the authenticated publishing
 account:
 
 ```powershell
 ./scripts/package-windows.ps1
-./scripts/package-macos-preview.ps1
+./scripts/package-macos-app.ps1
 ./scripts/publish-release.ps1 -NotesFile <path-to-release-notes>
 ```
 
 The publisher does not build binaries. It validates their metadata against the
 exact clean HEAD, signs a local review feed, and generates
 `artifacts/mac-lan-source-$version.zip` and `SHA256SUMS-$version.txt`. It creates
-a draft release containing the Windows package, Mac package, source ZIP, and
-checksums, signs the feed with the actual release/asset IDs, then publishes the
+a draft release containing the Windows package, command-line bridge, canonical
+app archive, app compatibility alias, source ZIP, and checksums. It verifies the
+alias is byte-identical to the canonical app archive, signs the feed with the
+actual release/asset IDs, then publishes the
 release. Finally it commits only `updates/feed.json` with a plain natural subject
 and pushes `main`. No paid CI or toolchain installation is part of this workflow.
 
@@ -32,10 +34,11 @@ the local source ZIP, checksums, and review feed. Review those outputs before
 publishing. A successful local validation is not a published release.
 
 Keep the source commit, package provenance, tag, and signed feed aligned. Publish
-`mac-lan.exe` and `mac-lan-macos-arm64-commandline-preview.tar.gz` before the
-matching feed. Verify final asset names, byte counts, hashes, platform,
+`mac-lan.exe`, `mac-lan-macos-arm64-commandline-preview.tar.gz`,
+`mac-lan-macos-arm64.tar.gz`, and `MAC-DOW-macos-arm64-unsigned.tar.gz` before
+the matching feed. Verify final asset names, byte counts, hashes, platform,
 architecture, version, and commit against the actual uploaded bytes. After
-publication, check the feed and both assets anonymously. Source changes alone
+publication, check the feed and all six uploaded assets anonymously. Source changes alone
 are not an application release; immutable release tags and assets must not be
 reused or replaced.
 
@@ -75,9 +78,10 @@ placeholders:
 ./scripts/prepare-update-feed.ps1 `
   -WindowsArtifact artifacts/mac-lan.exe `
   -MacArtifact artifacts/update-public/mac-lan-macos-arm64-commandline-preview.tar.gz `
-  -ReleaseTag v0.1.0-alpha.14 `
+  -MacAppArtifact artifacts/update-public/MAC-DOW-macos-arm64-unsigned.tar.gz `
+  -ReleaseTag v0.1.0-alpha.15 `
   -Commit 0123456789abcdef0123456789abcdef01234567 `
-  -ReleaseId 100 -WindowsAssetId 101 -MacAssetId 102 `
+  -ReleaseId 100 -WindowsAssetId 101 -MacAssetId 102 -MacAppAssetId 103 `
   -PreviousFeed artifacts/previous-feed.json
 ```
 
@@ -85,16 +89,25 @@ Omit `-PreviousFeed` for the first feed. A previous feed's signature and identit
 are verified before its history is preserved. Review-only IDs must be replaced
 with final IDs before publication.
 
-Preparation hashes both artifacts and writes UTF-8 `payload.json` and signed
+Preparation hashes the three feed artifacts and writes UTF-8 `payload.json` and signed
 `feed.json` under `artifacts/update-feed`. The signature covers the exact payload
 bytes, including whitespace. The manifest binds product, repository ID, version,
 source commit, asset names, byte counts, and SHA-256 hashes. Download locations
 are fixed in the applications, not accepted from the feed.
 
+Alpha.14's feed validator recognizes only the existing Windows, command-line
+preview, and `MAC-DOW-macos-arm64-unsigned.tar.gz` app names. Keep the canonical
+`mac-lan-macos-arm64.tar.gz` name out of the shared feed, even though it is the
+primary manual download. Alpha.15's app selects the known app alias; alpha.14's
+host selects the command-line bridge, which installs and opens a separate app
+on its next normal launch. Do not create a separate feed or signing key for
+this transition.
+
 The Mac gate requires `BUILD-PROVENANCE.json` with `publicUpdate:true` and scans
 archive contents for concrete embedded Discord webhook credentials. Build the
-public archive using `./scripts/package-macos-preview.ps1`; public packaging is
-the default, and `-PublicUpdate` remains an optional compatibility flag. A
+public app and bridge using `./scripts/package-macos-app.ps1`. The underlying
+`package-macos-preview.ps1` still supports standalone bridge packaging; public
+packaging is the default, and `-PublicUpdate` remains an optional compatibility flag. A
 private bootstrap requires explicit `-PrivateBootstrap` and is written only
 to `artifacts/private-bootstrap`. Private
 bootstrap packages are refused, even when their filename matches a public asset.

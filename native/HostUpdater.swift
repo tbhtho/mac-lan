@@ -1,10 +1,13 @@
 import AppKit
 import Foundation
+import Darwin
 
 // Updater failures must never stop LAN sharing or appear as permission errors.
 final class HostUpdater {
     weak var app: HostApp?
-    let defaults = UserDefaults.standard
+    // The executable lives in a versioned cache. Keep the established settings
+    // domain independent of Bundle.main so update preferences survive rebuilds.
+    let defaults = UserDefaults(suiteName:"com.tbhtho.macdow.host")!
     var timer: Timer?
     var busy = false
     var stage: [String:Any]?
@@ -40,6 +43,8 @@ final class HostUpdater {
     }
     func check(manual:Bool) {
         guard manual || automatic, !busy else { return }; busy = true
+        stage = nil
+        app?.updateMenu.title = "Check for Updates…"
         run(["check","--channel","preview"]) { [weak self] result,error in
             guard let self = self else { return }
             self.lastMessage = result?["message"] as? String ?? error ?? "Update check unavailable."
@@ -62,16 +67,30 @@ final class HostUpdater {
         }
     }
     func finish(manual:Bool) {
-        busy=false
-        if let message=stage?["message"] as? String {lastMessage=message}
-        if stage?["canApply"] as? Bool == true {app?.updateMenu.title="Restart to Update…";lastMessage="An update is downloaded. Restart when you are ready; sharing continues until then."}
-        app?.updateMenu.toolTip=lastMessage
-        if manual {present()}
+        guard let path=stage?["directory"] as? String else {
+            busy=false;app?.updateMenu.toolTip=lastMessage
+            if manual {present()};return
+        }
+        // Persisted canApply is display state, never evidence. Revalidate cached
+        // downloads against the signed feed and this exact installation first.
+        run(["preflight","--stage",path,"--install",appBundleURL.path]) { [weak self] result,error in
+            guard let self=self else {return};self.busy=false
+            if result?["ok"] as? Bool == true, let fresh=result?["stage"] as? [String:Any] {
+                self.stage=fresh
+                self.app?.updateMenu.title="Restart to Update…"
+                self.lastMessage="An update is downloaded. Restart when you are ready; sharing continues until then."
+            } else {
+                self.stage=nil
+                self.lastMessage=result?["message"] as? String ?? error ?? "Downloaded update could not be revalidated."
+            }
+            self.app?.updateMenu.toolTip=self.lastMessage
+            if manual {self.present()}
+        }
     }
     func present() {
         guard let app=app else {return}
         app.reopen()
-        let alert=NSAlert();alert.messageText="MAC-DOW Updates";alert.informativeText=lastMessage
+        let alert=NSAlert();alert.messageText="mac-lan Updates";alert.informativeText=lastMessage
         if stage?["canApply"] as? Bool == true {alert.addButton(withTitle:"Restart to update");alert.addButton(withTitle:"Later");if alert.runModal() == .alertFirstButtonReturn {apply()}}
         else {alert.addButton(withTitle:"Done");alert.runModal()}
     }
@@ -79,7 +98,7 @@ final class HostUpdater {
         guard !busy,let app=app,let stage=stage,let path=stage["directory"] as? String,
               let plan=stage["plan"] as? [String:Any],let tag=plan["tag"] as? String else {return}
         busy=true
-        let bundle=Bundle.main.bundleURL.path
+        let bundle=appBundleURL.path
         run(["preflight","--stage",path,"--install",bundle]) { [weak self] result,error in
             guard let self=self else {return};self.busy=false
             guard result?["ok"] as? Bool == true else {self.lastMessage=result?["message"] as? String ?? error ?? "Update could not be verified.";self.stage=nil;self.present();return}
@@ -91,7 +110,12 @@ final class HostUpdater {
                 try FileManager.default.copyItem(at:app.hostURL,to:worker)
                 try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:worker.path)
                 let child=Process();child.executableURL=worker;child.currentDirectoryURL=runner
-                child.arguments=["--updater","apply","--stage",path,"--install",bundle,"--wait-pid",String(ProcessInfo.processInfo.processIdentifier),"--confirm","APPLY "+tag,"--relaunch","--result-file",URL(fileURLWithPath:path).appendingPathComponent("worker-result.json").path]
+                // The Go launcher remains inside .app while this cached AppKit
+                // child runs. Wait for its exit before replacing the bundle.
+                guard appLaunchContext.launcherPID == getppid() else {
+                    throw NSError(domain:"mac-lan",code:3,userInfo:[NSLocalizedDescriptionKey:"App launcher ended; reopen mac-lan before updating."])
+                }
+                child.arguments=["--updater","apply","--stage",path,"--install",bundle,"--wait-pid",String(appLaunchContext.launcherPID),"--confirm","APPLY "+tag,"--relaunch","--result-file",URL(fileURLWithPath:path).appendingPathComponent("worker-result.json").path]
                 child.standardInput=FileHandle.nullDevice;child.standardOutput=FileHandle.nullDevice;child.standardError=FileHandle.nullDevice
                 try child.run();self.defaults.set(URL(fileURLWithPath:path).appendingPathComponent("worker-result.json").path,forKey:"updateResult")
                 NSApp.terminate(nil) // HostApp waits for sharing shutdown before allowing app exit.
