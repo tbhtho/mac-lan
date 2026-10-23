@@ -1,14 +1,14 @@
 import {parseFrame,SequenceGate,mapPointer} from './viewer-core.mjs';
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
-let decoder,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0;
+let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0;
 function show(text){hint.textContent=text;}
 function reset(){renderGeneration++;if(decoder){decoder.close();decoder=null;}sequence.reset();pending.clear();ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 function newDecoder(){
   if(decoder)decoder.close();pending.clear();
   const generation=renderGeneration;
   decoder=new VideoDecoder({output:frame=>{if(generation!==renderGeneration){frame.close();return;}let t=pending.get(frame.timestamp);pending.delete(frame.timestamp);canvas.width=frame.displayWidth;canvas.height=frame.displayHeight;ctx.drawImage(frame,0,0);frame.close();drawn++;post({type:"presented"});if(t!==undefined)lastDecode=performance.now()-t;show(armed?'CONTROLLING MAC � Ctrl+Alt+Shift+Backspace releases':'VIEW ONLY � click Control Mac to enable input');},error:e=>{sequence.reset();show('Decoder reset; waiting for keyframe: '+e.message);}});
-  decoder.configure(config);
+  decoder.configure(config);configuredCodec=config.codec;
 }
 chrome.webview.addEventListener('message',async e=>{
   const m=e.data;
@@ -27,9 +27,9 @@ chrome.webview.addEventListener('message',async e=>{
     if(p.kind===1){if(jpegBusy)return;jpegBusy=true;try{let t=performance.now(),generation=renderGeneration;const image=await createImageBitmap(new Blob([p.data],{type:'image/jpeg'}));if(generation!==renderGeneration){image.close();return;}canvas.width=image.width;canvas.height=image.height;ctx.drawImage(image,0,0);image.close();lastDecode=performance.now()-t;drawn++;post({type:"presented"});show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � JPEG diagnostic');}finally{jpegBusy=false;}return;}
     if(p.key){const s=p.data;if(s.length>=8&&s[0]===0&&s[1]===0&&s[2]===0&&s[3]===1&&(s[4]&31)===7){const hex=n=>n.toString(16).padStart(2,'0');config={codec:'avc1.'+hex(s[5])+hex(s[6])+hex(s[7]),hardwareAcceleration:'prefer-hardware',optimizeForLatency:true};}}
     if(!config||!sequence.accept(p.sequence,p.key))return;
-    if(!decoder||decoder.state!=='configured'){if(!p.key)return;newDecoder();}
+    if(!decoder||decoder.state!=='configured'||configuredCodec!==config.codec){if(!p.key)return;newDecoder();}
     if(decoder.decodeQueueSize>=2){sequence.reset();return;}
-    if(p.key){newDecoder();}
+
     const timestamp=++serial*33333;pending.set(timestamp,performance.now());
     decoder.decode(new EncodedVideoChunk({type:p.key?'key':'delta',timestamp,data:p.data}));
   }catch(err){sequence.reset();show('Video error: '+err.message);}

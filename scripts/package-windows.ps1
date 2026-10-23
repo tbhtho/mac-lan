@@ -4,9 +4,10 @@ $env:DOTNET_CLI_HOME=Join-Path $PWD '.cache\dotnet'
 $env:NUGET_PACKAGES=Join-Path $PWD '.cache\nuget'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE='false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
-dotnet publish src/Windows -c Release -r win-x64 --self-contained true -o artifacts/windows-x64 -m:1 -p:BuildInParallel=false -p:PublishSingleFile=false
+dotnet publish src/Windows -c Release -r win-x64 --self-contained true -o artifacts/windows-x64 -m:1 -p:BuildInParallel=false -p:PublishSingleFile=false -p:RestoreLockedMode=true
 if($LASTEXITCODE){throw 'Windows publish failed'}
 Copy-Item README.md,LICENSE,THIRD_PARTY_NOTICES.md -Destination artifacts/windows-x64/
+Copy-Item -Recurse -LiteralPath docs -Destination artifacts/windows-x64/ -Force
 Copy-Item -Recurse -LiteralPath licenses -Destination artifacts/windows-x64/ -Force
 Copy-Item -LiteralPath 'C:\Program Files\dotnet\LICENSE.txt' -Destination artifacts/windows-x64/licenses/dotnet-LICENSE.txt
 Copy-Item -LiteralPath 'C:\Program Files\dotnet\ThirdPartyNotices.txt' -Destination artifacts/windows-x64/licenses/dotnet-ThirdPartyNotices.txt

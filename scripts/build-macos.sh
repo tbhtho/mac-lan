@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || { echo "Build on an Apple Silicon Mac; cross-compilation is not native validation." >&2; exit 1; }
+xcode-select -p >/dev/null 2>&1 || { echo "Existing Xcode/Command Line Tools SDK required; nothing will be installed." >&2; exit 1; }
 command -v swiftc >/dev/null || { echo "An existing Xcode/Command Line Tools Swift compiler is required. Nothing will be installed." >&2; exit 1; }
 command -v go >/dev/null || { echo "An existing Go 1.24+ toolchain is required. Nothing will be installed." >&2; exit 1; }
 export GOMAXPROCS=2
