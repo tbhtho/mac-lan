@@ -27,7 +27,8 @@ func launchCommand(root, goos string) (string, []string) {
 	var args []string
 	if goos == "darwin" {
 		name = "MacDowHost"
-		args = []string{"--updates"}
+		// The host starts a fresh listener and still requires fresh pairing,
+		// video consent, and an input lease after an update.
 	}
 	return filepath.Join(root, name), args
 }

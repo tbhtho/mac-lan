@@ -3,7 +3,6 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
 
 namespace MacDow.Windows;
 
@@ -25,6 +24,7 @@ internal sealed class UpdatePreferences
 internal static class UpdateProcess
 {
     static readonly SemaphoreSlim operations=new(1,1);
+    static readonly SemaphoreSlim downloads=new(1,1);
     internal static string Helper => Payloads.Helper;
     internal static async Task<JsonElement> Call(params string[] arguments)
     {
@@ -45,26 +45,20 @@ internal static class UpdateProcess
         if(text.Length>2*1024*1024)throw new InvalidDataException("Updater output exceeded limit.");
         using var doc=JsonDocument.Parse(text);return doc.RootElement.Clone();
     }
-    internal static async Task<JsonElement> DownloadAvailable(UpdatePreferences preferences)
+    internal static async Task<JsonElement> DownloadAvailable(UpdatePreferences preferences,Action<string>? progress=null)
     {
-        var check=await Call("check","--channel",preferences.Channel);
-        if(!check.TryGetProperty("status",out var status)||status.GetString()!="available")return check;
-        if(preferences.Stage is string existing&&Directory.Exists(existing))
+        await downloads.WaitAsync();
+        try
         {
-            try
-            {
-                using var saved=JsonDocument.Parse(File.ReadAllText(Path.Combine(existing,"stage.json")));
-                if(saved.RootElement.GetProperty("plan").GetProperty("tag").GetString()==check.GetProperty("plan").GetProperty("tag").GetString())
-                    return JsonSerializer.SerializeToElement(new{ok=true,status="staged",message=saved.RootElement.GetProperty("message").GetString(),stage=saved.RootElement.Clone()});
-            }
-            catch(Exception e)when(e is IOException or JsonException or InvalidOperationException or KeyNotFoundException){}
+            // An opening dialog can overlap the startup check. Reuse the result of
+            // the first download only after another fresh preflight, rather than
+            // downloading the same release twice.
+            var latest=UpdatePreferences.Load();
+            string? existing=latest.Channel==preferences.Channel?latest.Stage:preferences.Stage;
+            return await UpdateDownload.Run(preferences.Channel,existing,Payloads.Install,arguments=>Call(arguments),directory=>
+            {var current=UpdatePreferences.Load();current.Stage=directory;current.Save();},progress);
         }
-        var result=await Call("stage","--channel",preferences.Channel);
-        if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("stage",out var stage))
-        {
-            var latest=UpdatePreferences.Load();latest.Stage=stage.GetProperty("directory").GetString();latest.Save();
-        }
-        return result;
+        finally{downloads.Release();}
     }
     internal static void StartDetached(string[] arguments)
     {
@@ -79,84 +73,73 @@ internal static class UpdateProcess
 internal sealed class UpdateDialog : Window
 {
     readonly UpdatePreferences preferences;
-    readonly TextBlock description=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,10)};
+    readonly TextBlock description=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,18,0,18)};
     readonly ComboBox channel=new(){ItemsSource=new[]{"stable","preview"},Width=160,HorizontalAlignment=HorizontalAlignment.Left};
-    readonly CheckBox automatic=new(){Content="Download updates automatically while MAC-DOW is open",Margin=new Thickness(0,10,0,10)};
+    readonly CheckBox automatic=new(){Content="Download updates automatically",Margin=new Thickness(0,8,0,4)};
     readonly CheckBox relaunch=new(){Content="Reopen MAC-DOW after updating",IsChecked=true,Margin=new Thickness(0,10,0,10)};
     readonly Button apply=new(){Content="Restart to update",IsEnabled=false,Margin=new Thickness(0,6,0,6)};
     readonly Action shutdown;
+    readonly Func<Task> prepareRestart;
     readonly StackPanel actions=new();
     string? stage;
     string? tag;
     bool busy;
-    public UpdateDialog(Window owner,Action shutdown)
+    public UpdateDialog(Window owner,Func<Task> prepareRestart,Action shutdown)
     {
-        this.shutdown=shutdown;preferences=UpdatePreferences.Load();
+        this.shutdown=shutdown;this.prepareRestart=prepareRestart;preferences=UpdatePreferences.Load();
         stage=preferences.Stage;
-        Owner=owner;Title="MAC-DOW Updates";Width=650;Height=570;MinWidth=500;MinHeight=400;WindowStartupLocation=WindowStartupLocation.CenterOwner;
-        var content=new StackPanel{Margin=new Thickness(24)};Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
-        content.Children.Add(new TextBlock{Text="Updates",FontSize=26});
-        content.Children.Add(new TextBlock{Text="Private GitHub releases. Existing GitHub CLI authentication only; no token is collected or saved.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,10)});
-        channel.SelectedItem=preferences.Channel;content.Children.Add(channel);automatic.IsChecked=preferences.Automatic;content.Children.Add(automatic);
+        Owner=owner;Title="MAC-DOW Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;
+        var content=new StackPanel{Margin=new Thickness(28)};Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+        content.Children.Add(new TextBlock{Text="Keep MAC-DOW up to date",FontSize=25,FontWeight=FontWeights.SemiBold});
+        content.Children.Add(new TextBlock{Text="Updates download in the background. Restart when you are ready.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,0)});
         content.Children.Add(description);content.Children.Add(actions);
-        Add("Check now",Check);
-        Add("Download update now",StageUpdate);
+        apply.Style=(Style)FindResource("PrimaryButton");
         apply.Click+=async(_,_)=>await Run(Apply);actions.Children.Add(apply);
-        Add("Open staged files (manual review)",()=>{if(stage!=null&&Directory.Exists(stage))Process.Start(new ProcessStartInfo("explorer.exe"){ArgumentList={stage},UseShellExecute=false});return Task.CompletedTask;});
-        Add("Rollback to previous signed release",Rollback);
+        Add("Check now",Check);
+        automatic.IsChecked=preferences.Automatic;content.Children.Add(automatic);
         content.Children.Add(relaunch);
-        content.Children.Add(new TextBlock{Text="Automatic replacement requires a cryptographically verified GitHub release attestation. Current mutable/unattested releases remain staged for manual review. Release provenance is distinct from Windows code signing. Settings stay outside the install folder.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,12,0,0)});
+        var advanced=new StackPanel();advanced.Children.Add(new TextBlock{Text="Update channel",Margin=new Thickness(0,0,0,6)});channel.SelectedItem=preferences.Channel;advanced.Children.Add(channel);
+        var rollback=new Button{Content="Restore previous version",Margin=new Thickness(0,12,0,0)};rollback.Click+=async(_,_)=>await Run(Rollback);advanced.Children.Add(rollback);
+        content.Children.Add(new Expander{Header="Advanced",Content=advanced});
         channel.SelectionChanged+=(_,_)=>Save();automatic.Checked+=(_,_)=>Save();automatic.Unchecked+=(_,_)=>Save();
         Loaded+=async(_,_)=>await Run(async()=>{await Check();if(preferences.ResultFile is string path&&File.Exists(path)){using var saved=JsonDocument.Parse(File.ReadAllText(path));description.Text+="\nLast worker result: "+saved.RootElement.GetProperty("message").GetString();}});
     }
-    void Save(){preferences.Channel=channel.SelectedItem as string??"preview";preferences.Automatic=automatic.IsChecked==true;preferences.Save();}
+    void Save(){var latest=UpdatePreferences.Load();preferences.Channel=latest.Channel=channel.SelectedItem as string??"preview";preferences.Automatic=latest.Automatic=automatic.IsChecked==true;latest.Save();}
     void Add(string label,Func<Task> action){var button=new Button{Content=label,Margin=new Thickness(0,6,0,6),Padding=new Thickness(8)};button.Click+=async(_,_)=>await Run(action);actions.Children.Add(button);}
     async Task Run(Func<Task> action)
     {
-        if(busy)return;busy=true;actions.IsEnabled=false;description.Text="Working securely; no app replacement without a separate confirmation...";
+        if(busy)return;busy=true;actions.IsEnabled=false;channel.IsEnabled=false;description.Text="Checking for updates…";
         try{await action();}catch(Exception e){description.Text="Update unavailable: "+e.Message;}
-        finally{busy=false;actions.IsEnabled=true;}
+        finally{busy=false;actions.IsEnabled=true;channel.IsEnabled=true;}
     }
     void Describe(JsonElement result)
     {
         description.Text=result.GetProperty("message").GetString();
+        if(result.TryGetProperty("status",out var status)&&status.GetString()=="current")description.Text="You're up to date.";
         if(result.TryGetProperty("version",out var v))description.Text="Current "+v.GetString()+"\n"+description.Text;
         if(result.TryGetProperty("plan",out var plan))description.Text+="\nAvailable "+plan.GetProperty("tag").GetString();
     }
     async Task Check()
     {
-        Save();var result=await UpdateProcess.Call("check","--channel",preferences.Channel);Describe(result);apply.IsEnabled=false;
-        stage=preferences.Stage;
-        if(stage!=null&&Directory.Exists(stage))
-        {
-            var ready=await UpdateProcess.Call("preflight","--stage",stage,"--install",Payloads.Install);
-            if(ready.GetProperty("ok").GetBoolean()){tag=ready.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString();apply.IsEnabled=true;description.Text="Update "+tag+" is downloaded and verified. Restart when you are ready.";}
-        }
-    }
-    async Task StageUpdate()
-    {
-        Save();apply.IsEnabled=false;var result=await UpdateProcess.Call("stage","--channel",preferences.Channel);Describe(result);
-        if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("stage",out var s))
-        {
-            stage=s.GetProperty("directory").GetString();tag=s.GetProperty("plan").GetProperty("tag").GetString();preferences.Stage=stage;preferences.Save();
-            apply.IsEnabled=s.GetProperty("canApply").GetBoolean();description.Text+="\nStaged: "+stage;
-        }
+        Save();apply.IsEnabled=false;var result=await UpdateProcess.DownloadAvailable(UpdatePreferences.Load(),text=>description.Text=text);Describe(result);
+        if(!UpdateDownload.Ready(result))return;
+        var ready=result.GetProperty("stage");stage=ready.GetProperty("directory").GetString();tag=ready.GetProperty("plan").GetProperty("tag").GetString();
+        apply.IsEnabled=true;description.Text="Update "+tag+" is ready. Restart to install it and keep your settings.";
     }
     async Task Apply()
     {
         if(stage==null||tag==null)return;
         var result=await UpdateProcess.Call("preflight","--stage",stage,"--install",Payloads.Install);
-        if(!result.GetProperty("ok").GetBoolean()){Describe(result);apply.IsEnabled=false;return;}
-        string restart=relaunch.IsChecked==true?"MAC-DOW will reopen in view-only mode.":"Reopen MAC-DOW yourself afterwards.";
-        if(MessageBox.Show(this,"Apply "+tag+"? MAC-DOW will close. The update is reverified, the previous folder is retained for rollback, and external settings are preserved. "+restart,"Confirm update",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes){description.Text="Apply cancelled.";return;}
-        preferences.Journal=Path.Combine(stage,"transaction.json");preferences.ResultFile=Path.Combine(stage,"worker-result.json");preferences.Save();
-        var args=new List<string>{"apply","--stage",stage,"--install",Payloads.Install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","APPLY "+tag,"--result-file",preferences.ResultFile!};
+        if(!UpdateDownload.Ready(result,tag)){Describe(result);apply.IsEnabled=false;return;}
+        description.Text="Preparing to restart…";await prepareRestart();
+        var latest=UpdatePreferences.Load();latest.Journal=Path.Combine(stage,"transaction.json");latest.ResultFile=Path.Combine(stage,"worker-result.json");latest.Save();
+        var args=new List<string>{"apply","--stage",stage,"--install",Payloads.Install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","APPLY "+tag,"--result-file",latest.ResultFile!};
         if(relaunch.IsChecked==true)args.Add("--relaunch");
         UpdateProcess.StartDetached(args.ToArray());Close();shutdown();
     }
     async Task Rollback()
     {
-        string? journal=preferences.Journal;
+        string? journal=UpdatePreferences.Load().Journal;
         if(journal==null||!File.Exists(journal)){description.Text="No applied update is recorded. Nothing changed.";return;}
         string install=Payloads.Install;
         var result=await UpdateProcess.Call("rollback-preflight","--journal",journal,"--install",install);
@@ -164,8 +147,8 @@ internal sealed class UpdateDialog : Window
         if(!result.GetProperty("ok").GetBoolean())return;
         string version=result.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString()!;
         if(MessageBox.Show(this,"Close MAC-DOW and reinstall verified "+version+"? This downloads the signed older release again; external settings are preserved. "+(relaunch.IsChecked==true?"MAC-DOW will reopen.":"Reopen it yourself afterwards."),"Confirm rollback",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
-        preferences.ResultFile=Path.Combine(Path.GetDirectoryName(journal)!,"worker-result.json");preferences.Save();
-        var args=new List<string>{"rollback","--journal",journal,"--install",install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","ROLLBACK","--result-file",preferences.ResultFile};
+        await prepareRestart();var latest=UpdatePreferences.Load();latest.ResultFile=Path.Combine(Path.GetDirectoryName(journal)!,"worker-result.json");latest.Save();
+        var args=new List<string>{"rollback","--journal",journal,"--install",install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","ROLLBACK","--result-file",latest.ResultFile};
         if(relaunch.IsChecked==true)args.Add("--relaunch");
         UpdateProcess.StartDetached(args.ToArray());Close();shutdown();
     }

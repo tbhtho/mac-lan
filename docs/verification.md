@@ -1,5 +1,37 @@
 # Verification record
 
+## Alpha.12 - signed automatic updates and click activation ordering
+
+The user's alpha.11 diagnostics show Accessibility granted and repeated
+control-ready followed immediately by view-only. Activation now commits after
+mouse-up and local pointer capture release. Browser-originated activation no
+longer refocuses the native WebView2, and repeated status messages do not refocus
+the canvas. A real isolated headless Edge DOM regression fails against alpha.11
+at the capture-order assertion and passes with this change. The exact native
+focus event from the user's session was not logged.
+
+Fresh local checks pass: 33 core assertions, 34 TLS session checks, 9 Windows
+update workflow checks, 46 TLS transfer checks, presentation and pointer geometry,
+9 viewer race groups, the headless Edge DOM regression, all Go packages and Go
+vet. Windows Release compilation has zero warnings/errors. Signed-feed tests
+cover tampering, wrong keys, expiry, pinned download locations, interrupted
+downloads, stage mutation, preview layout and fresh verification at apply.
+Worker tests cover copied executable integrity, waiting and safe replacement;
+pending stages are reused only after a fresh preflight. Diagnostic migration
+tests use fake destinations and isolated paths. Publisher tests reject private
+bootstrap archives and embedded webhook credentials.
+
+Windows and the actual Mac command-line preview now download signed updates in
+the background and offer Restart to update. The Mac preserves its private
+diagnostic configuration before replacing the private bootstrap with a public
+binary. Restart offers wait for an idle connection and reserve the host during
+worker preparation; failure restores pairing availability.
+
+No visible UI, OS input hooks, real capture, permission requests, webhook test
+sends or paid CI were used. Native macOS update worker/relaunch and end-to-end
+click control remain unverified here. Historical records below describe their
+respective releases, including the earlier blocked updater design.
+
 ## Alpha.11 - click control, single cursor and filled 1080p stream
 
 The user reported alpha.10 native-build-ready/compiled, Screen Recording granted,

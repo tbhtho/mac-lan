@@ -12,7 +12,7 @@ import (
 
 var (
 	ErrNoUpdate   = errors.New("no newer compatible release in this channel")
-	ErrProvenance = errors.New("signed GitHub release provenance unavailable; automatic apply is blocked, staged manual review only")
+	ErrProvenance = errors.New("publisher signature unavailable; automatic update is blocked")
 	ErrAccess     = errors.New("GitHub unavailable or private-repo access missing; use an existing authenticated GitHub CLI or manually download the private release; MAC-DOW will not sign in or save credentials")
 )
 
@@ -20,10 +20,12 @@ var (
 var configFS embed.FS
 
 type Config struct {
-	Version        string
-	Repository     string
-	RepositoryID   int64
-	DefaultChannel string
+	Version         string
+	Repository      string
+	RepositoryID    int64
+	DefaultChannel  string
+	UpdatePublicKey string
+	UpdateFeedBase  string
 }
 
 func BuildConfig() Config {
@@ -184,6 +186,14 @@ func Select(releases []Release, current, channel, goos, arch string) (Plan, erro
 			for _, a := range r.Assets {
 				if a.Name == "MAC-DOW.exe" {
 					selectedName = "MAC-DOW.exe"
+					break
+				}
+			}
+		}
+		if goos == "darwin" {
+			for _, a := range r.Assets {
+				if a.Name == "MAC-DOW-macos-arm64-commandline-preview.tar.gz" {
+					selectedName = a.Name
 					break
 				}
 			}

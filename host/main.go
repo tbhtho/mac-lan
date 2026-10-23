@@ -42,6 +42,12 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--updater" {
+		if runtime.GOOS == "darwin" {
+			if err := diagnostics.InitMacDestination(); err != nil {
+				_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": false, "status": "blocked", "message": "Cannot preserve private Mac diagnostic settings before updating. No app files were replaced."})
+				os.Exit(1)
+			}
+		}
 		os.Exit(updater.Run(os.Args[2:], os.Stdout))
 	}
 	addr := flag.String("listen", "auto", "automatic LAN selection, or a specific private IPv4:port")
@@ -63,6 +69,12 @@ func main() {
 		return
 	}
 	if *updates {
+		if runtime.GOOS == "darwin" {
+			if err := diagnostics.InitMacDestination(); err != nil {
+				fmt.Fprintln(os.Stderr, "Cannot preserve private Mac diagnostic settings before updating. No app files were replaced.")
+				os.Exit(1)
+			}
+		}
 		os.Exit(updater.Console(os.Stdin, os.Stdout))
 	}
 	if *updateCheck {
@@ -78,6 +90,10 @@ func main() {
 	}
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		fatal(errors.New("companion requires Apple Silicon macOS 14+"))
+	}
+	if err := diagnostics.InitMacDestination(); err != nil {
+		fmt.Fprintln(os.Stderr, "Private Mac diagnostic settings could not be retained. Automatic updates are disabled until that is resolved; sharing can continue.")
+		*noUpdateCheck = true
 	}
 	exe, err := os.Executable()
 	if err != nil {
@@ -238,9 +254,6 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 		broker.emit(map[string]any{"type": "ready", "address": actual.IP.String(), "port": actual.Port, "fingerprint": fp, "token": token})
 	} else {
 		fmt.Printf("\nMAC-DOW is ready - waiting for Windows. Ctrl+C stops sharing.\nMac identity: %s\n\nAdvanced connection details (only if discovery is unavailable):\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\n\nConnect from Windows, then choose Allow on this Mac to begin viewing. Video has not started yet.\n", strings.ToUpper(fp[:32]), listener.Addr(), fp, token)
-		if !noUpdates {
-			go updater.StartupCheck(os.Stdout)
-		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -252,6 +265,9 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 			case <-ctx.Done():
 			}
 		}()
+	}
+	if !gui && !noUpdates {
+		startHostUpdates(ctx, cancel, s)
 	}
 	srv := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
 	stopped := make(chan struct{})

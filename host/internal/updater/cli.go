@@ -27,7 +27,7 @@ func NewEngine() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	g, err := ExistingGH()
+	g, err := NewSignedFeed(BuildConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func Run(args []string, out io.Writer) int {
 		return 2
 	}
 	if args[0] == "info" {
-		result = Result{OK: true, Status: "info", Version: BuildConfig().Version, Message: "Existing GitHub CLI authentication; SHA-256 + signed-release provenance required for automatic apply."}
+		result = Result{OK: true, Status: "info", Version: BuildConfig().Version, Message: "Automatic updates use a public signed feed and SHA-256 verified downloads. No GitHub sign-in is required."}
 		return 0
 	}
 	flags := flag.NewFlagSet("MAC-DOW updates", flag.ContinueOnError)
@@ -157,21 +157,21 @@ func StartupCheck(out io.Writer) {
 	defer cancel()
 	e, err := NewEngine()
 	if err != nil {
-		fmt.Fprintln(out, "Updates: existing gh authentication unavailable; run MacDowHost --updates for manual fallback.")
+		fmt.Fprintln(out, "Updates: signed update feed unavailable; MAC-DOW will retry while it is open.")
 		return
 	}
 	p, err := e.Check(ctx, BuildConfig().DefaultChannel)
 	if err == nil {
-		fmt.Fprintf(out, "Update %s available. Stop streaming, then run MacDowHost --updates. No automatic install.\n", p.Tag)
+		fmt.Fprintf(out, "Update %s available. MAC-DOW downloads updates in the background and offers Restart to update.\n", p.Tag)
 	} else if !errors.Is(err, ErrNoUpdate) {
-		fmt.Fprintln(out, "Update check unavailable; existing private GitHub access is required. No credentials saved.")
+		fmt.Fprintln(out, "Update check unavailable; MAC-DOW will retry the signed feed while open.")
 	} else {
 		fmt.Fprintln(out, "MAC-DOW", e.Current, "- no newer compatible update.")
 	}
 }
 func Console(in io.Reader, out io.Writer) int {
 	fmt.Fprintln(out, "MAC-DOW updates", BuildConfig().Version, "- Check / Update (stage) / Apply / Rollback / Quit. No capture or listener in this mode.")
-	fmt.Fprintln(out, "Uses existing gh auth only. Private manual fallback: https://github.com/tbhtho/MAC-DOW/releases . No login or OS security changes are performed.")
+	fmt.Fprintln(out, "Uses signed public update downloads. No GitHub sign-in is required.")
 	scanner := bufio.NewScanner(in)
 	var staged *Stage
 	var journal string
@@ -254,7 +254,7 @@ func Console(in io.Reader, out io.Writer) int {
 				}
 				journal = scanner.Text()
 			}
-			fmt.Fprint(out, "Rollback re-downloads and verifies the older signed release; network/private GitHub access required. Type ROLLBACK (no capture restart): ")
+			fmt.Fprint(out, "Rollback re-downloads and verifies the older signed release; network access required. Type ROLLBACK (no capture restart): ")
 			if scanner.Scan() && scanner.Text() == "ROLLBACK" {
 				exe, er := os.Executable()
 				if er == nil {
