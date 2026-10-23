@@ -50,13 +50,15 @@ try{
         // The native activation boundary may replace focus/capture. The viewer
         // must finish its activation press before asking the native owner.
         if(canvas.hasPointerCapture(1))canvas.releasePointerCapture(1);
-        setTimeout(()=>receive({type:'armed',active:true}),0);
+        setTimeout(()=>receive({type:'armed',active:true,epoch:message.epoch}),0);
       }
     }};
     const focus=HTMLElement.prototype.focus;HTMLElement.prototype.focus=function(...args){focusCalls++;return focus.apply(this,args);};
   `});
   await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/'});
   await until(()=>evaluate('window.messages?.some(m=>m.type==="loaded")'),'viewer module load');
+  await evaluate('receive({type:"clear",epoch:1});receive({type:"video",codec:"jpeg",epoch:1})');
+  assert.deepEqual(await evaluate('messages.filter(m=>m.type==="clearAck").map(m=>m.epoch)'),[1],'a real DOM stream starts by acknowledging its clear epoch');
   const press=()=>send('Input.dispatchMouseEvent',{type:'mousePressed',x:320,y:240,button:'left',clickCount:1});
   const release=()=>send('Input.dispatchMouseEvent',{type:'mouseReleased',x:320,y:240,button:'left',clickCount:1});
   await evaluate('messages.length=0');await press();
@@ -64,17 +66,22 @@ try{
   await release();await until(()=>evaluate('activationCapture.length===1'),'activation click commit');
   assert.deepEqual(await evaluate('activationCapture'),[false],'native activation starts only after DOM pointer capture is released');
   await until(()=>evaluate('document.body.classList.contains("armed")'),'native activation acknowledgement');
-  await evaluate('for(let i=0;i<8;i++)receive({type:"armed",active:true})');
+  await evaluate('for(let i=0;i<8;i++)receive({type:"armed",active:true,epoch:1})');
   assert.equal(await evaluate('focusCalls'),1,'periodic armed status must not refocus the already focused canvas');
   await press();await release();
   assert.deepEqual(await evaluate('messages.map(m=>m.type)'),['requestControl','move','button','button'],'first complete click is consumed and the next click reaches the Mac');
   assert.deepEqual(await evaluate('messages.filter(m=>m.type==="button").map(m=>m.down)'),[true,false]);
+  assert.equal(await evaluate('messages.every(m=>m.epoch===1)'),true,'activation and routed pointer input carry the current stream epoch');
   await evaluate('window.dispatchEvent(new Event("blur"))');
   assert.equal(await evaluate('messages.at(-1).type'),'blur','true focus loss still revokes control');
-  await evaluate('receive({type:"armed",active:false});messages.length=0');
+  assert.equal(await evaluate('messages.at(-1).reason'),'viewer-blur','focus loss carries a fixed diagnostic release reason');
+  await evaluate('receive({type:"armed",active:false,epoch:1});messages.length=0');
   await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:340,y:240});
   assert.deepEqual(await evaluate('messages'),[],'focus loss suppresses mouse input until another explicit activation click');
-  console.log('PASS real headless DOM activation releases capture before native focus, consumes the first click, routes later clicks, and releases on blur');
+  await evaluate('receive({type:"clear",epoch:2});receive({type:"armed",active:true,epoch:1});messages.length=0');
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:350,y:240});
+  assert.deepEqual(await evaluate('messages'),[],'a stale armed acknowledgement cannot reactivate the new stream');
+  console.log('PASS real headless DOM epoch handshake, safe click activation, routed pointer input, stale armed rejection and blur release');
 }finally{
   closing=true;if(closeBrowser)void closeBrowser();
   for(let i=0;i<100&&browser.exitCode===null;i++)await delay(20);
