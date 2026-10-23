@@ -6,7 +6,7 @@ The existing repository is now named `tbhtho/mac-lan` (repository ID 1430459188)
 
 ## Local builds
 
-Windows requires .NET SDK 10, Go 1.24+, and Node 22+:
+Windows development and packaging require .NET SDK 10, Go 1.24+, Node 22+, and Python 3:
 
 ```powershell
 ./scripts/test.ps1
@@ -16,23 +16,27 @@ Windows requires .NET SDK 10, Go 1.24+, and Node 22+:
 
 Run these commands from the repository root. The Windows package is one `artifacts/mac-lan.exe`, including its .NET runtime, native loader, viewer, and discovery/updater helper. Internal resources extract to a private application cache. The existing Microsoft WebView2 Runtime is an external prerequisite.
 
-Build the cross-compiled Apple Silicon command-line preview on Windows:
+Build the cross-compiled Apple Silicon menu-bar app and command-line update bridge on Windows:
 
 ```powershell
-./scripts/package-macos-preview.ps1
+./scripts/package-macos-app.ps1
 ```
 
-The Mac package is public by default and has no embedded diagnostic destination. `-PublicUpdate` remains an optional compatibility flag. A private bootstrap requires explicit `-PrivateBootstrap`, reads `MACDOW_DIAGNOSTICS_WEBHOOK` or the ignored `.cache/discord-webhook.txt`, and is written only under `artifacts/private-bootstrap`. It saves that configuration locally on the Mac for later public updates. Never publish the private bootstrap or its embedded destination. Existing private diagnostic configuration remains in its legacy per-user location when the public preview is installed.
+The app packager always produces public packages with no embedded diagnostic destination. Its underlying `package-macos-preview.ps1` retains optional `-PublicUpdate` and explicit `-PrivateBootstrap` modes. A private bootstrap reads `MACDOW_DIAGNOSTICS_WEBHOOK` or the ignored `.cache/discord-webhook.txt`, and is written only under `artifacts/private-bootstrap`. It saves that configuration locally on the Mac for later public updates. Never publish the private bootstrap or its embedded destination. Existing private diagnostic configuration remains in its legacy per-user location when the public preview is installed.
 
-The Mac preview embeds canonical `native/MacDowCapture.swift`. First launch compiles it into the user's application cache with the Mac's existing Apple command-line tools, runs a non-capturing self-test, and verifies the cached binary on subsequent launches. It does not install tools, accept licenses, or alter OS security. Full bounded compiler output stays in the Mac cache as `last-build-error.txt`; diagnostics contain fixed categories and numeric source locations.
+The primary archive is `artifacts/update-public/mac-lan-macos-arm64.tar.gz`, containing `mac-lan.app`. Its arm64 Go entry point compiles embedded AppKit sources into the user's application cache using existing Apple command-line tools and launches the verified native menu. It stays alive to preserve the app's LaunchServices identity. The app has a status icon without a Dock icon or main window. Sharing starts discovery and pairing/file-transfer service; screen access and separate video consent remain required for capture. Menu actions expose sharing, permission settings, updates, and Quit.
 
-A full native source build requires existing Go and Swift toolchains on Apple Silicon:
+Both Mac packages embed canonical `native/MacDowCapture.swift`. Video setup compiles it into the existing application cache, runs a non-capturing self-test, and verifies the cached binary on subsequent launches. Menu compilation uses a separate verified cache. No tool installation, license acceptance, or OS security change occurs. Full bounded compiler output stays in the Mac cache as `last-build-error.txt`; diagnostics contain fixed categories and numeric source locations. A Windows cross-build and archive check do not prove native Swift compilation or visible menu behavior.
+
+`package-macos-app.ps1` also builds `mac-lan-macos-arm64-commandline-preview.tar.gz`. Alpha.14's updater still recognizes this layout. A normal launch of its updated `MacDowHost` installs a separate matching app in `~/Applications/mac-lan.app`, opens it, and exits; it preserves the old extracted folder and refuses unrelated existing app installations. Explicit diagnostic/command-line modes remain available. `MAC-DOW-macos-arm64-unsigned.tar.gz` is a byte-identical app archive alias needed by alpha.14's strict feed validator; the canonical app name must not be inserted into that shared feed as an unknown asset.
+
+A full native source build requires existing Go, Swift, and Python 3 on Apple Silicon:
 
 ```sh
 bash scripts/build-macos.sh
 ```
 
-That script also defaults to no embedded diagnostic destination. A private native bootstrap requires explicit `MACDOW_PRIVATE_BOOTSTRAP=1` and the existing private diagnostic configuration. The source for a menu-bar-only AppKit launcher is present, but the distributed Mac preview is still a Terminal companion, not a built `.app`. Capture and Accessibility permissions must be granted deliberately in macOS System Settings. Keep OS protections enabled; quarantine removal and Gatekeeper bypass are not project setup steps.
+That script also defaults to no embedded diagnostic destination. A private native bootstrap requires explicit `MACDOW_PRIVATE_BOOTSTRAP=1` and the existing private diagnostic configuration. The native build compiles and self-tests the menu and capture code in the workspace before packaging the same launcher layout; first app launch prepares its separate user cache. Screen Recording and Accessibility must be granted deliberately in macOS System Settings, potentially again for the app even if Terminal was allowed. Keep OS protections enabled; quarantine removal and Gatekeeper bypass are not project setup steps. The app is not Developer ID signed or notarized.
 
 The optional [native workflow](../.github/workflows/native-build.yml) has no push/tag trigger. It requires explicit confirmation that sufficient included free Actions minutes exist. It has not provided proof of current native capture or control. Do not start paid CI or broaden account permissions as an incidental publishing step.
 
@@ -40,7 +44,7 @@ The optional [native workflow](../.github/workflows/native-build.yml) has no pus
 
 Use [signed update publishing](update-feed-publishing.md) for the feed, pinned-key verification, immutable artifact identities, and private-key handling. Publish public artifacts without the Mac diagnostic destination. Do not rewrite published Git history to improve presentation or replace an old asset under its existing version.
 
-Build both packages from clean committed source, then publish from this existing repository using `./scripts/publish-release.ps1 -NotesFile <path>`; there is no separate downloads repository. The local publisher does not build binaries. It coordinates immutable public assets, a source ZIP, checksum list, and the signed feed at `updates/feed.json`. Diagnostic configuration and signing keys stay outside version control and public artifacts. Verify the feed and both binaries anonymously after publication.
+Build Windows and both Mac layouts from clean committed source, then publish from this existing repository using `./scripts/publish-release.ps1 -NotesFile <path>`; there is no separate downloads repository. The publisher validates existing packages rather than building them. It coordinates six immutable assets: Windows EXE, canonical app archive, byte-identical app compatibility alias, command-line bridge archive, source ZIP, and checksum list. The signed feed at `updates/feed.json` uses the three alpha.14-compatible binary asset names. Diagnostic configuration and signing keys stay outside version control and public artifacts. Verify the feed and every uploaded asset anonymously after publication.
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
@@ -60,6 +64,7 @@ These notes are historical; older ZIP, manual token, and Terminal-only update in
 - **Alpha.12:** the updater work replaces GitHub-authenticated downloads with a signed public feed and public binaries. The private Mac bootstrap preserves its existing diagnostic destination locally, keeping subsequent public Mac updates free of that secret. Current implementation and validation evidence belong in the linked update and verification documents.
 - **Alpha.13:** bounded dependency-aware queues and browser batches replace arbitrary encoded-frame dropping. Decoder output coalesces for display, stream epochs reject delayed callbacks, and the Mac reports fixed control-release reasons. The user confirmed native control in alpha.12; the new delivery path has synthetic and real software-codec checks, with hardware responsiveness still awaiting user testing. Distribution at that point remained manual in the original private repository.
 - **Alpha.14:** the public app name becomes `mac-lan`. The same repository is renamed and made public, and signed automatic updates use its releases and `updates/feed.json`. Public packages omit private diagnostic destinations; existing settings, cache paths, permissions identity, and `MacDowHost` remain compatible. Earlier private bootstrap assets are not advertised as public downloads. See the current verification record for the distinction between headless checks, cross-compilation, and native execution.
+- **Alpha.15:** the Mac package becomes a menu-bar `.app`, with first-launch native AppKit compilation through existing Apple tools, deliberate app permission grants, and a compatibility update bridge from alpha.14. Full-desktop capture preserves source proportions within a 1920-pixel width and 2160-pixel height cap without enlargement. Windows fits the complete picture, rejects input in surrounding bars, and maps input within the picture even when an older host announces `fill`. Pixels already stretched by an older native helper require the new capture helper to correct. Native menu/capture/update execution and measured responsiveness remain separate from headless checks.
 
 ## Runtime boundaries
 

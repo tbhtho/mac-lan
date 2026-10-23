@@ -148,7 +148,9 @@ func TestAppBundlePayload(t *testing.T) {
 	bundle := filepath.Join(root, "MAC-DOW Host.app")
 	resources := filepath.Join(bundle, "Contents", "Resources")
 	os.MkdirAll(resources, 0700)
-	marker := Marker{Product: "MAC-DOW", RepositoryID: BuildConfig().RepositoryID, Version: "0.2.0", OS: "darwin", Arch: "arm64"}
+	// Native bundles already used app-bundle before the menu-bar executable was
+	// renamed. Their marker must not route them through the new bundle validator.
+	marker := Marker{Product: "MAC-DOW", RepositoryID: BuildConfig().RepositoryID, Version: "0.2.0", OS: "darwin", Arch: "arm64", Commit: src.SHA, Layout: "app-bundle"}
 	writeJSON(filepath.Join(resources, "MAC-DOW-INSTALL.json"), marker)
 	os.WriteFile(filepath.Join(resources, "COMMIT.txt"), []byte(src.SHA), 0600)
 	for _, name := range []string{"MacOS/MAC-DOW Host", "Helpers/MacDowHost", "Helpers/MacDowCapture"} {

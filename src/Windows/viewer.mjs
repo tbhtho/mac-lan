@@ -2,7 +2,7 @@ import {parseFrame,SequenceGate,mapPointer,videoFrameDuration} from './viewer-co
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0,streamEpoch=0,lastBatch=0;
-let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false,presentation='fill';
+let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false;
 const MAX_BATCH_FRAMES=8,MAX_BATCH_BYTES=4*1024*1024,MAX_BUFFERED_FRAMES=64,MAX_BUFFERED_BYTES=8*1024*1024,MAX_BUFFERED_MS=250;
 let encoded=[],bufferedBytes=0,pumping=false,queueTimer=null,picture=null,paintRequest=null,queuedJpeg=null;
 const input=m=>post({...m,epoch:streamEpoch});
@@ -91,7 +91,8 @@ chrome.webview.addEventListener('message',async e=>{
   if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
   if(m.type==='video'){
     if(!epochFor(m,true))return;
-    presentation=m.presentation==='fit'?'fit':'fill';canvas.style.objectFit=presentation==='fit'?'contain':'fill';
+    // Older desktop hosts advertise fill; always preserve the received picture's proportions.
+    canvas.style.objectFit='contain';
     frameDuration=videoFrameDuration(m);
     if(m.codec==='jpeg'){if(config){reset();config=null;}return;}
     // Key packets carry SPS/PPS and configure themselves too; pipe delivery order is irrelevant.
@@ -112,17 +113,17 @@ chrome.webview.addEventListener('message',async e=>{
   finally{post(batch?{type:'frameAck',epoch:m.epoch,batch:m.batch}:{type:'frameAck'});}
 });
 setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps � encode ${encode.toFixed(1)} ms � local decode/submit ${lastDecode.toFixed(1)} ms � ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
-function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height,presentation);}
+function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height);}
 canvas.addEventListener('pointermove',e=>{if(!armed||activationPointer!==null)return;const p=coords(e);if(p)input({type:'move',...p});});
 canvas.addEventListener('pointerdown',e=>{
-  if(document.activeElement!==canvas)canvas.focus();const p=coords(e);if(!p||activationPointer!==null||controlRequested)return;
+  const p=coords(e);if(!p){e.preventDefault();return;}if(activationPointer!==null||controlRequested)return;if(document.activeElement!==canvas)canvas.focus();
   if(!armed){if(e.button!==0)return;e.preventDefault();activationPointer=e.pointerId;canvas.setPointerCapture(e.pointerId);return;}
   e.preventDefault();canvas.setPointerCapture(e.pointerId);input({type:'move',...p});input({type:'button',button:e.button,down:true});
 });
 canvas.addEventListener('pointerup',e=>{
   const activate=activationPointer===e.pointerId;
   if(activate){activationPointer=null;e.preventDefault();}
-  else if(armed&&activationPointer===null){e.preventDefault();input({type:'button',button:e.button,down:false});}
+  else if(armed&&activationPointer===null&&canvas.hasPointerCapture(e.pointerId)){e.preventDefault();input({type:'button',button:e.button,down:false});}
   if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
   // Commit the consumed click after capture is released. Native focus changes
   // during pointerdown can otherwise cancel that same activation gesture.
@@ -131,7 +132,7 @@ canvas.addEventListener('pointerup',e=>{
 function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;if(notify)input({type:'blur',reason});}
 canvas.addEventListener('pointercancel',e=>{if(activationPointer===e.pointerId||armed||controlRequested)releaseControl('pointer-cancel');if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener('lostpointercapture',e=>{if(activationPointer===e.pointerId)releaseControl('pointer-cancel');});
-canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null){e.preventDefault();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
+canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
 window.addEventListener('blur',()=>releaseControl('viewer-blur'));

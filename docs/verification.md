@@ -1,5 +1,49 @@
 # Verification record
 
+## Alpha.15 - proportional desktop and Mac menu-bar app
+
+The full Windows headless suite passed: 49 core, 28 encoded-video, 34 session,
+9 update-workflow and 46 transfer checks, presentation, geometry/race, real
+headless DOM and real software H.264 tests, all Go package tests, `go vet`, and
+Windows Release compilation with zero warnings/errors. New tests cover menu
+cache reuse and tamper recovery, safe app migration with preserved source and
+neighbors, proportional mapping and noninteractive bars, app apply/rollback,
+and public app manifest binding. An actual ARM64 compatibility package was
+copied into a validated temporary `.app` without executing native code.
+Final clean package checks and public release verification are pending.
+
+The Mac primary package is intended to contain `mac-lan.app`, with a menu-bar
+icon for sharing, permission settings, updates, and Quit, without a Dock icon,
+main window or Terminal session. Its arm64 Go launcher is cross-compiled on
+Windows. First launch builds verified embedded AppKit source with existing
+Apple command-line tools, and video setup builds the capture helper. The app
+starts discovery, pairing and file service without Screen Recording; video
+still requires deliberate permission and separate consent. macOS may require
+fresh Screen Recording and Accessibility grants under the app's identity.
+
+Full-desktop native capture now preserves source proportions within a 1920-pixel
+width and 2160-pixel height cap without enlargement. A 16:10 source can produce
+1920×1200. Windows aspect-fits the complete picture, excludes surrounding bars
+from activation/input, and maps the pointer within the displayed picture even
+when an old host labels it `fill`. Correcting pixels already stretched by an
+old native helper requires the new helper. Sixty fps remains a target.
+
+The intended release includes Windows, the canonical app archive, a byte-identical
+legacy app alias, the command-line update bridge, source ZIP, and checksums.
+The shared signed feed uses the three asset names recognized by alpha.14.
+After its bridge update, the old host's next normal launch installs and opens a
+separate `~/Applications/mac-lan.app`, preserving the extracted folder. Settings,
+cache paths, private Mac diagnostic configuration and Downloads/MAC-DOW remain
+in their existing locations. Public artifacts must contain no private destination
+or signing material.
+
+No alpha.15 native Swift compilation, visible menu, permission prompt, capture,
+input, Mac update/relaunch or measured LAN performance has been verified here.
+The Mac SSH connection was refused, so a native check was unavailable. No
+computer-use test, toolchain installation, OS protection bypass or paid CI was
+performed. The user's confirmation that alpha.14 works is inherited runtime
+evidence for that version, not a native alpha.15 acceptance result.
+
 ## Alpha.14 - mac-lan public distribution and signed updates
 
 The public app name is `mac-lan`. Source history remains in the original

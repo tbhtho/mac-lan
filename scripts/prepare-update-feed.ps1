@@ -9,6 +9,8 @@ param(
     [string]$PrivateKey='.release-private/updates.ed25519',
     [string]$PreviousFeed,
     [string]$PublicKey,
+    [string]$MacAppArtifact,
+    [long]$MacAppAssetId,
     [string]$OutputDirectory='artifacts/update-feed'
 )
 $ErrorActionPreference='Stop'
@@ -16,6 +18,8 @@ $repoRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 # Resolve caller-supplied paths before switching the Go working directory.
 $windowsPath=(Resolve-Path -LiteralPath $WindowsArtifact).Path
 $macPath=(Resolve-Path -LiteralPath $MacArtifact).Path
+$appPath=if($MacAppArtifact){(Resolve-Path -LiteralPath $MacAppArtifact).Path}else{$null}
+if([bool]$appPath -ne ($MacAppAssetId -gt 0)){throw 'Mac app artifact and positive asset ID must be supplied together'}
 $keyPath=(Resolve-Path -LiteralPath $PrivateKey).Path
 $outputRoot=[IO.Path]::GetFullPath($OutputDirectory)
 $previousPath=if($PreviousFeed){(Resolve-Path -LiteralPath $PreviousFeed).Path}else{$null}
@@ -38,6 +42,7 @@ try {
     $env:GOMAXPROCS='2'
     $toolArguments=@('run','-C',(Join-Path $repoRoot 'host'),'./cmd/macdow-release')
     $manifestArguments=@('manifest','--windows',$windowsPath,'--mac',$macPath,'--tag',$ReleaseTag,'--commit',$Commit,'--release-id',"$ReleaseId",'--windows-id',"$WindowsAssetId",'--mac-id',"$MacAssetId",'--out',$payloadPath)
+    if($appPath){$manifestArguments+=@('--mac-app',$appPath,'--mac-app-id',"$MacAppAssetId")}
     if($previousPath){$manifestArguments+=@('--previous',$previousPath)}
     if($PublicKey){$manifestArguments+=@('--public-key',$PublicKey)}
     & go @toolArguments @manifestArguments

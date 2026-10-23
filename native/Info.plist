@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>MAC-DOW Host</string>
+  <key>CFBundleExecutable</key><string>mac-lan</string>
   <key>CFBundleIdentifier</key><string>com.tbhtho.macdow.host</string>
-  <key>CFBundleName</key><string>MAC-DOW Host</string>
-  <key>CFBundleDisplayName</key><string>MAC-DOW Host</string>
+  <key>CFBundleName</key><string>mac-lan</string>
+  <key>CFBundleDisplayName</key><string>mac-lan</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>@NUMERIC_VERSION@</string>
   <key>CFBundleShortVersionString</key><string>@NUMERIC_VERSION@</string>

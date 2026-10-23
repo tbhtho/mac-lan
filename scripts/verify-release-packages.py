@@ -6,10 +6,12 @@ from pathlib import Path
 import re
 import struct
 import tarfile
+import plistlib
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--windows', required=True, type=Path)
 parser.add_argument('--mac', required=True, type=Path)
+parser.add_argument('--mac-app', type=Path)
 parser.add_argument('--commit', required=True)
 parser.add_argument('--version', required=True)
 args = parser.parse_args()
@@ -54,4 +56,25 @@ with tarfile.open(args.mac, 'r:gz') as archive:
         raise ValueError('Mac provenance must match clean public source')
     if archive.extractfile('macos-arm64/COMMIT.txt').read().decode().strip() != args.commit:
         raise ValueError('Mac source commit differs from the release')
+    menu_source = Path('native/HostUpdater.swift').read_bytes() + b'\n' + Path('native/MacDowHostApp.swift').read_bytes()
+    menu_hash = hashlib.sha256(menu_source).hexdigest()
+    if provenance.get('menuSourceSha256') != menu_hash or menu_hash.encode() not in binary:
+        raise ValueError('Mac preview does not contain the current verified menu source')
+if args.mac_app:
+    with tarfile.open(args.mac_app, 'r:gz') as archive:
+        for member in archive.getmembers():
+            if member.isfile():public(archive.extractfile(member).read())
+        prefix='mac-lan.app/Contents/'
+        for name in ['MacOS/mac-lan','Helpers/MacDowHost']:
+            member=archive.getmember(prefix+name)
+            content=archive.extractfile(member).read()
+            if not member.mode & 0o111 or content != binary:
+                raise ValueError('Mac app executable differs from the verified compatibility host')
+        identity(json.load(archive.extractfile(prefix+'Resources/MAC-DOW-INSTALL.json')),'darwin','app-bundle')
+        app_provenance=json.load(archive.extractfile(prefix+'Resources/BUILD-PROVENANCE.json'))
+        if app_provenance.get('hostCommit')!=args.commit or app_provenance.get('dirty') is not False or app_provenance.get('publicUpdate') is not True or app_provenance.get('menuSourceSha256')!=menu_hash or app_provenance.get('captureSourceSha256')!=source_hash:
+            raise ValueError('Mac app provenance differs from the intended public source')
+        info=plistlib.load(archive.extractfile(prefix+'Info.plist'))
+        if info.get('CFBundleIdentifier')!='com.tbhtho.macdow.host' or info.get('CFBundleExecutable')!='mac-lan' or info.get('LSUIElement') is not True:
+            raise ValueError('Mac app is missing its menu-bar application identity')
 print('Public Windows and Mac package identities, provenance, and credential checks passed.')

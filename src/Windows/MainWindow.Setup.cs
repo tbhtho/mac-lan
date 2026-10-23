@@ -39,7 +39,7 @@ internal sealed partial class MainWindow
         var quality=new StackPanel();var qualityRow=new WrapPanel();
         foreach(var option in new[]{("Video",codec),("Width",resolution),("Frames / sec",fps),("Mbit / sec",bitrate)}){var column=new StackPanel{Margin=new Thickness(0,0,12,0)};Field(column,option.Item1,option.Item2);qualityRow.Children.Add(column);}
         codec.Width=252;quality.Children.Add(qualityRow);
-        quality.Children.Add(new TextBlock{Text="The desktop defaults to 1920 x 1080 at 60 fps and fills the MacBook tab. The full desktop stays visible. Compatible JPEG uses more network bandwidth.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
+        quality.Children.Add(new TextBlock{Text="The desktop targets 60 fps with H.264 and a maximum width of 1920 pixels. The full desktop keeps its proportions, with black bars when needed. Actual frame rate depends on your Mac, PC and network. Compatible JPEG uses more network bandwidth.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
         streamSection.Children.Add(new Expander{Header="Streaming quality",Content=quality});
         streamSection.Children.Add(MakeButton("Disconnect",()=>Disconnect()));setup.Children.Add(streamSection);
 

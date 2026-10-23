@@ -39,6 +39,7 @@ try{
   closeBrowser=()=>send('Browser.close').catch(()=>{});
   const evaluate=async expression=>{const result=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw new Error(result.exceptionDetails.text+': '+result.exceptionDetails.exception?.description);return result.result.value;};
   await send('Page.enable');
+  await send('Emulation.setDeviceMetricsOverride',{width:1920,height:984,deviceScaleFactor:1,mobile:false});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`
     window.messages=[];window.activationCapture=[];window.focusCalls=0;let callback;
     window.receive=m=>callback({data:m});
@@ -57,8 +58,13 @@ try{
   `});
   await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/'});
   await until(()=>evaluate('window.messages?.some(m=>m.type==="loaded")'),'viewer module load');
-  await evaluate('receive({type:"clear",epoch:1});receive({type:"video",codec:"jpeg",epoch:1})');
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("canvas")).objectFit'),'contain','the first picture preserves aspect ratio before any metadata arrives');
+  await evaluate('document.querySelector("canvas").width=2560;document.querySelector("canvas").height=1600;receive({type:"clear",epoch:1});receive({type:"video",codec:"jpeg",epoch:1,presentation:"fill"})');
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("canvas")).objectFit'),'contain','legacy fill metadata must not stretch a Retina Mac desktop');
   assert.deepEqual(await evaluate('messages.filter(m=>m.type==="clearAck").map(m=>m.epoch)'),[1],'a real DOM stream starts by acknowledging its clear epoch');
+  await evaluate('messages.length=0');
+  for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,x:50,y:492,button:'left',clickCount:1});
+  assert.deepEqual(await evaluate('messages'),[],'clicking a side bar cannot arm control');
   const press=()=>send('Input.dispatchMouseEvent',{type:'mousePressed',x:320,y:240,button:'left',clickCount:1});
   const release=()=>send('Input.dispatchMouseEvent',{type:'mouseReleased',x:320,y:240,button:'left',clickCount:1});
   await evaluate('messages.length=0');await press();
@@ -72,6 +78,14 @@ try{
   assert.deepEqual(await evaluate('messages.map(m=>m.type)'),['requestControl','move','button','button'],'first complete click is consumed and the next click reaches the Mac');
   assert.deepEqual(await evaluate('messages.filter(m=>m.type==="button").map(m=>m.down)'),[true,false]);
   assert.equal(await evaluate('messages.every(m=>m.epoch===1)'),true,'activation and routed pointer input carry the current stream epoch');
+  await evaluate('messages.length=0');
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:960,y:492});
+  const center=await evaluate('messages.find(m=>m.type==="move")');
+  assert.equal(center.x,.5);assert.equal(center.y,.5,'the Retina desktop center matches the tab content center');
+  await evaluate('messages.length=0');
+  for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,x:50,y:492,button:'left',clickCount:1});
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:50,y:492,deltaX:0,deltaY:80});
+  assert.deepEqual(await evaluate('messages'),[],'armed side bars cannot inject clicks or scrolling');
   await evaluate('window.dispatchEvent(new Event("blur"))');
   assert.equal(await evaluate('messages.at(-1).type'),'blur','true focus loss still revokes control');
   assert.equal(await evaluate('messages.at(-1).reason'),'viewer-blur','focus loss carries a fixed diagnostic release reason');

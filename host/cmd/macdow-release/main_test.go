@@ -221,3 +221,37 @@ func TestSignCommandCannotReplacePrivateKey(t *testing.T) {
 		t.Fatal("private key changed")
 	}
 }
+
+func TestManifestCommandIncludesOptionalSignedMenuApp(t *testing.T) {
+	dir := t.TempDir()
+	windows, mac, app, out := filepath.Join(dir, "mac-lan.exe"), filepath.Join(dir, "preview.tar.gz"), filepath.Join(dir, "app.tar.gz"), filepath.Join(dir, "payload.json")
+	for path, data := range map[string][]byte{windows: []byte("win"), mac: macArchiveFixture(t, []byte("host"), []byte(`{"publicUpdate":true}`)), app: menuArchiveFixture(t, nil)} {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := []string{"manifest", "--windows", windows, "--mac", mac, "--tag", "v0.1.0-alpha.15", "--commit", strings.Repeat("c", 40), "--release-id", "4", "--windows-id", "5", "--mac-id", "6", "--out", out}
+	if err := run(append(append([]string{}, args...), "--mac-app", app, "--mac-app-id", "7"), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload feedPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Releases) != 1 || len(payload.Releases[0].Assets) != 3 {
+		t.Fatal("app asset missing", payload)
+	}
+	asset := payload.Releases[0].Assets[2]
+	if asset.Name != "MAC-DOW-macos-arm64-unsigned.tar.gz" || asset.ID != 7 || asset.Size <= 0 || len(asset.SHA256) != 64 {
+		t.Fatal("app feed binding incorrect", asset)
+	}
+	for _, extra := range [][]string{{"--mac-app", app}, {"--mac-app-id", "7"}, {"--mac-app", app, "--mac-app-id", "0"}, {"--mac-app", app, "--mac-app-id", "-1"}} {
+		if err := run(append(append([]string{}, args...), extra...), &bytes.Buffer{}); err == nil {
+			t.Fatal("accepted partial or invalid app binding", extra)
+		}
+	}
+}

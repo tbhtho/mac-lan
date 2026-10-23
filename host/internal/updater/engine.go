@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 )
 
@@ -200,6 +201,9 @@ func payloadRoot(base string, p Plan) string {
 		return filepath.Join(base, p.Asset.Name)
 	}
 	if p.OS == "darwin" {
+		if info, err := os.Lstat(filepath.Join(base, "mac-lan.app")); err == nil && info.IsDir() {
+			return filepath.Join(base, "mac-lan.app")
+		}
 		if info, err := os.Lstat(appBundle(base)); err == nil && info.IsDir() {
 			return appBundle(base)
 		}
@@ -227,6 +231,13 @@ func (e *Engine) validatePayload(base string, p Plan) error {
 	}
 	if standalonePlan(p) {
 		return nil
+	}
+	if p.OS == "darwin" && filepath.Base(root) == "mac-lan.app" {
+		entries, err := os.ReadDir(base)
+		if err != nil || len(entries) != 1 || entries[0].Name() != "mac-lan.app" || m.Commit != p.Commit {
+			return errors.New("Mac app payload root or commit mismatch")
+		}
+		return ValidateMacAppBundle(root, runtime.GOOS != "windows")
 	}
 	if commandlinePreviewPlan(p) {
 		if m.Layout != "commandline-preview" || m.Commit != p.Commit {
@@ -379,6 +390,19 @@ func (e *Engine) installIdentity(install string) error {
 	}
 	if m.Product != "MAC-DOW" || m.RepositoryID != BuildConfig().RepositoryID || m.OS != e.OS || m.Arch != e.Arch || m.Version != e.Current {
 		return errors.New("installed product/version/platform mismatch")
+	}
+	if e.OS == "darwin" {
+		menuBundle := filepath.Base(abs) == "mac-lan.app"
+		if m.Layout == "app-bundle" && !menuBundle {
+			// Older native bundles used the same layout marker with a different
+			// entry point. Detect the new executable so renamed menu apps still
+			// receive the strict validator without rejecting legacy bundles.
+			_, entryErr := os.Lstat(filepath.Join(abs, "Contents", "MacOS", "mac-lan"))
+			menuBundle = entryErr == nil
+		}
+		if menuBundle {
+			return ValidateMacAppBundle(abs, runtime.GOOS != "windows")
+		}
 	}
 	if e.OS == "darwin" && m.Layout == "commandline-preview" {
 		if err = rejectBroadPreviewDirectory(abs); err != nil {
