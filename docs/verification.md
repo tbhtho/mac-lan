@@ -1,5 +1,31 @@
 # Verification record
 
+## Alpha.18 - signed disk-image app, install window and slimmer Windows bar
+
+The user reported that the alpha.17 disk image (SHA-256 confirmed on the Mac)
+mounted, but macOS called the app damaged, and the window was a plain Finder
+view. The binaries carried only Go's linker signature (flags adhoc|linker-signed,
+identifier `a.out`, no special slots) and the bundle had no seal.
+
+- The disk-image app now gets an ad-hoc bundle signature written on Windows:
+  both binaries are re-signed (Info.plist, requirements and CodeResources
+  slots on the main executable; the helper is sealed as nested code by cdhash).
+  The writer re-parsed every page hash and slot; macholib independently
+  confirmed both Mach-O files end with the signature inside `__LINKEDIT`.
+  `codesign`/`spctl` on a Mac have not been run.
+- Finder view settings (fixed 640x420 window, 128-point icons, positions, no
+  toolbar/sidebar, background alias to `/.background/background.png`) were
+  read back by the included reader; Finder display is unverified.
+- The validator accepts `Contents/_CodeSignature/CodeResources` (new Go test).
+  Feed archives remain unsigned and byte-identical for alpha.17 and older.
+- The Windows bar is 32 DIPs; the full headless suite passed.
+- Release `v0.1.0-alpha.18` binds `803ed30df99d458c9b5819457c7cdf4add16f67b`;
+  feed commit `c7d23a1`. All eight downloads matched `SHA256SUMS`
+  anonymously; the disk image is SHA-256
+  `6279c11086ed885f524e3466f7489827ebe17e0ba371a14d549cd1d36daee9c9` and its
+  downloaded copy contains the sealed app. The alpha.17 EXE reported alpha.18
+  available.
+
 ## Alpha.17 - Windows setup and Mac disk image
 
 The application source is unchanged from alpha.16 apart from its version. New
