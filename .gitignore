@@ -10,3 +10,4 @@ artifacts/
 *.key
 *.log
 /.release-private/
+__pycache__/

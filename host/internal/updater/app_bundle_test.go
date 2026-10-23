@@ -126,6 +126,28 @@ func TestMenuAppRejectsWrongHostBrandingMetadataAndExtraFiles(t *testing.T) {
 	}
 }
 
+func TestDiskImageInstallWithBundleSealIsAccepted(t *testing.T) {
+	e, _, source := newFixture(t, true)
+	e.OS, e.Arch, e.Current = "darwin", "arm64", "0.2.0"
+	app := writeMenuApp(t, t.TempDir(), "0.2.0", source.SHA)
+	seal := filepath.Join(app, "Contents", "_CodeSignature")
+	if err := os.MkdirAll(seal, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seal, "CodeResources"), []byte("<plist/>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.installIdentity(app); err != nil {
+		t.Fatalf("rejected app installed from the signed disk image: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(seal, "CodeSignature"), []byte("extra"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.installIdentity(app); err == nil {
+		t.Fatal("accepted unrelated content beside the bundle seal")
+	}
+}
+
 func TestMenuAppPreferredOverCompatibilityPreview(t *testing.T) {
 	r := Release{ID: 1, Tag: "v0.2.0", Assets: []Asset{
 		{ID: 2, Name: "mac-lan-macos-arm64-commandline-preview.tar.gz", Size: 1, Digest: "sha256:" + strings.Repeat("a", 64)},

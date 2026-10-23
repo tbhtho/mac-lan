@@ -24,26 +24,26 @@ internal sealed class TabBar : Window,IDisposable
     HwndSource? source;
     public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
     {
-        Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=48;
+        Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=TabBarLayout.Dip;
         Glass.Apply(this,rounded:false);FontSize=12;
         var ghost=(Style)FindResource("GhostButton");
-        var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(14,8,10,8)};
+        var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(10,3,6,3)};
         var right=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(right,Dock.Right);
-        Button ActionButton(string label,Action action){var b=new Button{Content=label,Style=ghost,Margin=new Thickness(2,0,0,0)};b.Click+=(_,_)=>action();return b;}
+        Button ActionButton(string label,Action action){var b=new Button{Content=label,Style=ghost,Margin=new Thickness(2,0,0,0),MinHeight=24,Padding=new Thickness(10,2,10,2)};b.Click+=(_,_)=>action();return b;}
         var connectionButton=ActionButton("Connection",setup);
         if(files!=null)right.Children.Add(ActionButton("Files",files));
         right.Children.Add(connectionButton);
-        updateButton.Style=ghost;updateButton.Margin=new Thickness(2,0,0,0);
+        updateButton.Style=ghost;updateButton.Margin=new Thickness(2,0,0,0);updateButton.MinHeight=24;updateButton.Padding=new Thickness(10,2,10,2);
         right.Children.Add(updateButton);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);
         var left=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(left,Dock.Left);
-        left.Children.Add(new TextBlock{Text="mac-lan",FontWeight=FontWeights.SemiBold,FontSize=13,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,18,0)});
+        left.Children.Add(new TextBlock{Text="mac-lan",FontWeight=FontWeights.SemiBold,FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,14,0)});
         // Segmented control: one pill highlights the visible desktop.
-        Button Segment(string label,Action action){var b=new Button{Content=label,Style=ghost,MinWidth=96,MinHeight=26,Padding=new Thickness(12,3,12,3)};b.Click+=(_,_)=>action();return b;}
+        Button Segment(string label,Action action){var b=new Button{Content=label,Style=ghost,MinWidth=84,MinHeight=22,Padding=new Thickness(10,1,10,1)};b.Click+=(_,_)=>action();return b;}
         local=Segment("Windows",windows);mac=Segment("MacBook",macbook);
         var segments=new StackPanel{Orientation=Orientation.Horizontal};segments.Children.Add(local);segments.Children.Add(mac);
-        left.Children.Add(new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(9),Padding=new Thickness(2),VerticalAlignment=VerticalAlignment.Center,Child=segments});
+        left.Children.Add(new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(7),Padding=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Child=segments});
         grid.Children.Add(left);
-        var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(20,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connection);
+        var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(16,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connection);
         grid.Children.Add(status);
         Content=grid;SetMode(true);
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(Hook);};

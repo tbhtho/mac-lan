@@ -13,7 +13,8 @@ public static class DisplayLayout
 }
 public static class TabBarLayout
 {
-    public static int HeightPixels(uint dpi)=>(int)Math.Ceiling(48*Math.Max(96,dpi)/96.0);
+    public const int Dip=32;
+    public static int HeightPixels(uint dpi)=>(int)Math.Ceiling(Dip*Math.Max(96,dpi)/96.0);
 }
 public static class Viewport
 {
