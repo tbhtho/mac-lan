@@ -116,6 +116,41 @@ await using(var session=new Session())
     var reason=await ended.Task.WaitAsync(TimeSpan.FromSeconds(3));
     Check(reason=="Mac stopped: Mac user did not consent","unclean WebSocket close preserves the actual Mac error");
 }
+foreach(var capability in new string?[]{null,"bad token",new string('A',64)})
+await using(var peer=new LocalPeer())
+await using(var session=new Session())
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,transferToken=capability,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(new{type="lease",active=false,view=false});session.Send(new{type="release"});
+    await Task.Delay(100);
+    Check(session.IsPaired&&!session.CanTransfer&&session.TransferTarget==null&&!peer.HasPendingMessage,"old or invalid transfer capability cannot enable idle keepalive traffic");
+}
+
+await using(var peer=new LocalPeer())
+await using(var session=new Session())
+{
+    const string capability="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    Check(!session.CanTransfer&&session.TransferTarget==null,"transfer capability is unavailable before paired catalog arrives");
+    await peer.Send(new{type="catalog",maxFps=0,videoError="Native capture preparation failed",transferToken=capability,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    var target=session.TransferTarget;
+    Check(session.IsPaired&&!session.IsReady&&session.CanTransfer&&target?.Token==capability&&target.Endpoint.Scheme=="https"&&target.Endpoint.AbsolutePath=="/transfer","paired catalog enables a separate HTTPS transfer endpoint without a video stream");
+    Check(session.MaxFPS==0&&session.VideoError=="Native capture preparation failed","video-unavailable catalog preserves capture failure while file transfer stays paired");
+    session.Send(new{type="lease",active=true,view=false});session.Send(new{type="lease",active=false,view=true});
+    session.Send(new{type="release"});session.Send(new{type="key",code=0,down=true});
+    session.Send(new{type="lease",active=false,view=false});
+    Check((await peer.Next()).GetProperty("type").GetString()=="lease","only an inactive non-viewing lease is sent while paired for file transfers");
+    await Task.Delay(100);Check(!peer.HasPendingMessage,"transfer keepalive never allows input or release before video readiness");
+    session.Abort("transfer test ended");
+    Check(!session.CanTransfer&&session.TransferTarget==null&&target!.SessionEnded.IsCancellationRequested,"disconnect revokes the transfer target and cancels its session token");
+}
 Console.WriteLine($"{checks} session checks passed using synthetic loopback TLS WebSockets; no UI, capture, hooks, or webhook.");
 
 sealed class LocalPeer : IAsyncDisposable

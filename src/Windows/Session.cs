@@ -21,6 +21,10 @@ internal sealed class Session : IAsyncDisposable
     int phase;
     int maxFPS=30;
     string? remoteError;
+    string? videoError;
+    Uri? transferEndpoint;
+    string? fingerprint;
+    TransferTarget? transferTarget;
     Task? reader,writer;
     public event Action<byte[]>? Frame;
     public event Action<JsonElement>? Message;
@@ -29,6 +33,9 @@ internal sealed class Session : IAsyncDisposable
     public bool IsPaired { get { int current=Volatile.Read(ref phase);return current is Paired or Starting or Ready; } }
     public bool IsStarting => Volatile.Read(ref phase)==Starting;
     public int MaxFPS => Volatile.Read(ref maxFPS);
+    public string? VideoError {get {lock(lifecycle)return videoError;}}
+    public bool CanTransfer => TransferTarget!=null;
+    public TransferTarget? TransferTarget {get {lock(lifecycle)return phase is Paired or Starting or Ready?transferTarget:null;}}
     public long NativeAlive {get;private set;}
     public long LastFrame {get;private set;}
     public Task Connect(string host,string port,string fingerprint,string token)
@@ -44,7 +51,7 @@ internal sealed class Session : IAsyncDisposable
     }
     async Task ConnectCore(string host,string port,string fingerprint,object authentication)
     {
-        lock(lifecycle){if(phase!=New)throw new InvalidOperationException("A session can connect only once.");phase=Authenticating;}
+        lock(lifecycle){if(phase!=New)throw new InvalidOperationException("A session can connect only once.");phase=Authenticating;transferEndpoint=new Uri($"https://{host}:{port}/transfer");this.fingerprint=fingerprint.ToLowerInvariant();}
         socket.Options.RemoteCertificateValidationCallback=(_,cert,_,_)=>cert!=null&&Pin(cert,fingerprint);
         socket.Options.Proxy=null;
         using var timeout=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);timeout.CancelAfter(TimeSpan.FromSeconds(8));
@@ -71,6 +78,11 @@ internal sealed class Session : IAsyncDisposable
                 if(requested>maxFPS)
                     throw new InvalidOperationException($"Update MAC-DOW on your Mac to stream at {requested} fps. This Mac host supports up to {maxFPS} fps.");
                 phase=Starting;
+            }
+            else if(type=="lease"&&phase==Paired&&transferTarget!=null)
+            {
+                // A new host accepts idle keepalives so large file transfers do not expire before video starts.
+                if(!message.TryGetProperty("active",out var active)||active.ValueKind!=JsonValueKind.False||!message.TryGetProperty("view",out var view)||view.ValueKind!=JsonValueKind.False)return;
             }
             else if(phase!=Ready||type is not ("release" or "lease" or "key" or "move" or "button" or "scroll"))return;
             overflow=!outgoing.Writer.TryWrite(message.GetRawText());
@@ -104,6 +116,13 @@ internal sealed class Session : IAsyncDisposable
                             {
                                 if(phase!=Authenticating)throw new InvalidDataException("Unexpected pairing response.");
                                 maxFPS=value.TryGetProperty("maxFps",out var advertised)&&advertised.ValueKind==JsonValueKind.Number&&advertised.TryGetInt32(out var maximum)&&maximum is >=5 and <=60?maximum:30;
+                                if(value.TryGetProperty("videoError",out var captureError)&&captureError.ValueKind==JsonValueKind.String)
+                                {
+                                    string? text=captureError.GetString()?.Trim();
+                                    if(!string.IsNullOrEmpty(text)){videoError=text[..Math.Min(text.Length,1024)];if(value.TryGetProperty("maxFps",out var unavailable)&&unavailable.ValueKind==JsonValueKind.Number&&unavailable.TryGetInt32(out int limit)&&limit==0)maxFPS=0;}
+                                }
+                                if(value.TryGetProperty("transferToken",out var transfer)&&transfer.ValueKind==JsonValueKind.String&&transfer.GetString() is string capability&&capability.Length==64&&capability.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f'))
+                                    transferTarget=new TransferTarget(transferEndpoint!,fingerprint!,capability,stop.Token);
                                 phase=Paired;
                             }
                             if(t.GetString()=="ready"){if(phase!=Starting)throw new InvalidDataException("Unexpected stream response.");phase=Ready;}

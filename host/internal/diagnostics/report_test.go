@@ -72,3 +72,14 @@ func TestWindowsReportsNeverUpload(t *testing.T) {
 		t.Fatal("Windows must not enter Mac remote-report pipeline")
 	}
 }
+
+func TestCompilerReportAllowsOnlyBoundedNumericLocations(t *testing.T) {
+	r := NewReport("mac", "native-build-failed", "compile-type", map[string]int{"compilerLine": 167, "compilerColumn": 18, "compilerExit": 1, "compilerOutput": 99, "sourcePath": 3, "token": 1})
+	if len(r.Counts) != 3 || r.Counts["compilerLine"] != 167 || r.Counts["compilerColumn"] != 18 || r.Counts["compilerExit"] != 1 {
+		t.Fatalf("unexpected compiler fields: %+v", r.Counts)
+	}
+	invalid := NewReport("mac", "native-build-failed", "compile-failed", map[string]int{"compilerLine": 100001, "compilerColumn": -1, "compilerExit": 100001})
+	if len(invalid.Counts) != 0 {
+		t.Fatalf("unbounded compiler counters: %+v", invalid.Counts)
+	}
+}

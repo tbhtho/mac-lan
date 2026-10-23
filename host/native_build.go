@@ -15,7 +15,9 @@ import (
 	"os/exec"
 	posixpath "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,7 +37,7 @@ type nativeCommand func(context.Context, string, []string, []string) ([]byte, er
 type nativeBuilder struct {
 	encoded, sourceSHA, cacheBase, goos, goarch string
 	run                                         nativeCommand
-	emit                                        func(string, string)
+	emit                                        func(string, string, map[string]int)
 }
 type nativeManifest struct {
 	SourceSHA string `json:"sourceSHA256"`
@@ -47,15 +49,16 @@ func resolveCaptureHelper(ctx context.Context, sibling string) (string, error) {
 	if err != nil && (NativeCaptureSourceGzip != "" || NativeCaptureSourceSHA256 != "") {
 		return "", errors.New("native capture build cannot locate the Mac user cache")
 	}
-	b := nativeBuilder{NativeCaptureSourceGzip, NativeCaptureSourceSHA256, cache, runtime.GOOS, runtime.GOARCH, runNativeCommand,
-		func(event, code string) {
+	b := nativeBuilder{encoded: NativeCaptureSourceGzip, sourceSHA: NativeCaptureSourceSHA256, cacheBase: cache,
+		goos: runtime.GOOS, goarch: runtime.GOARCH, run: runNativeCommand,
+		emit: func(event, code string, counts map[string]int) {
 			if event == "native-build-started" {
 				fmt.Fprintln(os.Stderr, "Preparing the 60 fps native capture helper. The first launch may take a minute; no video or input has started.")
 			}
 			if event == "native-build-failed" {
-				diagnostics.Record("mac", event, code, nil) // Retain the fixed stage before main exits.
+				diagnostics.Record("mac", event, code, counts) // Retain the fixed stage before main exits.
 			} else {
-				diagnostics.Emit("mac", event, code, nil)
+				diagnostics.Emit("mac", event, code, counts)
 			}
 		}}
 	return b.resolve(ctx, sibling)
@@ -93,13 +96,14 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 		return sibling, nil
 	}
 	stage := "source-invalid"
+	var failureCounts map[string]int
 	if b.emit == nil {
-		b.emit = func(string, string) {}
+		b.emit = func(string, string, map[string]int) {}
 	}
-	b.emit("native-build-started", "source")
+	b.emit("native-build-started", "source", nil)
 	defer func() {
 		if err != nil {
-			b.emit("native-build-failed", stage)
+			b.emit("native-build-failed", stage, failureCounts)
 		}
 	}()
 	source, err := decodeNativeSource(b.encoded, b.sourceSHA)
@@ -126,7 +130,7 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 		if _, err = b.command(ctx, 15*time.Second, helper, []string{"--self-test"}, nil); err != nil {
 			return "", fmt.Errorf("cached native capture self-test failed: %w", err)
 		}
-		b.emit("native-build-ready", "cached")
+		b.emit("native-build-ready", "cached", nil)
 		return helper, nil
 	}
 	// Invalid files can be replaced; links and non-regular targets must not be followed.
@@ -141,13 +145,22 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 	if _, err = b.command(ctx, 10*time.Second, "/usr/bin/xcode-select", []string{"-p"}, nil); err != nil {
 		return "", errors.New("existing Xcode Command Line Tools are required to build the capture helper; nothing was installed")
 	}
-	compilerOutput, err := b.command(ctx, 10*time.Second, "/usr/bin/xcrun", []string{"--find", "swiftc"}, nil)
+	compilerOutput, err := b.command(ctx, 10*time.Second, "/usr/bin/xcrun", []string{"--sdk", "macosx", "--find", "swiftc"}, nil)
 	if err != nil {
 		return "", errors.New("existing Swift compiler is unavailable; nothing was installed")
 	}
 	compiler := strings.TrimSpace(string(compilerOutput))
 	if !posixpath.IsAbs(compiler) || posixpath.Base(compiler) != "swiftc" {
 		return "", errors.New("existing Swift compiler path is invalid")
+	}
+	stage = "sdk-unavailable"
+	sdkOutput, err := b.command(ctx, 10*time.Second, "/usr/bin/xcrun", []string{"--sdk", "macosx", "--show-sdk-path"}, nil)
+	if err != nil {
+		return "", errors.New("the selected developer toolchain has no usable macOS SDK; nothing was installed or changed")
+	}
+	sdk := strings.TrimSpace(string(sdkOutput))
+	if !posixpath.IsAbs(sdk) || !strings.HasSuffix(sdk, ".sdk") || strings.ContainsAny(sdk, "\r\n\x00") {
+		return "", errors.New("the selected developer toolchain returned an invalid macOS SDK path")
 	}
 	stage = "cache-unavailable"
 	temp, err := os.MkdirTemp(root, ".macdow-build-")
@@ -163,13 +176,20 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 	if err = os.WriteFile(sourcePath, source, 0600); err != nil {
 		return "", err
 	}
-	args := []string{"-swift-version", "5", "-O", "-num-threads", "2", "-target", "arm64-apple-macos14.0", "-module-cache-path", moduleCache, sourcePath, "-o", temporaryHelper}
+	// xcrun --find returns the toolchain binary, bypassing the /usr/bin shim.
+	// Supply the matching SDK explicitly instead of relying on an inherited SDKROOT.
+	args := []string{"-swift-version", "5", "-O", "-num-threads", "2", "-target", "arm64-apple-macos14.0", "-sdk", sdk, "-module-cache-path", moduleCache, sourcePath, "-o", temporaryHelper}
 	for _, framework := range []string{"ApplicationServices", "Foundation", "AppKit", "ScreenCaptureKit", "CoreGraphics", "CoreMedia", "CoreImage", "VideoToolbox", "ImageIO", "UniformTypeIdentifiers"} {
 		args = append(args, "-framework", framework)
 	}
-	env := []string{"CLANG_MODULE_CACHE_PATH=" + moduleCache, "SWIFT_MODULECACHE_PATH=" + moduleCache}
+	env := []string{"CLANG_MODULE_CACHE_PATH=" + moduleCache, "SWIFT_MODULECACHE_PATH=" + moduleCache, "SDKROOT=" + sdk}
 	stage = "compile-failed"
-	if _, err = b.command(ctx, 3*time.Minute, compiler, args, env); err != nil {
+	compileOutput, err := b.command(ctx, 3*time.Minute, compiler, args, env)
+	if err != nil {
+		stage, failureCounts = nativeCompileDiagnostic(compileOutput, err)
+		if logPath := saveNativeBuildError(root, temp, compileOutput, err); logPath != "" {
+			return "", fmt.Errorf("native capture compilation failed (local details saved to %s): %w", logPath, err)
+		}
 		return "", fmt.Errorf("native capture compilation failed: %w", err)
 	}
 	if _, err = nativeFileSHA(temporaryHelper, nativeBinaryLimit); err != nil {
@@ -199,8 +219,72 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 	if err = os.Rename(temporaryManifest, manifestPath); err != nil {
 		return "", err
 	}
-	b.emit("native-build-ready", "compiled")
+	b.emit("native-build-ready", "compiled", nil)
 	return helper, nil
+}
+
+var nativeCompilerLocation = regexp.MustCompile(`(?:^|[/\\])MacDowCapture\.swift:([0-9]{1,6}):([0-9]{1,6}):\s*(?:fatal )?error:`)
+
+// Never send compiler output to remote diagnostics. Only fixed categories and
+// numeric locations in our own source can leave the Mac; full output stays local.
+func nativeCompileDiagnostic(output []byte, err error) (string, map[string]int) {
+	counts := map[string]int{}
+	if location := nativeCompilerLocation.FindSubmatch(output); len(location) == 3 {
+		line, _ := strconv.Atoi(string(location[1]))
+		column, _ := strconv.Atoi(string(location[2]))
+		if line > 0 && line <= 100000 && column > 0 && column <= 100000 {
+			counts["compilerLine"], counts["compilerColumn"] = line, column
+		}
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() >= 0 && exit.ExitCode() <= 100000 {
+		counts["compilerExit"] = exit.ExitCode()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "compile-timeout", counts
+	}
+	text := strings.ToLower(string(output))
+	for _, category := range []struct {
+		code    string
+		markers []string
+	}{
+		{"compile-sdk", []string{"unable to load standard library", "no such module", "cannot load underlying module", "sdk does not contain", "unable to find sdk", "invalid sdk", "could not build module", "failed to build module", "this sdk is not supported by the compiler", "compiled with a different version"}},
+		{"compile-argument", []string{"unknown argument", "unsupported option", "unknown option", "missing argument"}},
+		{"compile-availability", []string{"is only available in", "has been explicitly marked unavailable", "is unavailable in"}},
+		{"compile-link", []string{"link command failed", "ld: ", "undefined symbols for architecture"}},
+		{"compile-symbol", []string{"cannot find", "has no member", "use of unresolved identifier"}},
+		{"compile-type", []string{"cannot convert", "cannot force unwrap", "ambiguous use", "could not infer", "cannot assign", "cannot pass", "type of expression is ambiguous", "requires that", "does not conform", "must be unwrapped"}},
+		{"compile-syntax", []string{"expected expression", "expected declaration", "expected '}", "expected ')", "consecutive statements", "expressions are not allowed"}},
+	} {
+		for _, marker := range category.markers {
+			if strings.Contains(text, marker) {
+				return category.code, counts
+			}
+		}
+	}
+	return "compile-failed", counts
+}
+
+func saveNativeBuildError(root, temp string, output []byte, err error) string {
+	if len(output) == 0 {
+		output = []byte(err.Error())
+	}
+	if len(output) > 16384 {
+		output = output[:16384]
+	}
+	path := filepath.Join(root, "last-build-error.txt")
+	if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
+		return ""
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return ""
+	}
+	// Rename an invocation-owned file instead of opening a shared destination,
+	// so an existing link is never followed. The directory is validated earlier.
+	staged := filepath.Join(temp, "compiler-error.txt")
+	if os.WriteFile(staged, output, 0600) != nil || os.Rename(staged, path) != nil {
+		return ""
+	}
+	return path
 }
 
 func (b nativeBuilder) command(ctx context.Context, timeout time.Duration, name string, args, env []string) ([]byte, error) {
@@ -211,6 +295,9 @@ func (b nativeBuilder) command(ctx context.Context, timeout time.Duration, name 
 		output = output[:16384]
 	}
 	if err != nil {
+		if child.Err() != nil {
+			err = child.Err()
+		}
 		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return output, nil

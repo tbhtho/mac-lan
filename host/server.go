@@ -65,6 +65,7 @@ func (s start) valid(windows []window) bool {
 // paired session idle. In particular, a release must not consume the start request.
 func readStart(c *websocket.Conn, windows []window) (start, error) {
 	for {
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
 		var raw json.RawMessage
 		if err := c.ReadJSON(&raw); err != nil {
 			return start{}, err
@@ -161,11 +162,17 @@ type server struct {
 	activeDone   chan struct{}
 	stopped      bool
 	stream       func(func([]byte), func(string), <-chan input) error
+	transfers    *transferReceiver
+	videoError   string
 	// selected is only accessed while slot is held.
 	selected start
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/transfer" && s.transfers != nil {
+		s.transfers.serveHTTP(w, r, s.peerAllowed)
+		return
+	}
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil || !s.peerAllowed(peer) || r.URL.Path != "/session" && r.URL.Path != "/" || r.Method != "GET" {
 		http.Error(w, "LAN session endpoint only", 403)
@@ -222,16 +229,51 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	diagnostics.Emit("mac", "pairing-approved", "ok", nil)
-	windows, err := s.catalog()
-	if err != nil {
-		_ = c.WriteJSON(map[string]string{"type": "error", "message": err.Error()})
-		return
+	transferToken := ""
+	if s.transfers != nil {
+		var revoke func()
+		transferToken, revoke, err = s.transfers.grant(peer)
+		if err != nil {
+			return
+		}
+		defer revoke()
 	}
-	if err = c.WriteJSON(map[string]any{"type": "catalog", "maxFps": 60, "windows": windows}); err != nil {
+	windows, err := s.catalog()
+	videoError := s.videoError
+	if err != nil {
+		if s.transfers == nil {
+			_ = c.WriteJSON(map[string]string{"type": "error", "message": err.Error()})
+			return
+		}
+		windows = nil
+		videoError = "Mac video is unavailable. File transfers are ready. Check the Mac's Screen Recording permission and restart MAC-DOW."
+	}
+	if windows == nil {
+		windows = []window{}
+	}
+	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows}
+	if transferToken != "" {
+		catalog["transferToken"] = transferToken
+	}
+	if videoError != "" {
+		catalog["maxFps"] = 0
+		catalog["videoError"] = videoError
+	}
+	if err = c.WriteJSON(catalog); err != nil {
 		return
 	}
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
-	request, err := readStart(c, windows)
+	var request start
+	for {
+		request, err = readStart(c, windows)
+		if err != nil || videoError == "" {
+			break
+		}
+		_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		if err = c.WriteJSON(map[string]any{"type": "status", "paused": true, "message": videoError}); err != nil {
+			return
+		}
+	}
 	if err != nil {
 		if errors.Is(err, errInvalidStart) {
 			diagnostics.Emit("mac", "stream-denied", "invalid-request", nil)
@@ -389,5 +431,8 @@ func (s *server) stopActive() {
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
+	}
+	if s.transfers != nil {
+		s.transfers.stopAndWait()
 	}
 }

@@ -1,5 +1,42 @@
 # Verification record
 
+## Alpha.10 - Windows to Mac file transfer and native build diagnostics
+
+Fresh Windows headless suite passes: 33 core assertions, 34 session checks,
+46 transfer checks over loopback TLS, in-memory presentation checks, viewer/race
+regressions, all Go packages and Go vet. Windows Release compilation has zero
+warnings/errors. No visible UI, capture, OS input hooks, or webhook test sends.
+
+Transfer coverage includes certificate pins, paired capabilities, byte-for-byte
+files/ZIPs, SHA-256 receipts, Unicode names, empty/nested folders, safe no-overwrite
+names, cancellation, session revocation and process shutdown cleanup, malformed
+and oversized metadata, traversal/symlink/duplicate ZIP entries, ZIP64 and bounded
+actual central-directory scans. A 342-byte ZIP generated with the production
+Windows `FileTransferPackage.CreateFolderAsync` is accepted by the production Go
+receiver with its Unicode file and empty directory intact. Real TLS tests also
+verify file-only pairing after native setup/catalog failure and cancellation of
+a stalled upload. Independent review findings on shutdown/reconnect, publication
+and ZIP allocation limits were resolved before packaging.
+
+Some OS symlink-creation tests skip on this Windows account because it lacks
+the required privilege; ZIP symlink rejection tests run. Go's race detector
+cannot run in the current environment because cgo is disabled. No race-detector
+pass is claimed.
+
+The Mac bootstrap now resolves the selected macOS SDK explicitly and records
+fixed compiler categories plus numeric source line/column and exit status.
+Full bounded compiler output stays in `last-build-error.txt` in the Mac cache.
+Synthetic SDK/cache/compiler tests pass. **The user's alpha.9 report contains
+no compiler stderr, so its exact cause remains unconfirmed.** Current Swift
+drivers can already infer an SDK; explicit selection is a robustness change,
+not proof that this specific native compilation failure is fixed.
+
+Native compilation, actual Mac transfer/filesystem behavior, capture/input,
+delivered 60 fps and latency while transferring remain unverified. Video still
+requires 60 fps; capture setup failure leaves file transfer available instead
+of substituting 15/30 fps. The AppKit menu-bar launcher remains source-only,
+and secure automatic update application prerequisites remain unresolved.
+
 Windows development machine, 2026-10-23 UTC. Dedicated project was created in C:\Users\hunnid\Documents\Codex\2026-10-22\task-6 and explicitly moved to C:\Users\hunnid\Documents\code\01_My_Projects\WIP\MAC-DOW. Source/Git hashes verified for 43 files at move time; map in move-map.json. No other project was changed.
 
 ## Passing headless checks
