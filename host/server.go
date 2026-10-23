@@ -25,6 +25,8 @@ import (
 
 const maxFrame = 4 << 20
 
+var errInvalidStart = errors.New("Choose a Mac desktop or window to start viewing")
+
 type window struct {
 	ID    uint32 `json:"id"`
 	Title string `json:"title"`
@@ -56,6 +58,39 @@ func (s start) valid(windows []window) bool {
 		}
 	}
 	return false
+}
+
+// Safety releases can be sent whenever the Windows focus or selected tab changes.
+// Before viewing approval there is no native process to receive them, so leave the
+// paired session idle. In particular, a release must not consume the start request.
+func readStart(c *websocket.Conn, windows []window) (start, error) {
+	for {
+		var raw json.RawMessage
+		if err := c.ReadJSON(&raw); err != nil {
+			return start{}, err
+		}
+		var kind struct{ Type string }
+		if json.Unmarshal(raw, &kind) != nil {
+			return start{}, errInvalidStart
+		}
+		switch kind.Type {
+		case "start":
+			var request start
+			if json.Unmarshal(raw, &request) != nil || !request.valid(windows) {
+				return start{}, errInvalidStart
+			}
+			return request, nil
+		case "release", "lease":
+			var idle input
+			if json.Unmarshal(raw, &idle) != nil || !idle.valid() {
+				return start{}, errInvalidStart
+			}
+			// An active lease here also grants nothing: capture and input do not
+			// exist until a separate start request receives local Mac consent.
+		default:
+			return start{}, errInvalidStart
+		}
+	}
 }
 
 type input struct {
@@ -196,10 +231,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
-	var request start
-	if c.ReadJSON(&request) != nil || !request.valid(windows) {
+	request, err := readStart(c, windows)
+	if err != nil {
+		if errors.Is(err, errInvalidStart) {
+			diagnostics.Emit("mac", "stream-denied", "invalid-request", nil)
+			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			_ = c.WriteJSON(map[string]string{"type": "error", "message": errInvalidStart.Error()})
+		} else {
+			diagnostics.Emit("mac", "stream-ended", "before-view-request", nil)
+		}
 		return
 	}
+	diagnostics.Emit("mac", "stream-request", "ok", map[string]int{"width": request.Width, "fps": request.FPS})
 	if !s.consent(request) {
 		diagnostics.Emit("mac", "stream-denied", "not-approved", nil)
 		_ = c.WriteJSON(map[string]string{"type": "error", "message": "Mac user did not consent"})
@@ -212,7 +255,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	events := make(chan input, 32)
 	frames := make(chan []byte, 1)
-	status := make(chan string, 4)
+	type statusMessage struct {
+		line string
+		sent chan struct{}
+	}
+	status := make(chan statusMessage, 4)
 	done := make(chan struct{})
 	var once sync.Once
 	stop := func() { once.Do(func() { close(done); c.Close() }) }
@@ -230,7 +277,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			case v := <-status:
 				_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-				if c.WriteMessage(websocket.TextMessage, []byte(v)) != nil {
+				err := c.WriteMessage(websocket.TextMessage, []byte(v.line))
+				if v.sent != nil {
+					close(v.sent)
+				}
+				if err != nil {
 					return
 				}
 			}
@@ -248,7 +299,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if e.Type == "lease" {
 				b, _ := json.Marshal(map[string]any{"type": "pong", "stamp": e.Stamp})
 				select {
-				case status <- string(b):
+				case status <- statusMessage{line: string(b)}:
 				case <-done:
 					return
 				default:
@@ -286,7 +337,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			line = string(b)
 		}
 		select {
-		case status <- line:
+		case status <- statusMessage{line: line}:
 		case <-done:
 		default:
 			stop()
@@ -294,7 +345,22 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	err = s.stream(send, report, events)
 	if err != nil && !errors.Is(err, net.ErrClosed) {
-		report("Capture stopped: " + err.Error())
+		// Do not enqueue the native failure and immediately close the socket:
+		// wait for the single writer to send it so Windows can show the reason.
+		b, _ := json.Marshal(map[string]string{"type": "error", "message": "Capture stopped: " + err.Error()})
+		final := statusMessage{line: string(b), sent: make(chan struct{})}
+		deadline := time.NewTimer(2 * time.Second)
+		defer deadline.Stop()
+		select {
+		case status <- final:
+			select {
+			case <-final.sent:
+			case <-done:
+			case <-deadline.C:
+			}
+		case <-done:
+		case <-deadline.C:
+		}
 	}
 }
 
