@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+func TestEscapedMacNameIsDecoded(t *testing.T) {
+	entry := &zeroconf.ServiceEntry{ServiceRecord: zeroconf.ServiceRecord{Instance: `Marcel\226\128\153s\ MacBook\.Pro`}, Port: 4433, Text: []string{"v=2", "fp=" + strings.Repeat("a", 64)}, AddrIPv4: []net.IP{net.ParseIP("192.168.1.199")}, Expiry: time.Now().Add(time.Minute)}
+	got := normalize([]*zeroconf.ServiceEntry{entry}, time.Now())
+	if len(got) != 1 || got[0].Name != "Marcel’s MacBook.Pro" {
+		t.Fatal(got)
+	}
+	for _, bad := range []string{`Mac\300`, `Mac\255\255`, `Mac\`, `Mac\010forged`} {
+		entry.Instance = bad
+		if len(normalize([]*zeroconf.ServiceEntry{entry}, time.Now())) != 0 {
+			t.Fatal("accepted", bad)
+		}
+	}
+}
+
 func TestUntrustedRecordsFailClosed(t *testing.T) {
 	good := &zeroconf.ServiceEntry{ServiceRecord: zeroconf.ServiceRecord{Instance: "My Mac"}, Port: 4433, Text: []string{"v=2", "fp=" + strings.Repeat("a", 64)}, AddrIPv4: []net.IP{net.ParseIP("192.168.1.7")}, Expiry: time.Now().Add(time.Minute)}
 	got := normalize([]*zeroconf.ServiceEntry{good}, time.Now())

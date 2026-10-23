@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Host struct {
@@ -23,15 +24,47 @@ func private(ip net.IP) bool {
 	b := ip.To4()
 	return b != nil && (b[0] == 10 || b[0] == 172 && b[1] >= 16 && b[1] <= 31 || b[0] == 192 && b[1] == 168)
 }
+
+// instanceName decodes DNS presentation escapes: a Mac named "Marcel’s MacBook"
+// arrives as Marcel\226\128\153s\ MacBook. Malformed escapes or invalid UTF-8 fail.
+func instanceName(raw string) (string, bool) {
+	out := make([]byte, 0, len(raw))
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' {
+			out = append(out, raw[i])
+			continue
+		}
+		if i+3 < len(raw) && isDigit(raw[i+1]) && isDigit(raw[i+2]) && isDigit(raw[i+3]) {
+			value := int(raw[i+1]-'0')*100 + int(raw[i+2]-'0')*10 + int(raw[i+3]-'0')
+			if value > 255 {
+				return "", false
+			}
+			out = append(out, byte(value))
+			i += 3
+			continue
+		}
+		if i+1 >= len(raw) {
+			return "", false
+		}
+		out = append(out, raw[i+1])
+		i++
+	}
+	return string(out), utf8.Valid(out)
+}
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 func normalize(entries []*zeroconf.ServiceEntry, now time.Time) []Host {
 	found := map[string]Host{}
 	conflict := map[string]bool{}
 	for _, e := range entries {
-		if e == nil || len(e.Instance) == 0 || len(e.Instance) > 63 || e.Port < 1024 || e.Port > 65535 || (!e.Expiry.IsZero() && !e.Expiry.After(now)) || len(e.Text) > 8 || len(e.AddrIPv4) > 16 {
+		if e == nil {
+			continue
+		}
+		name, decoded := instanceName(e.Instance)
+		if !decoded || len(name) == 0 || len(name) > 63 || e.Port < 1024 || e.Port > 65535 || (!e.Expiry.IsZero() && !e.Expiry.After(now)) || len(e.Text) > 8 || len(e.AddrIPv4) > 16 {
 			continue
 		}
 		bad := false
-		for _, r := range e.Instance {
+		for _, r := range name {
 			if unicode.IsControl(r) {
 				bad = true
 			}
@@ -66,7 +99,7 @@ func normalize(entries []*zeroconf.ServiceEntry, now time.Time) []Host {
 				delete(found, key)
 			}
 			if !conflict[key] && len(found) < 32 {
-				found[key] = Host{e.Instance, address, e.Port, fp}
+				found[key] = Host{name, address, e.Port, fp}
 			}
 		}
 	}
