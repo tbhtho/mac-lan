@@ -15,6 +15,7 @@ account:
 ```powershell
 ./scripts/package-windows.ps1
 ./scripts/package-macos-app.ps1
+./scripts/package-installers.ps1
 ./scripts/publish-release.ps1 -NotesFile <path-to-release-notes>
 ```
 
@@ -33,12 +34,22 @@ Add `-ValidateOnly` for validation without GitHub mutations; it still generates
 the local source ZIP, checksums, and review feed. Review those outputs before
 publishing. A successful local validation is not a published release.
 
+`package-installers.ps1` wraps those exact packages for first installs: a
+per-user NSIS `mac-lan-setup.exe` (needs an existing NSIS 3 installation) and
+`mac-lan-macos-arm64.dmg`, a read-only ISO 9660/Rock Ridge image with
+`mac-lan.app` and an Applications link, written and read back by
+`scripts/package-macos-dmg.py`. Both are release downloads only; the signed feed
+keeps updating the installed EXE and app in place. Run the packaging scripts in
+PowerShell 7 or Windows PowerShell 5.1. On a PC where an extensionless `python`
+file shadows Python in PowerShell, alias `python` to `python.exe` first; the
+installer script already calls `python.exe` directly.
+
 Keep the source commit, package provenance, tag, and signed feed aligned. Publish
 `mac-lan.exe`, `mac-lan-macos-arm64-commandline-preview.tar.gz`,
 `mac-lan-macos-arm64.tar.gz`, and `MAC-DOW-macos-arm64-unsigned.tar.gz` before
 the matching feed. Verify final asset names, byte counts, hashes, platform,
 architecture, version, and commit against the actual uploaded bytes. After
-publication, check the feed and all six uploaded assets anonymously. Source changes alone
+publication, check the feed and all eight uploaded assets anonymously. Source changes alone
 are not an application release; immutable release tags and assets must not be
 reused or replaced.
 
