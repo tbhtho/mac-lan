@@ -11,6 +11,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/tbhtho/MAC-DOW/host/internal/diagnostics"
+	"github.com/tbhtho/MAC-DOW/host/internal/discovery"
 	"github.com/tbhtho/MAC-DOW/host/internal/updater"
 	"io"
 	"net"
@@ -21,17 +23,30 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--diagnose" {
+		event, code := "manual-report", "ok"
+		if len(os.Args) > 2 {
+			event = os.Args[2]
+		}
+		if len(os.Args) > 3 {
+			code = os.Args[3]
+		}
+		json.NewEncoder(os.Stdout).Encode(diagnostics.Record("mac", event, code, nil))
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--updater" {
 		os.Exit(updater.Run(os.Args[2:], os.Stdout))
 	}
 	addr := flag.String("listen", "auto", "automatic LAN selection, or a specific private IPv4:port")
 	gui := flag.Bool("gui", false, "inherited-pipe UI mode; no Terminal consent")
+	terminalConsent := flag.Bool("terminal-consent", false, "use Terminal approvals instead of Mac Allow dialogs")
 	interfaces := flag.Bool("interfaces", false, "list eligible LAN interfaces; no listener/capture")
 	check := flag.Bool("check", false, "check existing permissions without requesting them")
 	self := flag.Bool("self-test", false, "non-capturing TLS self-test")
@@ -78,11 +93,12 @@ func main() {
 		}
 		return
 	}
-	if err = hostSession(helper, *addr, *gui, *noUpdateCheck); err != nil {
+	if err = hostSession(helper, *addr, *gui, *noUpdateCheck, *terminalConsent); err != nil {
 		fatal(err)
 	}
 }
-func hostSession(helper, address string, gui, noUpdates bool) error {
+func hostSession(helper, address string, gui, noUpdates, terminalConsent bool) error {
+	diagnostics.Emit("mac", "startup", "ok", nil)
 	all, err := localInterfaces()
 	if err != nil {
 		return err
@@ -97,8 +113,10 @@ func hostSession(helper, address string, gui, noUpdates bool) error {
 		cmd.Stderr = os.Stderr
 	}
 	if err = cmd.Run(); err != nil {
+		diagnostics.Emit("mac", "permissions-missing", "screen", nil)
 		return errors.New("Screen Recording is not available to the capture helper. Open MAC-DOW Host, choose Screen Recording, grant access yourself and restart the app")
 	}
+	diagnostics.Emit("mac", "permissions-ok", "ok", map[string]int{"screenPermission": 1})
 	cert, fp, err := identity()
 	if err != nil {
 		return err
@@ -135,6 +153,10 @@ func hostSession(helper, address string, gui, noUpdates bool) error {
 		if gui {
 			return broker.ask("stream", map[string]any{"scope": scope, "width": r.Width, "fps": r.FPS, "codec": streamDescription(r)}, 45*time.Second)
 		}
+		if !terminalConsent {
+			fmt.Println("Windows requested viewing. Choose Allow in the Mac dialog to start video.")
+			return nativeConsent(fmt.Sprintf("Allow Windows to view %s?\n\n%d px / %d fps / %s\n\nKeyboard and mouse stay off until you enable Control Mac on Windows.", scope, r.Width, r.FPS, streamDescription(r)))
+		}
 		fmt.Printf("\nWindows requests %s, %d px / %d fps / %s.\nAllow viewing and explicitly armed keyboard/mouse for this session? Type ALLOW: ", scope, r.Width, r.FPS, streamDescription(r))
 		return scanner.Scan() && scanner.Text() == "ALLOW"
 	}
@@ -142,12 +164,27 @@ func hostSession(helper, address string, gui, noUpdates bool) error {
 		s.pair = func(peer, code string) bool {
 			return broker.ask("pair", map[string]any{"peer": peer, "code": code}, 45*time.Second)
 		}
+	} else {
+		s.pair = func(peer, code string) bool {
+			fmt.Printf("Windows pairing request: %s. Compare this number on Windows.\n", code)
+			if !terminalConsent {
+				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nOnly allow the request you started. Viewing needs a separate approval.")
+			}
+			fmt.Print("Type ALLOW to approve this pairing request: ")
+			return scanner.Scan() && scanner.Text() == "ALLOW"
+		}
 	}
 	s.stream = func(send func([]byte), status func(string), events <-chan input) error {
+		diagnostics.Emit("mac", "stream-started", "ok", map[string]int{"width": s.selected.Width, "fps": s.selected.FPS})
 		if gui {
 			broker.emit(map[string]any{"type": "state", "message": "Sharing active. Windows control remains explicit."})
 		}
 		err := runCapture(helper, s.selected, send, status, events)
+		if err != nil {
+			diagnostics.Emit("mac", "capture-failed", "native-helper", nil)
+		} else {
+			diagnostics.Emit("mac", "stream-ended", "ok", nil)
+		}
 		if gui {
 			broker.emit(map[string]any{"type": "state", "message": "Session ended. Waiting for a new approved connection."})
 		}
@@ -159,10 +196,21 @@ func hostSession(helper, address string, gui, noUpdates bool) error {
 	}
 	defer listener.Close()
 	actual := listener.Addr().(*net.TCPAddr)
+	diagnostics.Emit("mac", "listener-ready", "ok", nil)
+	if !gui {
+		if stopAdvert, err := discovery.Advertise(actual.IP.String(), actual.Port, fp); err == nil {
+			diagnostics.Emit("mac", "advertise-ready", "ok", nil)
+			defer stopAdvert()
+			fmt.Println("MacBook is discoverable. In Windows, choose Find my Mac.")
+		} else {
+			diagnostics.Emit("mac", "advertise-failed", "mdns", nil)
+			fmt.Println("Local discovery unavailable. Use the connection details below.")
+		}
+	}
 	if gui {
 		broker.emit(map[string]any{"type": "ready", "address": actual.IP.String(), "port": actual.Port, "fingerprint": fp, "token": token})
 	} else {
-		fmt.Printf("\nMAC-DOW host - Ctrl+C stops sharing.\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\nNo capture until pairing + ALLOW.\n", listener.Addr(), fp, token)
+		fmt.Printf("\nMAC-DOW is ready - waiting for Windows. Ctrl+C stops sharing.\nMac identity: %s\n\nAdvanced connection details (only if discovery is unavailable):\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\n\nConnect from Windows, then choose Allow on this Mac to begin viewing. Video has not started yet.\n", strings.ToUpper(fp[:32]), listener.Addr(), fp, token)
 		if !noUpdates {
 			go updater.StartupCheck(os.Stdout)
 		}
@@ -189,7 +237,11 @@ func hostSession(helper, address string, gui, noUpdates bool) error {
 	}
 	return nil
 }
-func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+func fatal(err error) {
+	diagnostics.Record("mac", "fatal", "host-startup", nil)
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
+}
 func streamDescription(r start) string {
 	if r.Codec == "jpeg" {
 		return fmt.Sprintf("JPEG quality %d", r.Quality)

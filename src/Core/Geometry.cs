@@ -4,11 +4,16 @@ public record MonitorArea(string Id, int Left, int Top, int Width, int Height, u
 {
     public double DipWidth => Width * 96.0 / Dpi;
     public double DipHeight => Height * 96.0 / Dpi;
+    public string DisplayName => Id.Replace("\\\\.\\DISPLAY","Display ")+(Primary?" (main)":"")+$" - {Width} x {Height}";
 }
 public static class DisplayLayout
 {
     public static MonitorArea Select(IReadOnlyList<MonitorArea> monitors, string? preferred = null) =>
         monitors.FirstOrDefault(m => m.Id == preferred) ?? monitors.FirstOrDefault(m => !m.Primary) ?? monitors.First();
+}
+public static class TabBarLayout
+{
+    public static int HeightPixels(uint dpi)=>(int)Math.Ceiling(48*Math.Max(96,dpi)/96.0);
 }
 public static class Viewport
 {

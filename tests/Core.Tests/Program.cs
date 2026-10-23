@@ -42,4 +42,5 @@ Check(!DiscoveredHost.TryCreate("Mac","8.8.8.8",4433,new string('a',64),out _),"
 Check(!DiscoveredHost.TryCreate("Mac\nforged","192.168.1.2",4433,new string('a',64),out _),"discovered control characters refused");
 Check(!DiscoveredHost.TryCreate("Mac","192.168.1.2",80,new string('a',64),out _),"discovered privileged endpoint refused");
 Check(!DiscoveredHost.TryCreate("Mac","192.168.1.2",4433,"bad",out _),"discovered malformed fingerprint refused");
+Check(TabBarLayout.HeightPixels(96)==48&&TabBarLayout.HeightPixels(144)==72,"tab reservation scales with monitor DPI");
 Console.WriteLine($"{count} checks passed; no windows, hooks, capture, or injected input.");

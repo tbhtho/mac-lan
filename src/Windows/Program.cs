@@ -14,7 +14,10 @@ internal static class Program
             return;
         }
         var app=new Application { ShutdownMode=ShutdownMode.OnMainWindowClose };
-        app.DispatcherUnhandledException+=(_,e)=>{MessageBox.Show("MAC-DOW stopped safely. Reconnect and rearm control.\n"+e.Exception.Message,"MAC-DOW");app.Shutdown(1);e.Handled=true;};
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/MAC-DOW;component/Theme.xaml",UriKind.Relative)});
+        if(args.Length==2&&args[0]=="--layout-smoke"){LayoutSmoke.Start(app,args[1]);app.Run();return;}
+        Telemetry.Report("startup");
+        app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Report("fatal",e.Exception.GetType().Name);MessageBox.Show("MAC-DOW stopped safely. Reopen it to reconnect. A diagnostic report is queued.","MAC-DOW");app.Shutdown(1);e.Handled=true;};
         app.Run(new MainWindow());
     }
 }

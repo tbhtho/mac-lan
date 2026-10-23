@@ -7,14 +7,14 @@ import Darwin
 // Pure state model used by the app and its non-UI --self-test.
 struct HostLifecycle {
     enum Action { case ready, closeWindow, reopen, stop, quit }
-    var visible = true
+    var visible = false
     var hosting = false
     var quitting = false
     mutating func receive(_ action: Action) {
         switch action {
         case .ready: hosting = true
         case .closeWindow: visible = false
-        case .reopen: visible = true
+        case .reopen: visible = false
         case .stop: hosting = false
         case .quit: hosting = false; quitting = true
         }
@@ -25,7 +25,7 @@ func lifecycleTests() {
     precondition(!state.hosting)
     state.receive(.ready); state.receive(.closeWindow)
     precondition(state.hosting && !state.visible && !state.quitting)
-    state.receive(.reopen); precondition(state.visible && state.hosting)
+    state.receive(.reopen); precondition(!state.visible && state.hosting)
     state.receive(.stop); precondition(!state.hosting)
     state.receive(.ready); state.receive(.quit)
     precondition(!state.hosting && state.quitting)
@@ -33,16 +33,16 @@ func lifecycleTests() {
 }
 if CommandLine.arguments.contains("--self-test") { lifecycleTests(); exit(0) }
 
-final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServiceDelegate {
+final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate {
     var state = HostLifecycle()
-    var window: NSWindow!
     var menuBar: NSStatusItem!
     var menuStatus = NSMenuItem(title: "Not sharing", action: nil, keyEquivalent: "")
     var menuStop: NSMenuItem!
-    let status = NSTextField(wrappingLabelWithString: "Ready to set up. Nothing is being shared.")
-    let permissions = NSTextField(wrappingLabelWithString: "")
-    let identity = NSTextField(wrappingLabelWithString: "")
-    let startButton = NSButton(title: "Start sharing", target: nil, action: nil)
+    var statusText = "Starting MAC-DOW" { didSet { menuStatus.title = String(statusText.prefix(72)); menuStatus.toolTip = statusText } }
+    let permissionMenu = NSMenuItem(title:"Checking viewing access",action:nil,keyEquivalent:"")
+    let identity = NSMenuItem(title:"Mac identity available after sharing starts",action:nil,keyEquivalent:"")
+    var menuStart: NSMenuItem!
+    var wantsSharing = true
     var process: Process?
     var input: FileHandle?
     var outputPipe: Pipe?
@@ -65,45 +65,25 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         makeMenu()
-        window = NSWindow(contentRect: NSRect(x:0,y:0,width:540,height:360),
-            styleMask:[.titled,.closable,.miniaturizable], backing:.buffered, defer:false)
-        window.title = "MAC-DOW Host"
-        window.delegate = self
-        window.isReleasedWhenClosed = false
-        let stack = NSStackView()
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        window.contentView!.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),
-            stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),
-            stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo:window.contentView!.bottomAnchor,constant:-20)
-        ])
-        let title = NSTextField(labelWithString:"Your Mac, on Windows")
-        title.font = .systemFont(ofSize:23,weight:.semibold); stack.addArrangedSubview(title)
-        let hint = NSTextField(wrappingLabelWithString:"Open MAC-DOW on Windows and choose Find my Mac. Closing this window keeps the menu-bar controls available.")
-        hint.textColor = .secondaryLabelColor; stack.addArrangedSubview(hint)
-        stack.addArrangedSubview(permissions)
-        let buttons = NSStackView(); buttons.orientation = .horizontal; buttons.spacing = 8
-        buttons.addArrangedSubview(NSButton(title:"Screen Recording…",target:self,action:#selector(screenPermission)))
-        buttons.addArrangedSubview(NSButton(title:"Control Access…",target:self,action:#selector(controlPermission)))
-        buttons.addArrangedSubview(NSButton(title:"Refresh",target:self,action:#selector(refreshSetup)))
-        stack.addArrangedSubview(buttons)
-        startButton.target = self; startButton.action = #selector(toggleSharing)
-        startButton.bezelStyle = .rounded; stack.addArrangedSubview(startButton)
-        status.textColor = .secondaryLabelColor; stack.addArrangedSubview(status)
-        identity.font = .monospacedSystemFont(ofSize:12,weight:.medium)
-        identity.isSelectable = true; stack.addArrangedSubview(identity)
-        refreshPermissions(); loadInterfaces(); reopen(); updater.start()
+        report("startup")
+        refreshPermissions(); loadInterfaces(); updater.start()
+        if CGPreflightScreenCaptureAccess() { startSharing() }
+        else { statusText = "Screen Recording access needed - open this menu";report("permissions-missing",code:"screen") }
     }
     func makeMenu() {
         updater = HostUpdater(app:self)
         menuBar = NSStatusBar.system.statusItem(withLength:NSStatusItem.variableLength)
-        menuBar.button?.title = "MAC-DOW"
+        menuBar.button?.title = " MAC-DOW"
+        menuBar.button?.image = NSImage(systemSymbolName:"display.2",accessibilityDescription:"MAC-DOW")
         menuBar.button?.setAccessibilityLabel("MAC-DOW: not sharing")
         let menu = NSMenu(); menu.addItem(menuStatus); menu.addItem(.separator())
-        menu.addItem(withTitle:"Reopen",action:#selector(reopen),keyEquivalent:"")
+        menu.addItem(permissionMenu)
+        menu.addItem(identity)
+        menu.addItem(.separator())
+        menuStart = menu.addItem(withTitle:"Start Sharing",action:#selector(toggleSharing),keyEquivalent:"")
+        menu.addItem(withTitle:"Screen Recording Access…",action:#selector(screenPermission),keyEquivalent:"")
+        menu.addItem(withTitle:"Keyboard and Mouse Access…",action:#selector(controlPermission),keyEquivalent:"")
+        menu.addItem(withTitle:"Refresh Permissions",action:#selector(refreshSetup),keyEquivalent:"")
         menuStop = menu.addItem(withTitle:"Stop Sharing / Disconnect",action:#selector(stopSharing),keyEquivalent:"")
         menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"")
         menu.addItem(withTitle:"Advanced connection details…",action:#selector(showDetails),keyEquivalent:"")
@@ -115,35 +95,39 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
         menu.autoenablesItems = false; menuStop.isEnabled = false; menuBar.menu = menu
     }
     @objc func reopen() {
-        state.receive(.reopen)
-        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
+        NSApp.activate(ignoringOtherApps:true)
         refreshPermissions()
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        state.receive(.closeWindow); sender.orderOut(nil); return false
-    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool { false }
-    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool)->Bool {reopen();return false}
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool)->Bool {menuBar.button?.performClick(nil);return false}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
         state.receive(.quit)
         if process != nil { stopSharing(); return .terminateLater }
         return .terminateNow
     }
     @objc func quit() { NSApp.terminate(nil) }
+    func report(_ event:String,code:String="ok") {
+        let executable=hostURL
+        DispatchQueue.global(qos:.utility).async {
+            let child=Process();child.executableURL=executable;child.arguments=["--diagnose",event,code]
+            child.standardInput=FileHandle.nullDevice;child.standardOutput=FileHandle.nullDevice;child.standardError=FileHandle.nullDevice
+            try? child.run()
+        }
+    }
     @objc func refreshPermissions() {
         let screen = CGPreflightScreenCaptureAccess()
         let control = AXIsProcessTrusted()
-        permissions.stringValue = "Viewing: \(screen ? "allowed" : "needs Screen Recording")    Control: \(control ? "allowed" : "optional Accessibility")"
-        if process == nil { startButton.isEnabled = screen }
+        permissionMenu.title = "Viewing: \(screen ? "allowed" : "needs Screen Recording")    Control: \(control ? "allowed" : "optional Accessibility")"
+        if process == nil { menuStart.isEnabled = screen }
     }
-    @objc func refreshSetup() {refreshPermissions();loadInterfaces()}
+    @objc func refreshSetup() {refreshPermissions();loadInterfaces();if wantsSharing && process == nil && CGPreflightScreenCaptureAccess() {startSharing()}}
     @objc func screenPermission() {
         // Only an explicit user click reaches a system request/settings UI.
         _ = CGRequestScreenCaptureAccess()
         if let url = URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
         }
-        status.stringValue = "Allow MAC-DOW Host in Screen Recording, then quit and reopen it if macOS asks. Nothing starts automatically."
+        statusText = "Allow MAC-DOW Host in Screen Recording, then choose Refresh Permissions here. Reopen if macOS asks."
         refreshPermissions()
     }
     @objc func controlPermission() {
@@ -152,7 +136,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
         if let url = URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
-        status.stringValue = "Accessibility is optional for control. Viewing alone does not need it. Windows control still requires an explicit click."
+        statusText = "Accessibility is optional for control. Viewing alone does not need it. Windows control still requires an explicit click."
         refreshPermissions()
     }
     func readOnly(_ arguments:[String],completion:@escaping(Data?,String?)->Void) {
@@ -181,12 +165,12 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
             guard let self = self else { return }
             if let data = data, let list = try? JSONSerialization.jsonObject(with:data) as? [[String:String]] {
                 self.interfaces = list
-                if list.isEmpty { self.status.stringValue = "Connect this Mac to the same Wi-Fi or Ethernet as Windows, then Refresh." }
-            } else { self.status.stringValue = error ?? "Cannot read local interfaces." }
+                if list.isEmpty { self.statusText = "Connect this Mac to the same Wi-Fi or Ethernet as Windows, then Refresh." }
+            } else { self.statusText = error ?? "Cannot read local interfaces." }
         }
     }
     @objc func chooseNetwork() {
-        guard process == nil else { status.stringValue = "Stop sharing before changing networks."; reopen(); return }
+        guard process == nil else { statusText = "Stop sharing before changing networks."; reopen(); return }
         loadInterfaces()
         let alert = NSAlert(); alert.messageText = "Local network"
         alert.informativeText = "Automatic selects an active private LAN interface. No public or wildcard listener is used."
@@ -203,15 +187,16 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
     }
     func startSharing() {
         guard process == nil else { return }
-        guard CGPreflightScreenCaptureAccess() else { status.stringValue = "Choose Screen Recording first."; return }
+        wantsSharing = true
+        guard CGPreflightScreenCaptureAccess() else { statusText = "Choose Screen Recording first."; return }
         let child = Process(); child.executableURL = hostURL
         child.arguments = ["--gui","--listen",selectedAddress.map { "\($0):0" } ?? "auto","--no-update-check"]
         let incoming = Pipe(); let outgoing = Pipe(); let errors = Pipe()
         child.standardInput = incoming; child.standardOutput = outgoing; child.standardError = errors
         process = child; input = incoming.fileHandleForWriting; outputPipe = outgoing; errorPipe = errors
-        buffer.removeAll(); fingerprint = ""; manualDetails = ""; identity.stringValue = ""
-        status.stringValue = "Starting a private LAN host. No screen is shared until you approve."
-        startButton.title = "Stop sharing"; startButton.isEnabled = true; menuStop.isEnabled = true
+        buffer.removeAll(); fingerprint = ""; manualDetails = ""; identity.title = "Mac identity available after sharing starts"
+        statusText = "Starting a private LAN host. No screen is shared until you approve."
+        menuStart.title = "Start Sharing"; menuStart.isEnabled = false; menuStop.isEnabled = true
         outgoing.fileHandleForReading.readabilityHandler = { [weak self,weak child] file in
             let data = file.availableData
             guard !data.isEmpty else { file.readabilityHandler = nil; return }
@@ -222,7 +207,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
             guard !data.isEmpty else { file.readabilityHandler = nil; return }
             DispatchQueue.main.async {
                 guard let child = child, self?.process === child else { return }
-                self?.status.stringValue = String(data:data.prefix(2048),encoding:.utf8) ?? "Host stopped. Reopen setup and check permissions."
+                self?.statusText = String(data:data.prefix(2048),encoding:.utf8) ?? "Host stopped. Reopen setup and check permissions."
             }
         }
         child.terminationHandler = { [weak self] child in
@@ -232,32 +217,32 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
             }
         }
         do { try child.run() }
-        catch { status.stringValue = "Cannot start bundled host: \(error.localizedDescription)"; finished(1) }
+        catch { report("fatal",code:"launcher");statusText = "Cannot start bundled host: \(error.localizedDescription)"; finished(1) }
     }
     func consume(_ data:Data) {
-        guard buffer.count + data.count <= 16384 else { status.stringValue = "Invalid host response. Stopped safely."; stopSharing(); return }
+        guard buffer.count + data.count <= 16384 else { statusText = "Invalid host response. Stopped safely."; stopSharing(); return }
         buffer.append(data)
         while let end = buffer.firstIndex(of:10) {
             let line = Data(buffer[..<end]); buffer.removeSubrange(...end)
             guard let object = try? JSONSerialization.jsonObject(with:line) as? [String:Any],
-                  let type = object["type"] as? String else { status.stringValue = "Invalid host message."; stopSharing(); return }
+                  let type = object["type"] as? String else { statusText = "Invalid host message."; stopSharing(); return }
             switch type {
             case "ready":
                 guard let ip = object["address"] as? String, let port = object["port"] as? Int,
                       let fp = object["fingerprint"] as? String, fp.count == 64 else { stopSharing(); return }
                 fingerprint = fp; state.receive(.ready)
-                identity.stringValue = "Identity to compare in Windows:\n\(identityCode(fp))"
-                manualDetails = "Address: \(ip):\(port)\nFull SHA-256: \(fp)\nTemporary token: \(object["token"] as? String ?? "")\n\nLegacy manual pairing only. Never share these beyond your Windows PC."
+                identity.title = "Mac identity: \(identityCode(fp))"
+                manualDetails = "Address: \(ip):\(port)\nSHA-256 fingerprint: \(fp)\nTemporary token: \(object["token"] as? String ?? "")\n\nLegacy manual pairing only. Never share these beyond your Windows PC."
                 publisher = NetService(domain:"local.",type:"_macdow._tcp.",name:Host.current().localizedName ?? "Mac",port:Int32(port))
                 publisher?.delegate = self
                 publisher?.setTXTRecord(NetService.data(fromTXTRecord:["v":Data("2".utf8),"fp":Data(fp.utf8),"ip":Data(ip.utf8)]))
                 publisher?.publish()
-                status.stringValue = "Waiting for Windows. Choose Find my Mac there, compare the identity, and approve its pairing number here."
+                statusText = "Waiting for Windows. Choose Find my Mac there, compare the identity, and approve its pairing number here."
                 menuBar.button?.title = "● MAC-DOW"; menuBar.button?.contentTintColor = .systemOrange
                 menuBar.button?.setAccessibilityLabel("MAC-DOW: hosting active")
                 menuStatus.title = "Hosting active · approval required"
             case "consent": presentConsent(object)
-            case "state": status.stringValue = object["message"] as? String ?? "Connection changed."
+            case "state": statusText = object["message"] as? String ?? "Connection changed."
             default: break
             }
         }
@@ -280,29 +265,31 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
         } else { return }
         alert.addButton(withTitle:"Allow"); alert.addButton(withTitle:"Deny")
         consent = alert
-        consentTimer = Timer.scheduledTimer(withTimeInterval:43,repeats:false) { [weak self,weak alert] _ in
-            guard let self = self, let alert = alert, self.consent === alert else { return }
-            self.window.endSheet(alert.window,returnCode:.abort)
+        let expiry = Timer(timeInterval:43,repeats:false) { [weak self,weak alert] _ in
+            guard let self=self, let alert=alert, self.consent === alert else {return}
+            NSApp.abortModal(); alert.window.orderOut(nil)
         }
-        alert.beginSheetModal(for:window) { [weak self,weak alert] response in
-            guard let self = self, let alert = alert, self.consent === alert else { return }
-            self.consentTimer?.invalidate(); self.consentTimer = nil; self.consent = nil
-            self.send(["type":"consent","id":id,"allow":response == .alertFirstButtonReturn])
-            self.status.stringValue = response == .alertFirstButtonReturn ? "Approved. Control remains explicit on Windows." : "Request denied or expired. Nothing new was shared."
-        }
+        consentTimer = expiry
+        RunLoop.main.add(expiry,forMode:.common)
+        RunLoop.main.add(expiry,forMode:.modalPanel)
+        let response = alert.runModal()
+        expiry.invalidate(); consentTimer = nil; consent = nil
+        send(["type":"consent","id":id,"allow":response == .alertFirstButtonReturn])
+        statusText = response == .alertFirstButtonReturn ? "Approved - Windows control remains explicit" : "Request denied or expired - Mac is still available"
     }
     func send(_ value:[String:Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject:value) else { return }
         do { try input?.write(contentsOf:data + Data([10])) }
-        catch { status.stringValue = "Host connection ended."; process?.terminate() }
+        catch { statusText = "Host connection ended."; process?.terminate() }
     }
     @objc func stopSharing() {
+        wantsSharing = false
         publisher?.stop(); publisher = nil
-        if let alert = consent { window.endSheet(alert.window,returnCode:.abort) }
+        if let alert = consent { NSApp.abortModal(); alert.window.orderOut(nil) }
         state.receive(.stop)
         guard let child = process else { return }
-        status.stringValue = "Stopping sharing and releasing control…"
-        startButton.isEnabled = false; menuStop.isEnabled = false
+        statusText = "Stopping sharing and releasing control…"
+        menuStart.isEnabled = false; menuStop.isEnabled = false
         send(["type":"stop"])
         stopTimer?.invalidate()
         stopTimer = Timer.scheduledTimer(withTimeInterval:3,repeats:false) { [weak self,weak child] _ in
@@ -319,17 +306,17 @@ final class HostApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NetServi
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
         try? input?.close(); input = nil; process = nil; outputPipe = nil; errorPipe = nil
-        if let alert = consent { window.endSheet(alert.window,returnCode:.abort) }
-        state.receive(.stop); manualDetails = ""; fingerprint = ""; identity.stringValue = ""
+        if let alert = consent { NSApp.abortModal(); alert.window.orderOut(nil) }
+        state.receive(.stop); manualDetails = ""; fingerprint = ""; identity.title = "Mac identity available after sharing starts"
         menuBar.button?.title = "MAC-DOW"; menuBar.button?.contentTintColor = nil
         menuBar.button?.setAccessibilityLabel("MAC-DOW: not sharing")
-        menuStatus.title = "Not sharing"; menuStop.isEnabled = false; startButton.title = "Start sharing"
-        if code == 0 { status.stringValue = "Not sharing. Start again when you want a new connection." }
+        menuStatus.title = "Not sharing"; menuStop.isEnabled = false; menuStart.title = "Start sharing"
+        if code == 0 { statusText = "Not sharing. Start again when you want a new connection." }
         refreshPermissions()
         if state.quitting { NSApp.reply(toApplicationShouldTerminate:true) }
     }
     func netService(_ sender:NetService,didNotPublish errorDict:[String:NSNumber]) {
-        status.stringValue = "Sharing host is ready, but automatic discovery is unavailable. Use Advanced connection details, or check local network access yourself. No firewall rule was changed."
+        statusText = "Sharing host is ready, but automatic discovery is unavailable. Use Advanced connection details, or check local network access yourself. No firewall rule was changed."
     }
     @objc func showDetails() {
         let alert = NSAlert(); alert.messageText = "Advanced connection details"

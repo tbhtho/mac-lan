@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/tbhtho/MAC-DOW/host/internal/diagnostics"
 	"math"
 	"math/big"
 	"net"
@@ -182,8 +183,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authenticated = s.pair(peer, auth.Code)
 	}
 	if !authenticated {
+		diagnostics.Emit("mac", "pairing-denied", "not-approved", nil)
 		return
 	}
+	diagnostics.Emit("mac", "pairing-approved", "ok", nil)
 	windows, err := s.catalog()
 	if err != nil {
 		_ = c.WriteJSON(map[string]string{"type": "error", "message": err.Error()})
@@ -198,9 +201,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.consent(request) {
+		diagnostics.Emit("mac", "stream-denied", "not-approved", nil)
 		_ = c.WriteJSON(map[string]string{"type": "error", "message": "Mac user did not consent"})
 		return
 	}
+	diagnostics.Emit("mac", "stream-approved", "ok", map[string]int{"width": request.Width, "fps": request.FPS})
 	s.selected = request
 	if err = c.WriteJSON(map[string]string{"type": "ready"}); err != nil {
 		return

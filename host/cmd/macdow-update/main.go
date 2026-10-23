@@ -3,13 +3,20 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/tbhtho/MAC-DOW/host/internal/diagnostics"
 	"github.com/tbhtho/MAC-DOW/host/internal/discovery"
 	"github.com/tbhtho/MAC-DOW/host/internal/updater"
 	"os"
+	"strconv"
 	"time"
 )
 
 func main() {
+	if len(os.Args) == 6 && os.Args[1] == "diagnose" {
+		count, _ := strconv.Atoi(os.Args[5])
+		json.NewEncoder(os.Stdout).Encode(diagnostics.Record(os.Args[2], os.Args[3], os.Args[4], map[string]int{"hosts": count}))
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "discover" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -18,7 +25,7 @@ func main() {
 		if err != nil {
 			message = err.Error()
 		} else if len(hosts) == 0 {
-			message = "No Mac found. Open MAC-DOW Host on the Mac and click Start sharing. Both devices need the same LAN. Advanced connection remains available; no firewall rules are changed."
+			message = "No Mac appeared. Keep MAC-DOW running on your Mac and use the same Wi-Fi or Ethernet. If you have the previous Mac version, update it: that version could not announce itself to Windows."
 		}
 		json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": err == nil, "message": message, "hosts": hosts})
 		return
