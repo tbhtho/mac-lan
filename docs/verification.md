@@ -1,5 +1,28 @@
 # Verification record
 
+## Alpha.20 - persistent Mac signing identity
+
+Ad-hoc signatures are identified by code hash, so each Mac build was a new app
+to macOS privacy controls. Alpha.20 signs every build with one self-made
+certificate (SHA-1 `5aa75b4598c42bc585845f608b2baab649196cd5`, public part in
+`installer/macos-codesign.cer`, private key outside the repository) and the
+designated requirement `identifier "com.tbhtho.macdow.host" and certificate
+leaf = H"5aa75b45..."`.
+
+- The signer re-checked every page hash, bound slot, the compiled requirement
+  and the RSA signature; OpenSSL 3.5 independently verified the CMS over the
+  CodeDirectory (`openssl cms -verify -noverify`) and listed the same signed
+  attributes `codesign` emits (content type, signing time, message digest,
+  Apple cdhash plist and cdhash list).
+- The release verifier now requires the certificate signature and compares the
+  app executables with the compatibility host after removing signatures.
+- Release `v0.1.0-alpha.20` binds `79ea7ec14d06e1624e9137f516122c118d4616ea`;
+  feed commit `2572b39`. All checksummed downloads matched anonymously, the
+  feed verified, the downloaded feed app archive's signature and requirement
+  verified, and the alpha.18 EXE reported alpha.20 available.
+- Not verified: macOS accepting the self-made certificate signature, TCC grants
+  persisting across an update, and `codesign`/`spctl` output on a Mac.
+
 ## Alpha.19 - escaped Mac names and missing Mac video
 
 After installing the alpha.18 disk image, the user's Mac showed a garbled name
