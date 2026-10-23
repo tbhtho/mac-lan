@@ -1,5 +1,50 @@
 # Verification record
 
+## Alpha.13 - preserve encoded frames through temporary viewer delays
+
+The user confirmed working native video and mouse/keyboard control in alpha.12,
+with the physical Mac responding ahead of the Windows picture and repeated
+returns to click-to-control. Their log retains one video session throughout and
+reports native `view-only`, with Accessibility granted. Native expiry and scope
+failures have separate codes. This identifies Windows-initiated control releases;
+the old log cannot distinguish a local video stall from focus loss.
+
+Reproductions found encoded H.264 frames being replaced at the Go transport,
+Windows dispatcher and WebView bridge. Dropping a delta breaks later dependent
+frames. The real sequence gate then waits for a keyframe: a simulated 18–40 ms
+bridge acknowledgment reduced the old path to about two decoded frames per
+second. An independent server test lost the first eleven frames of a twelve-frame
+burst. A separate viewer test decoded only two of ten frames during a short
+decoder backlog. These are code-level reproductions, not hardware measurements.
+
+The updated path preserves encoded dependencies in bounded queues and bridge
+batches. Pressure discards an unusable chain and resumes at a keyframe. Decoded
+pictures coalesce at presentation; the canvas dimensions change only when needed.
+Epochs, batch identities and a reset acknowledgment prevent delayed work from an
+old stream entering a new one. A reset disarms synchronously. Original one-second
+presentation and 1.5-second native-heartbeat safety limits remain, with no
+automatic input rearming. The Mac now records a finite control-release reason
+such as `video-stale` or `viewer-blur`; Windows diagnostic files are not uploaded.
+
+Verified headlessly: 49 core checks, 28 video queue/lifecycle checks, cross-language
+delivery of all 600 synthetic frames at a 60 fps input cadence through 18/25/40 ms
+bridge delays, 34 TLS session checks, 9 updater workflow checks, 46 TLS transfer
+checks, presentation checks, 23 viewer race groups and actual headless Edge DOM
+activation. All Go packages and vet pass; Windows Release compilation has zero
+warnings/errors. The new real-codec check uses existing FFmpeg to generate twenty
+96×64 baseline pictures and real Edge software H.264 decoding. All twenty decode
+in order, actual pixels paint, and every frame closes. Holding decoded outputs
+across a clear cannot repaint or restore control. The test explicitly overrides
+only acceleration preference because its isolated browser disables GPU access.
+FFmpeg and codec availability are optional for that additional check.
+
+Current Swift capture source is unchanged from alpha.12. No native Mac capture,
+input, compilation, permission prompt, webhook test send, visible UI or paid CI
+was run for this release. Delivered 1080p/60 fps, hardware decode, LAN latency and
+the user's two-computer experience remain unmeasured. Distribution remains manual
+through the original private repository; the withdrawn public feed is not used
+for publishing.
+
 ## Alpha.12 - signed automatic updates and click activation ordering
 
 The user's alpha.11 diagnostics show Accessibility granted and repeated

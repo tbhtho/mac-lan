@@ -192,8 +192,22 @@ func readDestination(path string) (string, error) {
 }
 
 var codePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,48}$`)
-var events = strings.Fields("startup shutdown discovery-empty discovery-ready discovery-failed pairing-start pairing-approved pairing-denied pairing-failed stream-request stream-approved stream-denied stream-started stream-ended control-state capture-failed decode-failed fatal manual-report bar-docked bar-restored bar-failed permissions-ok permissions-missing listener-ready advertise-ready advertise-failed native-build-started native-build-ready native-build-failed")
+var events = strings.Fields("startup shutdown discovery-empty discovery-ready discovery-failed pairing-start pairing-approved pairing-denied pairing-failed stream-request stream-approved stream-denied stream-started stream-ended control-state control-release capture-failed decode-failed fatal manual-report bar-docked bar-restored bar-failed permissions-ok permissions-missing listener-ready advertise-ready advertise-failed native-build-started native-build-ready native-build-failed")
 var allowedCounts = map[string]bool{"hosts": true, "monitors": true, "screenPermission": true, "controlPermission": true, "controlActive": true, "width": true, "fps": true, "bitrate": true, "appOnly": true, "paired": true, "streaming": true, "docked": true, "compilerLine": true, "compilerColumn": true, "compilerExit": true}
+
+// ValidControlReleaseReason accepts only product state labels, never client
+// messages, input contents, addresses, paths, or credentials.
+func ValidControlReleaseReason(reason string) bool {
+	switch reason {
+	case "foreground-lost", "window-deactivated", "viewer-blur", "pointer-cancel",
+		"video-stale", "native-heartbeat-stale", "tab-change", "monitor-change",
+		"manual", "disconnected", "mac-permission", "mac-scope", "mac-watchdog",
+		"shutdown", "files-open", "updates-open", "keyboard-unavailable",
+		"stream-start", "display-change", "mac-paused":
+		return true
+	}
+	return false
+}
 
 type Report struct {
 	Product string         `json:"product"`
@@ -222,6 +236,9 @@ func NewReport(role, event, code string, counts map[string]int) Report {
 		event = "manual-report"
 	}
 	if !codePattern.MatchString(code) {
+		code = "unknown"
+	}
+	if event == "control-release" && !ValidControlReleaseReason(code) {
 		code = "unknown"
 	}
 	safe := map[string]int{}

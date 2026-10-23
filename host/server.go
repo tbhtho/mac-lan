@@ -106,9 +106,13 @@ type input struct {
 	Delta      int     `json:"delta"`
 	Stamp      int64   `json:"stamp"`
 	Generation uint64  `json:"generation"`
+	Reason     string  `json:"reason,omitempty"`
 }
 
 func (e input) valid() bool {
+	if e.Reason != "" && (e.Type != "release" || !diagnostics.ValidControlReleaseReason(e.Reason)) {
+		return false
+	}
 	switch e.Type {
 	case "lease", "release":
 		return e.Generation < 9007199254740992
@@ -297,11 +301,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events := make(chan input, 32)
-	frames := make(chan []byte, 1)
-	type statusMessage struct {
-		line string
-		sent chan struct{}
-	}
+	frames := newVideoQueue()
 	status := make(chan statusMessage, 4)
 	done := make(chan struct{})
 	var once sync.Once
@@ -309,26 +309,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 	go func() {
 		defer stop()
-		for {
-			select {
-			case <-done:
-				return
-			case b := <-frames:
-				_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-				if c.WriteMessage(websocket.BinaryMessage, b) != nil {
-					return
-				}
-			case v := <-status:
-				_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-				err := c.WriteMessage(websocket.TextMessage, []byte(v.line))
-				if v.sent != nil {
-					close(v.sent)
-				}
-				if err != nil {
-					return
-				}
+		writeQueuedVideo(done, frames, status, func(text bool, b []byte) error {
+			kind := websocket.BinaryMessage
+			if text {
+				kind = websocket.TextMessage
 			}
-		}
+			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			return c.WriteMessage(kind, b)
+		})
 	}()
 	go func() {
 		defer stop()
@@ -338,6 +326,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			var e input
 			if c.ReadJSON(&e) != nil || !e.valid() {
 				return
+			}
+			if e.Type == "release" && e.Reason != "" {
+				// A Windows armed-to-released transition supplies only this fixed
+				// reason. The Mac owns reporting; no input or arbitrary client text
+				// enters remote diagnostics, and legacy empty releases stay silent.
+				diagnostics.Emit("mac", "control-release", e.Reason, nil)
 			}
 			if e.Type == "lease" {
 				b, _ := json.Marshal(map[string]any{"type": "pong", "stamp": e.Stamp})
@@ -363,13 +357,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		select {
-		case <-frames:
+		case <-done:
+			return
 		default:
 		}
-		select {
-		case frames <- b:
-		case <-done:
-		}
+		frames.push(b, time.Now())
 	}
 	report := func(line string) {
 		if len(line) > 2048 {

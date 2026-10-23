@@ -9,6 +9,10 @@ $env:GOMODCACHE=Join-Path $PWD '.cache\go-mod'
 $env:GOMAXPROCS='2'
 dotnet run --project tests/Core.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Core tests failed'}
+dotnet run --project tests/Video.Tests -c Release -p:BuildInParallel=false
+if($LASTEXITCODE){throw 'Encoded video queue tests failed'}
+node tests/video-pipeline.test.mjs
+if($LASTEXITCODE){throw 'Video bridge dependency tests failed'}
 dotnet run --project tests/Session.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Session protocol tests failed'}
 dotnet run --project tests/Update.Tests -c Release -p:BuildInParallel=false
@@ -23,6 +27,8 @@ node tests/viewer-races.test.mjs
 if($LASTEXITCODE){throw 'Viewer race tests failed'}
 node tests/viewer-dom.test.mjs
 if($LASTEXITCODE){throw 'Viewer DOM tests failed'}
+node tests/viewer-codec.test.mjs
+if($LASTEXITCODE){throw 'Real H264 viewer checks failed'}
 go test -C host -p 1 ./...
 if($LASTEXITCODE){throw 'Host tests failed'}
 go vet -C host ./...

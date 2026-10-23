@@ -24,7 +24,7 @@ The unsigned preview may be blocked by OS security. Keep those protections enabl
 - **Control:** the first click activates input. Focus loss, tab or monitor changes, and disconnect release it. Left Alt+Tab maps to Command+Tab; right Alt maps to Option. Windows security shortcuts remain local. Connection also provides explicit control, release, and disconnect actions.
 - **Streaming settings:** choose a width cap, H.264 bitrate, or compatible JPEG before starting video. Both codecs target 60 fps. JPEG uses more bandwidth; no 15/30 fps fallback starts automatically.
 
-There is no audio, shared clipboard, IME, multi-touch, stylus, or non-US physical keyboard layout support. Capture performance and latency depend on the Mac, Windows decoder, and LAN; a 60 fps target is not a measured throughput guarantee. The user confirmed live Mac video in alpha.10. Current native control still requires the two-computer checks in the [hardware checklist](docs/manual-validation.md).
+There is no audio, shared clipboard, IME, multi-touch, stylus, or non-US physical keyboard layout support. Capture performance and latency depend on the Mac, Windows decoder, and LAN; a 60 fps target is not a measured throughput guarantee. The user confirmed live video and input control in alpha.12, with video lag and intermittent control releases. The current frame delivery changes still require the two-computer checks in the [hardware checklist](docs/manual-validation.md).
 
 ## Updates
 
