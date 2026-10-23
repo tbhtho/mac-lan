@@ -14,18 +14,21 @@ if(-not $diagnosticDestination -and (Test-Path -LiteralPath '.cache/discord-webh
 if(-not $PublicUpdate -and $diagnosticDestination -notmatch '^https://discord\.com/api/webhooks/[0-9]{17,22}/[A-Za-z0-9_-]+$'){throw 'Private Mac diagnostic destination missing or invalid'}
 $outputRoot=if($PublicUpdate){Join-Path $PWD 'artifacts/update-public'}else{Join-Path $PWD 'artifacts/private-bootstrap'}
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+# Windows PowerShell 5.1 lacks SHA256.HashData and SmallestSize; keep both shells working.
+function Get-Sha256Hex([byte[]]$bytes){[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace('-','').ToLowerInvariant()}
+$level=if([Enum]::IsDefined([IO.Compression.CompressionLevel],'SmallestSize')){[IO.Compression.CompressionLevel]'SmallestSize'}else{[IO.Compression.CompressionLevel]::Optimal}
 $captureSource=[IO.File]::ReadAllBytes((Join-Path $PWD 'native/MacDowCapture.swift'))
-$sourceHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($captureSource)).ToLowerInvariant()
+$sourceHash=Get-Sha256Hex $captureSource
 $compressedSource=New-Object IO.MemoryStream
-$compressor=New-Object IO.Compression.GZipStream($compressedSource,[IO.Compression.CompressionLevel]::SmallestSize,$true)
+$compressor=New-Object IO.Compression.GZipStream($compressedSource,$level,$true)
 try{$compressor.Write($captureSource,0,$captureSource.Length)}finally{$compressor.Dispose()}
 $encodedSource=[Convert]::ToBase64String($compressedSource.ToArray())
 $compressedSource.Dispose()
 if($encodedSource.Length -gt 24000){throw 'Embedded native source exceeds bounded linker configuration'}
 [byte[]]$menuSource=[IO.File]::ReadAllBytes((Join-Path $PWD 'native/HostUpdater.swift')) + [Text.Encoding]::UTF8.GetBytes("`n") + [IO.File]::ReadAllBytes((Join-Path $PWD 'native/MacDowHostApp.swift'))
-$menuHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($menuSource)).ToLowerInvariant()
+$menuHash=Get-Sha256Hex $menuSource
 $menuStream=[IO.MemoryStream]::new()
-$menuCompressor=[IO.Compression.GZipStream]::new($menuStream,[IO.Compression.CompressionLevel]::SmallestSize,$true)
+$menuCompressor=[IO.Compression.GZipStream]::new($menuStream,$level,$true)
 try{$menuCompressor.Write($menuSource,0,$menuSource.Length)}finally{$menuCompressor.Dispose()}
 $encodedMenu=[Convert]::ToBase64String($menuStream.ToArray());$menuStream.Dispose()
 $encodedInfo=[Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'native/Info.plist')))
