@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 )
 
@@ -21,6 +22,15 @@ type GH struct{ Executable string }
 
 func ExistingGH() (*GH, error) {
 	path, e := exec.LookPath("gh")
+	if e != nil && runtime.GOOS == "darwin" {
+		for _, candidate := range []string{"/opt/homebrew/bin/gh", "/usr/local/bin/gh"} {
+			if p, err := exec.LookPath(candidate); err == nil {
+				path = p
+				e = nil
+				break
+			}
+		}
+	}
 	if e != nil {
 		return nil, ErrAccess
 	}

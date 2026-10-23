@@ -23,15 +23,24 @@ internal sealed class Session : IAsyncDisposable
     public bool IsReady { get;private set; }
     public long NativeAlive {get;private set;}
     public long LastFrame {get;private set;}
-    public async Task Connect(string host,string port,string fingerprint,string token)
+    public Task Connect(string host,string port,string fingerprint,string token)
     {
-        if(!Pairing.Validate(host,port,fingerprint,token))throw new ArgumentException("Enter private IPv4, port, 64-digit fingerprint and temporary token from the Mac.");
+        if(!Pairing.Validate(host,port,fingerprint,token))throw new ArgumentException("Enter the advanced connection details from your Mac.");
+        return ConnectCore(host,port,fingerprint,new{type="auth",token});
+    }
+    public Task ConnectGuided(DiscoveredHost host,string pairNumber)
+    {
+        if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _) ||
+           pairNumber.Length!=6||pairNumber.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Invalid guided pairing request.");
+        return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="pair",code=pairNumber});
+    }
+    async Task ConnectCore(string host,string port,string fingerprint,object authentication)
+    {
         socket.Options.RemoteCertificateValidationCallback=(_,cert,_,_)=>cert!=null&&Pin(cert,fingerprint);
-
         socket.Options.Proxy=null;
         using var timeout=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);timeout.CancelAfter(TimeSpan.FromSeconds(8));
         await socket.ConnectAsync(new Uri($"wss://{host}:{port}/session"),timeout.Token);
-        writer=WriteLoop();reader=ReadLoop();Send(new {type="auth",token});
+        writer=WriteLoop();reader=ReadLoop();Send(authentication);
     }
     static bool Pin(X509Certificate cert,string expected)
     {byte[] actual=SHA256.HashData(cert.GetRawCertData());return CryptographicOperations.FixedTimeEquals(actual,Convert.FromHexString(expected));}

@@ -22,17 +22,31 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 )
 
 func main() {
-	addr := flag.String("listen", "", "explicit private IPv4:port, e.g. 192.168.1.20:4433")
-	check := flag.Bool("check", false, "check existing Mac permissions; never request them")
-	self := flag.Bool("self-test", false, "transport-independent non-capturing self-test")
-	updates := flag.Bool("updates", false, "interactive updates; no capture/listener")
-	updateCheck := flag.Bool("update-check", false, "check private releases without UI/capture")
+	if len(os.Args) > 1 && os.Args[1] == "--updater" {
+		os.Exit(updater.Run(os.Args[2:], os.Stdout))
+	}
+	addr := flag.String("listen", "auto", "automatic LAN selection, or a specific private IPv4:port")
+	gui := flag.Bool("gui", false, "inherited-pipe UI mode; no Terminal consent")
+	interfaces := flag.Bool("interfaces", false, "list eligible LAN interfaces; no listener/capture")
+	check := flag.Bool("check", false, "check existing permissions without requesting them")
+	self := flag.Bool("self-test", false, "non-capturing TLS self-test")
+	updates := flag.Bool("updates", false, "interactive updates only")
+	updateCheck := flag.Bool("update-check", false, "read-only release check")
 	noUpdateCheck := flag.Bool("no-update-check", false, "disable startup release check")
 	flag.Parse()
+	if *interfaces {
+		all, err := localInterfaces()
+		if err != nil {
+			fatal(err)
+		}
+		json.NewEncoder(os.Stdout).Encode(all)
+		return
+	}
 	if *updates {
 		os.Exit(updater.Console(os.Stdin, os.Stdout))
 	}
@@ -64,25 +78,34 @@ func main() {
 		}
 		return
 	}
-	ip, port, err := net.SplitHostPort(*addr)
-	p, e := strconv.Atoi(port)
-	if err != nil || e != nil || p < 1024 || p > 65535 || !privateIP(ip) {
-		fatal(errors.New("--listen requires an explicit RFC1918 IPv4 and port 1024..65535"))
-	}
-	// No server or capture starts until existing permissions have been checked.
-	cmd := exec.Command(helper, "--check")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err = cmd.Run(); err != nil {
+	if err = hostSession(helper, *addr, *gui, *noUpdateCheck); err != nil {
 		fatal(err)
+	}
+}
+func hostSession(helper, address string, gui, noUpdates bool) error {
+	all, err := localInterfaces()
+	if err != nil {
+		return err
+	}
+	address, err = chooseListen(address, all)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(helper, "--check")
+	if !gui {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	if err = cmd.Run(); err != nil {
+		return errors.New("Screen Recording is not available to the capture helper. Open MAC-DOW Host, choose Screen Recording, grant access yourself and restart the app")
 	}
 	cert, fp, err := identity()
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	secret := make([]byte, 32)
 	if _, err = rand.Read(secret); err != nil {
-		fatal(err)
+		return err
 	}
 	token := hex.EncodeToString(secret)
 	s := &server{token: token, peerAllowed: privateIP, slot: make(chan struct{}, 1)}
@@ -91,39 +114,80 @@ func main() {
 		defer cancel()
 		out, err := exec.CommandContext(ctx, helper, "--list").Output()
 		if err != nil {
-			return nil, errors.New("cannot list windows; check Screen Recording permission")
+			return nil, errors.New("Cannot list Mac windows. Check the host app's Screen Recording permission")
 		}
-		var ws []window
-		err = json.Unmarshal(out, &ws)
-		return ws, err
+		var windows []window
+		err = json.Unmarshal(out, &windows)
+		return windows, err
 	}
-	scanner := bufio.NewScanner(os.Stdin)
+	var broker *uiBroker
+	var scanner *bufio.Scanner
+	if gui {
+		broker = newUIBroker(os.Stdin, os.Stdout)
+	} else {
+		scanner = bufio.NewScanner(os.Stdin)
+	}
 	s.consent = func(r start) bool {
-		scope := "FULL DESKTOP"
+		scope := "Full desktop"
 		if r.Window != 0 {
-			scope = fmt.Sprintf("ONLY window ID %d (child windows/dialogs excluded)", r.Window)
+			scope = fmt.Sprintf("Only selected window %d; menus and child dialogs excluded", r.Window)
+		}
+		if gui {
+			return broker.ask("stream", map[string]any{"scope": scope, "width": r.Width, "fps": r.FPS, "codec": streamDescription(r)}, 45*time.Second)
 		}
 		fmt.Printf("\nWindows requests %s, %d px / %d fps / %s.\nAllow viewing and explicitly armed keyboard/mouse for this session? Type ALLOW: ", scope, r.Width, r.FPS, streamDescription(r))
 		return scanner.Scan() && scanner.Text() == "ALLOW"
 	}
+	if gui {
+		s.pair = func(peer, code string) bool {
+			return broker.ask("pair", map[string]any{"peer": peer, "code": code}, 45*time.Second)
+		}
+	}
 	s.stream = func(send func([]byte), status func(string), events <-chan input) error {
-		return runCapture(helper, s.selected, send, status, events)
+		if gui {
+			broker.emit(map[string]any{"type": "state", "message": "Sharing active. Windows control remains explicit."})
+		}
+		err := runCapture(helper, s.selected, send, status, events)
+		if gui {
+			broker.emit(map[string]any{"type": "state", "message": "Session ended. Waiting for a new approved connection."})
+		}
+		return err
 	}
-	listener, err := net.Listen("tcp4", *addr)
+	listener, err := net.Listen("tcp4", address)
 	if err != nil {
-		fatal(err)
+		return fmt.Errorf("Cannot start sharing on this network: %w", err)
 	}
-	fmt.Printf("\nMAC-DOW foreground host — Ctrl+C stops all capture/control.\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary pairing token: %s\nCompare the fingerprint directly on Windows. Do not share token beyond your PC.\nNo capture until authenticated session + ALLOW.\n", *addr, fp, token)
-	if !*noUpdateCheck {
-		go updater.StartupCheck(os.Stdout)
+	defer listener.Close()
+	actual := listener.Addr().(*net.TCPAddr)
+	if gui {
+		broker.emit(map[string]any{"type": "ready", "address": actual.IP.String(), "port": actual.Port, "fingerprint": fp, "token": token})
+	} else {
+		fmt.Printf("\nMAC-DOW host - Ctrl+C stops sharing.\nAddress: %s\nSHA-256 fingerprint: %s\nTemporary token: %s\nNo capture until pairing + ALLOW.\n", listener.Addr(), fp, token)
+		if !noUpdates {
+			go updater.StartupCheck(os.Stdout)
+		}
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	srv := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
-	go func() { <-ctx.Done(); listener.Close(); os.Exit(0) }() // child stdin EOF / lease watchdog independently releases input.
-	if err = srv.Serve(tls.NewListener(listener, srv.TLSConfig)); err != nil && !errors.Is(err, net.ErrClosed) {
-		fatal(err)
+	if gui {
+		go func() {
+			select {
+			case <-broker.ctx.Done():
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
 	}
+	srv := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}}}
+	stopped := make(chan struct{})
+	go func() { <-ctx.Done(); listener.Close(); s.stopActive(); close(stopped) }()
+	err = srv.Serve(tls.NewListener(listener, srv.TLSConfig))
+	cancel()
+	<-stopped
+	if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 func fatal(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 func streamDescription(r start) string {

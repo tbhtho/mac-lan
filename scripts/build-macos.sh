@@ -11,16 +11,29 @@ export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-$CLANG_MODULE_CACHE_PAT
 export GOCACHE="${GOCACHE:-$PWD/.cache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-$PWD/.cache/go-mod}"
 mkdir -p "$CLANG_MODULE_CACHE_PATH" "$GOCACHE" "$GOMODCACHE"
-mkdir -p artifacts/macos-arm64
-swiftc -swift-version 5 -O -target arm64-apple-macos14.0 native/MacDowCapture.swift -o artifacts/macos-arm64/MacDowCapture -framework ApplicationServices -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework CoreGraphics -framework CoreMedia -framework CoreImage -framework VideoToolbox -framework ImageIO -framework UniformTypeIdentifiers
-(cd host && go test -p 1 ./... && go build -trimpath -o ../artifacts/macos-arm64/MacDowHost .)
-artifacts/macos-arm64/MacDowCapture --self-test
-artifacts/macos-arm64/MacDowHost --self-test
-cp README.md LICENSE THIRD_PARTY_NOTICES.md artifacts/macos-arm64/
-cp -R licenses artifacts/macos-arm64/
-if command -v git >/dev/null && git rev-parse HEAD >/dev/null 2>&1; then git rev-parse HEAD > artifacts/macos-arm64/COMMIT.txt; fi
+app="$PWD/artifacts/macos-app-arm64/MAC-DOW Host.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Helpers" "$app/Contents/Resources" .cache/mac-app-build
+swiftc -swift-version 5 -O -target arm64-apple-macos14.0 native/MacDowCapture.swift -o "$app/Contents/Helpers/MacDowCapture" -framework ApplicationServices -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework CoreGraphics -framework CoreMedia -framework CoreImage -framework VideoToolbox -framework ImageIO -framework UniformTypeIdentifiers
+(cd host && go test -p 1 ./... && go build -trimpath -o "$app/Contents/Helpers/MacDowHost" .)
+cp native/MacDowHostApp.swift .cache/mac-app-build/main.swift
+swiftc -swift-version 5 -O -target arm64-apple-macos14.0 .cache/mac-app-build/main.swift native/HostUpdater.swift -o "$app/Contents/MacOS/MAC-DOW Host" -framework AppKit -framework Foundation -framework ApplicationServices -framework CoreGraphics
+"$app/Contents/Helpers/MacDowCapture" --self-test
+"$app/Contents/Helpers/MacDowHost" --self-test
+"$app/Contents/MacOS/MAC-DOW Host" --self-test
+cp README.md LICENSE THIRD_PARTY_NOTICES.md "$app/Contents/Resources/"
+cp -R licenses "$app/Contents/Resources/"
+git rev-parse HEAD > "$app/Contents/Resources/COMMIT.txt"
 version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' host/internal/updater/config.json)"
 [[ -n "$version" ]] || { echo "Missing update build version" >&2; exit 1; }
-printf '{"product":"MAC-DOW","repositoryId":1430459188,"version":"%s","os":"darwin","arch":"arm64"}\n' "$version" > artifacts/macos-arm64/MAC-DOW-INSTALL.json
-(cd artifacts && tar -czf MAC-DOW-macos-arm64-unsigned.tar.gz macos-arm64)
-echo "Native build + non-capturing self-tests passed. This is unsigned/not notarized; real capture/control remain untested."
+numeric_version="${version%%-*}"
+sed "s/@NUMERIC_VERSION@/$numeric_version/g" native/Info.plist > "$app/Contents/Info.plist"
+plutil -lint "$app/Contents/Info.plist"
+printf '{"product":"MAC-DOW","repositoryId":1430459188,"version":"%s","os":"darwin","arch":"arm64","layout":"app-bundle"}\n' "$version" > "$app/Contents/Resources/MAC-DOW-INSTALL.json"
+# Ad-hoc signatures provide local bundle integrity only, not Developer ID/notarization.
+codesign --force --sign - --timestamp=none "$app/Contents/Helpers/MacDowCapture"
+codesign --force --sign - --timestamp=none "$app/Contents/Helpers/MacDowHost"
+codesign --force --sign - --timestamp=none "$app"
+codesign --verify --deep --strict "$app"
+(cd artifacts/macos-app-arm64 && tar -czf ../MAC-DOW-macos-arm64-unsigned.tar.gz 'MAC-DOW Host.app')
+ditto -c -k --sequesterRsrc --keepParent "$app" artifacts/MAC-DOW-macos-app.zip
+echo "Native app bundle build + non-capturing self-tests passed. Double-click MAC-DOW Host.app; no Terminal or --listen needed. Ad-hoc signed, not Developer ID/notarized; real capture/control remain untested."

@@ -1,6 +1,7 @@
 # Third-party components
 
 - Gorilla WebSocket v1.5.3: BSD-2-Clause. Full notice in licenses/gorilla-websocket.txt.
+- libp2p zeroconf v2.2.0: MIT, licenses/zeroconf-LICENSE.txt. DNS-SD discovery includes miekg/dns v1.1.68 (BSD-3-Clause, licenses/miekg-dns-LICENSE.txt) and Go x/net, x/sys, x/sync dependencies (BSD-style, licenses/golang-x-LICENSE.txt).
 - Microsoft.Web.WebView2 SDK 1.0.4258.31: BSD-3-Clause-style Microsoft SDK license. Full SDK license in licenses/webview2-LICENSE.txt. The runtime is a separate Microsoft prerequisite; MAC-DOW does not install or bundle it.
 - .NET 10 runtime: MIT and other third-party notices; self-contained Windows package includes runtime license/notice files from the SDK.
 - Go standard library/runtime: BSD-style Go license, included in licenses/go-LICENSE.txt.

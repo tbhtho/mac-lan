@@ -1,5 +1,15 @@
 # MAC-DOW
 
+## Current development build (alpha.4)
+
+Windows now publishes as one **MAC-DOW.exe** with its .NET runtime, native loader, viewer and discovery/updater helper bundled. Run that EXE directly; no adjacent dependency folder is needed. Internal resources extract to a private application cache. Microsoft WebView2 Runtime remains an OS prerequisite. Build with `scripts/package-windows.ps1`.
+
+The new Mac interface is **MAC-DOW Host.app**: open it, grant viewing access when you choose, click **Start sharing**, then **Find my Mac** on Windows. LAN address selection is automatic; normal setup has no Terminal or manual `--listen` command. The native build script now assembles this bundle. **This new AppKit launcher has not yet been natively compiled or tested.** Do not confuse the older released command-line companion below with the new app.
+
+Both app interfaces now support automatic background checks/downloads and **Restart to update**. Updates preserve settings and replace only the Windows EXE or Mac app bundle. Restart is user-triggered and returns idle/view-only. Private download access still requires an existing authenticated GitHub CLI, and automatic replacement still requires verified signed release provenance with GitHub CLI 2.93+. Current unattested releases cannot be applied automatically. These deployment prerequisites are unresolved; this is not a claim that production auto-update is working end to end.
+
+The remainder describes the earlier command-line releases and their capture/control limits. Existing releases/assets remain unchanged.
+
 Your Windows desktop and your Mac, in two tabs on the second monitor. Or stream one selected Mac window in a normal Windows window with **App Priority**.
 
 **Private development prerelease.** Windows compiles and headless tests pass. The Swift capture helper was natively compiled and self-tested on macOS 15.5 for alpha.2. The alpha.3 Go host adds updates and is cross-compiled for arm64 but has not been run on macOS. Real capture/control, hardware codec behavior and Wi-Fi editing latency remain untested. This release includes a Windows portable app and an **Apple Silicon command-line companion**, with those validation limits.
