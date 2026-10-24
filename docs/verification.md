@@ -19,6 +19,12 @@ releases after the 850 ms lease, so a stall shows a control pause rather than he
 keys, and video resumes when messages flow again. A genuinely closed viewer is
 still detected by EOF and the helper's shutdown.
 
+Release `v0.1.0-alpha.35` binds `9bcbc83`; the signed-feed commit is `2ec1ddd`.
+All eight assets were downloaded anonymously and matched their published SHA-256
+digests and byte counts. A live feed check selected alpha.35 from simulated
+alpha.33 and alpha.34 Windows and Mac clients. The Swift change was not compiled
+on Apple Silicon here; the Mac compiles and self-tests the helper at first launch.
+
 ## Alpha.34 - native self-test fix and clearer video-off guidance
 
 Alpha.33 was published and its assets verified, but the Mac helper failed its
