@@ -15,8 +15,11 @@ using MacDow.Windows;
 int checks=0;
 void Check(bool condition,string message){if(!condition)throw new Exception(message);checks++;Console.WriteLine("PASS "+message);}
 
+string diagnosticRoot=Path.Combine(Path.GetTempPath(),"mac-lan-session-test-"+Guid.NewGuid().ToString("N"));
+await using var testDiagnostics=new DiagnosticLog(diagnosticRoot,"synthetic-test" );
+
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var ready=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -57,7 +60,31 @@ await using(var session=new Session())
 }
 
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var ready=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();if(m.GetProperty("type").GetString()=="ready")ready.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(StreamProfile.DefaultHardware.CreateStart(0));
+    await peer.Next();
+    await peer.Send(new{type="ready"});
+    await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    Check(session.IsReady,"input pressure fixture reaches an approved stream");
+    // Keep the writer busy with a full bounded queue, then route more input. Pressure
+    // must never disconnect an approved stream.
+    var outgoing=(Channel<string>)typeof(Session).GetField("outgoing",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(session)!;
+    for(int i=0;i<10000;i++)outgoing.Writer.TryWrite("{\"type\":\"move\"}");
+    for(int i=0;i<200;i++)session.Send(new{type="move",x=.5,y=.5});
+    Check(session.IsReady,"a full outgoing input queue drops input instead of ending the stream");
+    Check((long)typeof(Session).GetField("droppedInput",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(session)!>0,"dropped input is counted for diagnostics");
+    session.Abort("input pressure test ended");
+}
+
+await using(var peer=new LocalPeer())
+await using(var session=new Session(testDiagnostics))
 {
     var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
@@ -77,7 +104,7 @@ await using(var session=new Session())
 
 foreach(var advertised in new object?[]{null,30,0,61,"60",60.5})
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
@@ -92,7 +119,7 @@ await using(var session=new Session())
 }
 
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     var ended=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
     session.Ended+=reason=>ended.TrySetResult(reason);
@@ -103,7 +130,7 @@ await using(var session=new Session())
 }
 
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     var errorReceived=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var ended=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -118,7 +145,7 @@ await using(var session=new Session())
 }
 foreach(var capability in new string?[]{null,"bad token",new string('A',64)})
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
@@ -131,7 +158,7 @@ await using(var session=new Session())
 }
 
 await using(var peer=new LocalPeer())
-await using(var session=new Session())
+await using(var session=new Session(testDiagnostics))
 {
     const string capability="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -151,6 +178,66 @@ await using(var session=new Session())
     session.Abort("transfer test ended");
     Check(!session.CanTransfer&&session.TransferTarget==null&&target!.SessionEnded.IsCancellationRequested,"disconnect revokes the transfer target and cancels its session token");
 }
+string regressionRoot=Path.Combine(Path.GetTempPath(),"mac-lan-disconnect-test-"+Guid.NewGuid().ToString("N"));
+await using(var log=new DiagnosticLog(regressionRoot,"synthetic-test"))
+await using(var peer=new LocalPeer())
+await using(var session=new Session(log))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var ready=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var control=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var ended=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{switch(m.GetProperty("type").GetString()){case "catalog":catalog.TrySetResult();break;case "ready":ready.TrySetResult();break;case "controlStatus":control.TrySetResult();break;}};
+    session.Ended+=reason=>ended.TrySetResult(reason);
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,transferToken=new string('a',64),windows=new[]{new{id=42,app="PRIVATE-APP",title="PRIVATE-DOCUMENT"}}});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(StreamProfile.DefaultHardware.CreateStart(0));await peer.Next();
+    await peer.Send(new{type="ready"});await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(new{type="lease",active=true,generation=7,view=true,stamp=System.Diagnostics.Stopwatch.GetTimestamp()});await peer.Next();
+    session.Send(new{type="key",code=12,down=true});await peer.Next();
+    await peer.Send(new{type="controlStatus",code="lease-expired",controlPermission=true,active=false,message="PRIVATE-DOCUMENT"});
+    await control.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    await peer.Close(WebSocketCloseStatus.EndpointUnavailable,"PRIVATE-CLOSE-REASON");
+    Check((await ended.Task.WaitAsync(TimeSpan.FromSeconds(3))).Contains("disconnected",StringComparison.OrdinalIgnoreCase),"clean remote close ends the real synthetic TLS session");
+    session.UiTick();await Task.Delay(850);session.UiTick();
+}
+string regressionPath=Path.Combine(regressionRoot,"windows-local.jsonl");
+Check(File.Exists(regressionPath),"the session writes diagnostic evidence to Windows on disconnect");
+var regressionLines=File.ReadAllLines(regressionPath);
+var regression=regressionLines.Select(line=>JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+Check(regression.Any(row=>row.GetProperty("name").GetString()=="session-ended"&&row.GetProperty("code").GetString()=="remote-close"&&row.GetProperty("state").GetProperty("closeStatus").GetInt32()==1001),"disconnect log distinguishes a Mac close and preserves its WebSocket status");
+Check(regression.Any(row=>row.GetProperty("name").GetString()=="host-control"&&row.GetProperty("code").GetString()=="lease-expired"),"native watchdog control status is saved on Windows before the stream ends");
+Check(regression.Any(row=>row.GetProperty("name").GetString()=="lease-state"&&row.GetProperty("state").GetProperty("generation").GetInt32()==7),"lease activation and generation changes leave metadata evidence");
+string regressionText=string.Join("\n",regressionLines);
+Check(!regressionText.Contains(new string('a',64))&&!regressionText.Contains("123456")&&!regressionText.Contains("PRIVATE-")&&!regressionText.Contains("\"down\"")&&!regressionText.Contains("\"token\""),"session diagnostics omit pairing secrets, window names, close text and key contents");
+Check(regression.Select(row=>row.GetProperty("session").GetString()).Distinct().Count()==1,"session events share one connection ID across worker tasks");
+Check(regression.Any(row=>row.GetProperty("name").GetString()=="ui-heartbeat-gap"&&row.GetProperty("state").GetProperty("gapMs").GetDouble()>=750),"a delayed UI heartbeat leaves its measured gap in the diagnostic file");
+string workerRoot=Path.Combine(diagnosticRoot,"worker-evidence");
+await using(var workerLog=new DiagnosticLog(workerRoot,"synthetic-test"))
+await using(var peer=new LocalPeer())
+await using(var session=new Session(workerLog))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var ended=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    session.Ended+=reason=>ended.TrySetResult();
+    await peer.Connect(session,new NonPumpingContext()).WaitAsync(TimeSpan.FromSeconds(3));
+    await peer.Next();await peer.Send(new{type="catalog",maxFps=60,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    await Task.Delay(2200); // No UI ticks or message pumping: only the background sampler can report this stall.
+    await peer.Close(WebSocketCloseStatus.EndpointUnavailable,"test close");
+    await ended.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    Check(!session.IsPaired,"transport receives status and reports a disconnect even when the caller UI context never pumps");
+}
+var workerEvidence=File.ReadAllLines(Path.Combine(workerRoot,"windows-local.jsonl")).Select(line=>JsonSerializer.Deserialize<JsonElement>(line)).ToArray();
+Check(workerEvidence.Any(row=>row.GetProperty("name").GetString()=="ui-heartbeat-stalled"&&row.GetProperty("state").GetProperty("uiTickAgeMs").GetDouble()>=1000),"the independent sampler records a UI stall even before the first UI tick");
+Check(workerEvidence.Any(row=>row.GetProperty("name").GetString()=="process-health"&&row.GetProperty("state").GetProperty("workingSetBytes").GetInt64()>0),"background resource samples reach disk while the UI context does not pump");
+Directory.Delete(regressionRoot,true);
+await testDiagnostics.DisposeAsync();
+var transportEvidence=File.ReadAllLines(Path.Combine(diagnosticRoot,"windows-local.jsonl")).Select(line=>JsonSerializer.Deserialize<JsonElement>(line));
+Check(transportEvidence.Any(row=>row.GetProperty("name").GetString()=="session-ended"&&row.GetProperty("code").GetString()=="receive-failed"&&row.GetProperty("state").GetProperty("hostError").GetString()=="not-approved"&&row.GetProperty("error")[0].GetProperty("type").GetString()=="System.Net.WebSockets.WebSocketException"),"an abrupt transport failure retains the native error category and WebSocket exception details");
+Directory.Delete(diagnosticRoot,true);
 Console.WriteLine($"{checks} session checks passed using synthetic loopback TLS WebSockets; no UI, capture, hooks, or webhook.");
 
 sealed class LocalPeer : IAsyncDisposable
@@ -171,13 +258,17 @@ sealed class LocalPeer : IAsyncDisposable
         certificate=X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pkcs12),null,X509KeyStorageFlags.DefaultKeySet);
         listener.Start();
     }
-    public async Task Connect(Session session)
+    public async Task Connect(Session session,SynchronizationContext? context=null)
     {
         var accept=Accept();
         var connect=typeof(Session).GetMethod("ConnectCore",BindingFlags.NonPublic|BindingFlags.Instance)!;
         var port=((IPEndPoint)listener.LocalEndpoint).Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var fingerprint=Convert.ToHexString(SHA256.HashData(certificate.RawData));
-        try{await (Task)connect.Invoke(session,new object[]{"127.0.0.1",port,fingerprint,new{type="pair",code="123456"}})!;}
+        Task connecting;
+        var previous=SynchronizationContext.Current;
+        try{SynchronizationContext.SetSynchronizationContext(context);connecting=(Task)connect.Invoke(session,new object[]{"127.0.0.1",port,fingerprint,new{type="pair",code="123456"}})!;}
+        finally{SynchronizationContext.SetSynchronizationContext(previous);}
+        try{await connecting;}
         catch{if(accept.IsFaulted)await accept;throw;}
         await accept;
     }
@@ -214,8 +305,15 @@ sealed class LocalPeer : IAsyncDisposable
         catch(Exception ex)when(ex is OperationCanceledException or WebSocketException or IOException){}
     }
     public async Task Send(object value)=>await socket!.SendAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)),WebSocketMessageType.Text,true,stop.Token);
+    public Task Close(WebSocketCloseStatus status,string description)=>socket!.CloseOutputAsync(status,description,stop.Token);
     public void Abort()=>socket!.Abort();
     public async Task<JsonElement> Next()=>await incoming.Reader.ReadAsync(stop.Token).AsTask().WaitAsync(TimeSpan.FromSeconds(3));
     public bool HasPendingMessage=>incoming.Reader.TryPeek(out _);
     public async ValueTask DisposeAsync(){stop.Cancel();socket?.Abort();if(receiver!=null)await receiver;socket?.Dispose();tcp?.Dispose();listener.Stop();certificate.Dispose();stop.Dispose();}
+}
+
+// Models a UI thread stalled in application work without opening a window.
+sealed class NonPumpingContext : SynchronizationContext
+{
+    public override void Post(SendOrPostCallback callback,object? state){}
 }

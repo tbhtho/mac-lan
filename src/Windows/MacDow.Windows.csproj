@@ -3,6 +3,7 @@
   <PropertyGroup><DebugType>embedded</DebugType><PublishSingleFile>true</PublishSingleFile><IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Core/Core.csproj"/><PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31"/></ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../host/internal/updater/config.json" LogicalName="MacDow.Diagnostics.build-config.json"/>
     <EmbeddedResource Include="viewer.html;viewer.mjs;viewer-core.mjs" LogicalName="MacDow.Payload.%(Filename)%(Extension)"/>
     <EmbeddedResource Include="../../.cache/package-input/MAC-DOW-Update.exe" Condition="Exists('../../.cache/package-input/MAC-DOW-Update.exe')" LogicalName="MacDow.Payload.MAC-DOW-Update.exe"/>
     <EmbeddedResource Include="../../LICENSE;../../THIRD_PARTY_NOTICES.md" LogicalName="MacDow.Payload.%(Filename)%(Extension)"/>

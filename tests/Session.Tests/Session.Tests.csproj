@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../../src/Core/Core.csproj"/><Compile Include="../../src/Windows/Session.cs" Link="Session.cs"/><Compile Include="../../src/Windows/FileTransferTarget.cs" Link="FileTransferTarget.cs"/></ItemGroup>
+  <ItemGroup><ProjectReference Include="../../src/Core/Core.csproj"/><Compile Include="../../src/Windows/Session.cs" Link="Session.cs"/><Compile Include="../../src/Windows/FileTransferTarget.cs" Link="FileTransferTarget.cs"/><Compile Include="../../src/Windows/DiagnosticLog.cs" Link="DiagnosticLog.cs"/><Compile Include="../../src/Windows/Telemetry.cs" Link="Telemetry.cs"/><Compile Include="../../src/Windows/DiagnosticHostFields.cs" Link="DiagnosticHostFields.cs"/></ItemGroup>
 </Project>

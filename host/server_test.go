@@ -176,6 +176,54 @@ func TestNativeStatusBurstDoesNotDisconnectApprovedCapture(t *testing.T) {
 	}
 }
 
+func TestInputPressureDoesNotEndApprovedCapture(t *testing.T) {
+	streaming := make(chan struct{})
+	s := &server{token: strings.Repeat("2", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+		catalog: func() ([]window, error) { return nil, nil },
+		consent: func(start) bool { return true },
+		stream: func(send func([]byte), status func(string), events <-chan input) error {
+			send([]byte{1, 2, 3})
+			close(streaming)
+			// A stalled native helper must not turn viewer input pressure into a
+			// disconnect; the session keeps video and control state alive.
+			time.Sleep(250 * time.Millisecond)
+			for e := range events {
+				if e.Type == "release" {
+					send([]byte{9})
+					// Keep the session up while the client reads its proof frame.
+					for range events {
+					}
+					return nil
+				}
+			}
+			return nil
+		},
+	}
+	c := connectFixture(t, s)
+	if err := c.WriteJSON(start{Type: "start", FPS: 60, Width: 1280, Quality: 70}); err != nil {
+		t.Fatal(err)
+	}
+	<-streaming
+	for i := 0; i < 200; i++ {
+		if err := c.WriteJSON(input{Type: "move", X: 0.5, Y: 0.5}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(350 * time.Millisecond)
+	if err := c.WriteJSON(input{Type: "release"}); err != nil {
+		t.Fatalf("input pressure closed the approved session: %v", err)
+	}
+	for {
+		kind, frame, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("approved capture ended after input pressure: %v", err)
+		}
+		if kind == websocket.BinaryMessage && bytes.Equal(frame, []byte{9}) {
+			return
+		}
+	}
+}
+
 func TestPrivateLANOnly(t *testing.T) {
 	for _, s := range []string{"10.1.2.3", "172.16.1.1", "192.168.1.5"} {
 		if !privateIP(s) {

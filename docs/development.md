@@ -70,6 +70,21 @@ These notes are historical; older ZIP, manual token, and Terminal-only update in
 
 ## Runtime boundaries
 
+Alpha.33 has [local disconnect diagnostics](windows-diagnostics.md)
+with background disk writes, connection/run correlation, bounded file rotation,
+and transport/UI/decoder timing. Use `./scripts/test.ps1` for the headless logger,
+synthetic disconnect and viewer regressions. No current-source logging change
+establishes that the Fluxframe disconnect is fixed.
+
+The alpha.32 Mac diagnostic `capture-failed` with code `input-overflow` recorded the
+native helper leaving capture because its bounded input mailbox overflowed. Alpha.33
+removes that fatal exit at every hop: the viewer coalesces absolute pointer
+moves to one per animation frame, the Windows session and the Mac host drop excess
+input instead of disconnecting, and the native mailbox coalesces moves and answers
+pressure by releasing held input and pausing control with `input-overflow`. Video,
+audio and the session stay up; the next click resumes control. The pressure source
+for a specific report is still inferred from the fixed code, not measured.
+
 Direct LAN TLS 1.3 and WebSockets carry video and input, with ephemeral launch identity, local pairing approval, one controller, and separate video approval. There is no cloud relay, STUN/TURN, saved pairing, daemon, or automatic login startup. An older command-line mode printed a temporary token and fingerprint and accepted `--listen`; the normal discovery flow needs neither manual entry nor a selected interface argument.
 
 Hardware H.264 uses ScreenCaptureKit and VideoToolbox on the Mac. Windows WebCodecs prefers hardware decoding, subject to the installed runtime and GPU. Dependency-aware encoded-frame queues, bounded buffers, and sequence-gap recovery preserve decodability; decoded pictures coalesce for display. RTT, encode time, and local decode/submit time are local measurements, not synchronized capture-to-display latency. Reliable TCP may stall behind retransmission; WebRTC/UDP behavior is not claimed.

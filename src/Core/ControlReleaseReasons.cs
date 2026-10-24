@@ -7,7 +7,7 @@ public static class ControlReleaseReasons
         "foreground-lost", "window-deactivated", "viewer-blur", "pointer-cancel",
         "video-stale", "native-heartbeat-stale", "tab-change", "monitor-change",
         "manual", "disconnected", "mac-permission", "mac-scope", "mac-watchdog",
-        "shutdown", "files-open", "updates-open", "keyboard-unavailable",
+        "mac-input-pressure", "shutdown", "files-open", "updates-open", "keyboard-unavailable",
         "stream-start", "display-change", "mac-paused"
     };
     public static IReadOnlyCollection<string> All { get; } = Array.AsReadOnly(values.ToArray());

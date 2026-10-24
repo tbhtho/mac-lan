@@ -45,6 +45,7 @@ internal sealed partial class MainWindow
         var options=new StackPanel{Margin=new Thickness(0,8,0,8)};monitors.Width=double.NaN;monitors.DisplayMemberPath="DisplayName";Field(options,"Display for Windows / Mac tabs",monitors);
         options.Children.Add(new TextBlock{Text="The tab strip reserves its own space. App title bars stay below it.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,8,0,10)});
         options.Children.Add(new TextBlock{Text="Mac diagnostics are sent automatically. Windows diagnostics stay on this PC.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,4,0,8)});
+        options.Children.Add(MakeButton("Open logs folder",OpenLogs));
         setup.Children.Add(new Expander{Header="Display and diagnostics",Content=options});
         setup.Children.Add(new TextBlock{Text="Click the Mac desktop once to enable keyboard and mouse control. That first click only activates control. Ctrl+Alt+Shift+Backspace releases it.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,24,0,0)});
     }

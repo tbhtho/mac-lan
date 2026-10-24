@@ -23,9 +23,12 @@ internal static class Program
         app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/mac-lan;component/Theme.xaml",UriKind.Relative)});
         if(args.Length==2&&args[0]=="--layout-smoke"){LayoutSmoke.Start(app,args[1]);app.Run();return;}
         Telemetry.Report("startup");
-        app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Report("fatal",e.Exception.GetType().Name);MessageBox.Show("mac-lan stopped safely. Reopen it to reconnect. A diagnostic report is queued.","mac-lan");app.Shutdown(1);e.Handled=true;};
+        Telemetry.Log.Record("environment",state:new{os=Environment.OSVersion.VersionString,dotnet=Environment.Version.ToString(),arch=System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),buildId=typeof(Program).Assembly.ManifestModule.ModuleVersionId});
+        AppDomain.CurrentDomain.UnhandledException+=(_,e)=>{Telemetry.Log.Record("fatal","process-unhandled",error:e.ExceptionObject as Exception);Telemetry.Flush().Wait(TimeSpan.FromSeconds(2));};
+        TaskScheduler.UnobservedTaskException+=(_,e)=>Telemetry.Log.Record("task-failed","unobserved",error:e.Exception);
+        app.DispatcherUnhandledException+=(_,e)=>{Telemetry.Log.Record("fatal","ui-unhandled",error:e.Exception);MessageBox.Show("mac-lan stopped safely. Reopen it to reconnect. Logs are saved on this PC in "+Telemetry.DirectoryPath,"mac-lan");app.Shutdown(1);e.Handled=true;};
         var main=new MainWindow();
         app.SessionEnding+=(_,_)=>main.Quit();
-        app.Run(main);
+        try{app.Run(main);}finally{Telemetry.Flush().Wait(TimeSpan.FromSeconds(2));}
     }
 }

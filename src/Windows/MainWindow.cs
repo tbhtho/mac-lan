@@ -60,9 +60,9 @@ internal sealed partial class MainWindow : Window
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
-        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;BuildSetup();
+        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;BuildSetup();
         keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
-        gate.Released+=reason=>{keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
+        gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
         Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
         discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
@@ -88,10 +88,10 @@ internal sealed partial class MainWindow : Window
             if(filesWindow?.IsBusy==true)
             {
                 // Keep the process alive until cancellation has closed the upload and removed any temporary folder ZIP.
-                e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed");
+                e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed","app-closed");
                 await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
             }
-            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed","app-closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
         };
     }
     internal void Quit(){quitting=true;Close();}
@@ -210,7 +210,7 @@ internal sealed partial class MainWindow : Window
         var s=CreateSession();
         Telemetry.Report("pairing-start");
         try{await s.ConnectGuided(selected,number);}
-        catch(Exception e){connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;Telemetry.Report("pairing-failed",e.GetType().Name);s.Abort(e.Message);pairingProgress.Text=status.Text="Pairing failed. Keep mac-lan running on the Mac and approve the matching request there.";}
+        catch(Exception e){connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;Telemetry.Report("pairing-failed",e.GetType().Name);s.Abort(e.Message,"connect-failed",e);pairingProgress.Text=status.Text="Pairing failed. Keep mac-lan running on the Mac and approve the matching request there.";}
     }
     Session CreateSession()
     {
@@ -223,14 +223,16 @@ internal sealed partial class MainWindow : Window
         s.Frame+=b=>
         {
             // Kind 4 is Mac audio; it plays immediately and never enters the video queue.
-            if(b.Length>9&&b[0]==4){Dispatcher.BeginInvoke(()=>{if(CurrentStream())(appView??desktop).PlayAudio(b);});return;}
+            if(b.Length>9&&b[0]==4){Interlocked.Increment(ref s.PendingAudioDispatches);Dispatcher.BeginInvoke(()=>{Interlocked.Decrement(ref s.PendingAudioDispatches);if(CurrentStream())(appView??desktop).PlayAudio(b);});return;}
             frames.Enqueue(b,Environment.TickCount64);
+            Volatile.Write(ref s.VideoQueueFrames,frames.Count);Volatile.Write(ref s.VideoQueueBytes,frames.Bytes);
             if(Interlocked.Exchange(ref frameScheduled,1)!=0)return;
             Dispatcher.BeginInvoke(()=>
             {
                 Interlocked.Exchange(ref frameScheduled,0);
                 if(CurrentStream())(appView??desktop).Frames(frames,CurrentStream);
                 else frames.Clear();
+                Volatile.Write(ref s.VideoQueueFrames,frames.Count);Volatile.Write(ref s.VideoQueueBytes,frames.Bytes);
             },DispatcherPriority.Background);
         };
         s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){clipboard?.Dispose();clipboard=null;paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
@@ -263,10 +265,10 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
-            remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
+            remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
             appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
-            appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
+            appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed","app-window-closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
         }
         else{remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
@@ -279,7 +281,7 @@ internal sealed partial class MainWindow : Window
         if(focusViewer)(appView??desktop).Focus();RefreshContext();
         if(!gate.Arm()){status.Text="Connect, wait for a fresh frame and focus the remote window first.";return;}
         if(ControlVideoBlockReason() is string blocked){gate.Disarm(blocked);status.Text="Waiting for fresh video; control remains off.";return;}
-        try{keyboard.Install();controlIssue=null;controlGeneration++;SendLease();UpdateControl();}catch(Exception ex){gate.Disarm("keyboard-unavailable");status.Text="Cannot acquire keyboard: "+ex.Message;}
+        try{keyboard.Install();controlIssue=null;controlGeneration++;LogDiagnostic("control-armed","ok",UiHealth());SendLease();UpdateControl();}catch(Exception ex){LogDiagnostic("control-failed","keyboard-unavailable",error:ex);gate.Disarm("keyboard-unavailable");status.Text="Cannot acquire keyboard: "+ex.Message;}
     }
     void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
@@ -291,6 +293,8 @@ internal sealed partial class MainWindow : Window
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
+        session?.UiTick();
+        if(session?.IsPaired==true&&(lastUiHealth==0||Stopwatch.GetElapsedTime(lastUiHealth).TotalSeconds>=5)){lastUiHealth=Stopwatch.GetTimestamp();LogDiagnostic("ui-health","ok",UiHealth());}
         // Re-raise only when something is actually out of order; raising every tick made the bar flicker.
         if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this))
         {
@@ -334,11 +338,22 @@ internal sealed partial class MainWindow : Window
             case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";break;
             case "scope-blocked":controlIssue="Control paused: refocus the selected Mac window";gate.Disarm("mac-scope");break;
             case "lease-expired":case "stale-input":case "generation-revoked":controlIssue="Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
+            case "input-overflow":controlIssue="Control paused: Mac input was too fast";gate.Disarm("mac-input-pressure");status.Text="Mac input was faster than it could be applied. Click the Mac view again to resume control; video keeps playing.";break;
         }
         UpdateControl();
     }
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
-    void Disconnect(){clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
+    long lastUiHealth;
+    static double? AgeMs(long timestamp)=>timestamp>0?Math.Round(Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds,1):null;
+    object UiHealth()=>new{remote,appPriority=appWindow!=null,focused=OwnerIsForeground(),active=gate.CanRoute,generation=controlGeneration,controlPermission,videoBlock=ControlVideoBlockReason(),lastPresentedAgeMs=AgeMs((appView??desktop).LastPresented),lastLeaseQueuedAgeMs=AgeMs(lastLease)};
+    void LogDiagnostic(string name,string code,object? state=null,Exception? error=null)
+    {if(session is Session current)current.Log(name,code,state,error);else Telemetry.Log.Record(name,code,state,error:error);}
+    void OpenLogs()
+    {
+        try{Directory.CreateDirectory(Telemetry.DirectoryPath);Process.Start(new ProcessStartInfo("explorer.exe"){Arguments="\""+Telemetry.DirectoryPath+"\"",UseShellExecute=true});}
+        catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){LogDiagnostic("logs-folder-failed","open",error:ex);status.Text="Logs folder: "+Telemetry.DirectoryPath;}
+    }
+    void Disconnect(){clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
     void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;root.Margin=new Thickness(0,TabBarLayout.Dip,0,0);Topmost=true;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));tabBar.KeepAbove();}
     nint WndProc(nint hwnd,int msg,nint w,nint l,ref bool handled)
@@ -396,18 +411,21 @@ internal sealed class RemoteView : WebView2
     readonly DispatcherTimer frameWatchdog=new(){Interval=TimeSpan.FromMilliseconds(100)};
     readonly Action<JsonElement> pointer;
     readonly Action<string> report;
+    readonly Action<string,string,object?,Exception?> diagnostic;
+    long lastDiagnostic;
     public event Action? VideoInvalidated;
     public event Action? KeyframeNeeded;
     public long LastPresented{get;private set;}
     public string VideoStats{get;private set;}="waiting for video";
-    public RemoteView(Action<JsonElement> pointer,Action<string> report)
+    public RemoteView(Action<JsonElement> pointer,Action<string> report,Action<string,string,object?,Exception?> diagnostic)
     {
-        this.pointer=pointer;this.report=report;
+        this.pointer=pointer;this.report=report;this.diagnostic=diagnostic;
         Loaded+=async(_,_)=>{await Initialize();if(bridge.HasPending)frameWatchdog.Start();PumpFrames();};
         Unloaded+=(_,_)=>frameWatchdog.Stop();
         frameWatchdog.Tick+=(_,_)=>
         {
             if(!bridge.Expired(Environment.TickCount64))return;
+            diagnostic("viewer-ack-timeout","delayed",new{epoch=bridge.Epoch,queueFrames=frames?.Count,queueBytes=frames?.Bytes},null);
             // Do not accumulate browser work behind a missing acknowledgment.
             // A fresh epoch rejects its delayed output and resumes at a keyframe.
             frames?.Clear();ResetEpoch();PumpFrames();
@@ -422,6 +440,9 @@ internal sealed class RemoteView : WebView2
             var env=await CoreWebView2Environment.CreateAsync(null,cache,new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
             await EnsureCoreWebView2Async(env);
             if(CoreWebView2==null)throw new InvalidOperationException("WebView2 initialization did not produce a runtime.");
+            diagnostic("viewer-runtime","ready",new{version=CoreWebView2.Environment.BrowserVersionString},null);
+            CoreWebView2.ProcessFailed+=(_,e)=>diagnostic("viewer-process-failed",e.ProcessFailedKind.ToString(),new{reason=e.Reason.ToString(),exitCode=e.ExitCode},null);
+            CoreWebView2.NavigationCompleted+=(_,e)=>{if(!e.IsSuccess)diagnostic("viewer-navigation-failed",e.WebErrorStatus.ToString(),null,null);};
             CoreWebView2.Settings.AreDevToolsEnabled=false;CoreWebView2.Settings.AreDefaultContextMenusEnabled=false;CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled=false;CoreWebView2.Settings.IsStatusBarEnabled=false;CoreWebView2.Settings.IsZoomControlEnabled=false;
             CoreWebView2.PermissionRequested+=(_,e)=>e.State=CoreWebView2PermissionState.Deny;
             CoreWebView2.NewWindowRequested+=(_,e)=>e.Handled=true;
@@ -434,7 +455,7 @@ internal sealed class RemoteView : WebView2
                 try
                 {
                     using var doc=JsonDocument.Parse(e.WebMessageAsJson);var m=doc.RootElement;var type=m.GetProperty("type").GetString();
-                    if(type=="loaded"){ready=true;ResetEpoch();SetArmed(armed);}
+                    if(type=="loaded"){diagnostic("viewer-loaded","ok",null,null);ready=true;ResetEpoch();SetArmed(armed);}
                     else if(type=="presented")
                     {
                         if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)&&currentStream?.Invoke()==true)LastPresented=Stopwatch.GetTimestamp();
@@ -448,14 +469,14 @@ internal sealed class RemoteView : WebView2
                     {
                         if(MessageEpoch(m,out long epoch)&&bridge.AcknowledgeReset(epoch)){KeyframeNeeded?.Invoke();PumpFrames();}
                     }
-                    else if(type=="keyframe"){if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch))KeyframeNeeded?.Invoke();}
-                    else if(type=="stats"){VideoStats=m.GetProperty("message").GetString()??"";report(VideoStats);}
+                    else if(type=="keyframe"){if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)){string? code=m.TryGetProperty("code",out var c)&&c.ValueKind==JsonValueKind.String?c.GetString():null;diagnostic("viewer-recovery",code is "decoder-delayed" or "sequence-gap" or "decoder-error" or "frame-error"?code:"keyframe-needed",DiagnosticHostFields.Viewer(m),null);KeyframeNeeded?.Invoke();}}
+                    else if(type=="stats"){VideoStats=m.GetProperty("message").GetString()??"";report(VideoStats);if(lastDiagnostic==0||Stopwatch.GetElapsedTime(lastDiagnostic).TotalSeconds>=5){lastDiagnostic=Stopwatch.GetTimestamp();diagnostic("viewer-health","ok",DiagnosticHostFields.Viewer(m),null);}}
                     else if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)&&currentStream?.Invoke()==true)pointer(m);
                 }
                 catch(JsonException){}
             };
             CoreWebView2.Navigate("https://macdow.local/viewer.html");
-        }catch(Exception ex){VideoStats="WebView2 runtime unavailable: "+ex.Message;report(VideoStats);}
+        }catch(Exception ex){diagnostic("viewer-initialization-failed","WebView2",null,ex);VideoStats="WebView2 runtime unavailable: "+ex.Message;report(VideoStats);}
     }
     static bool MessageEpoch(JsonElement m,out long epoch){epoch=0;return m.TryGetProperty("epoch",out var value)&&value.ValueKind==JsonValueKind.Number&&value.TryGetInt64(out epoch);}
     public void Configure(JsonElement m){config=m;PostConfiguration();}
