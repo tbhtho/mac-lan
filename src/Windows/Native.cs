@@ -81,6 +81,7 @@ internal sealed class KeyboardHook : IDisposable
         switch(decision.Route)
         {
             case KeyRoute.Remote:send(decision.MacCode,down);return 1;
+            case KeyRoute.Sequence:foreach(var (mac,press) in decision.Keys!)send(mac,press);return 1;
             case KeyRoute.Swallow:return 1;
             case KeyRoute.Release:escape();return 1;
             case KeyRoute.ReleaseLocal:escape();break;
