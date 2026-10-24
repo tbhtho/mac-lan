@@ -57,7 +57,7 @@ internal sealed partial class MainWindow : Window
         Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Glass.Apply(this);Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowSetup,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;BuildSetup();
@@ -112,12 +112,26 @@ internal sealed partial class MainWindow : Window
             if(previous!=null&&ReferenceEquals(previous.BoundSession,session)){previous.Activate();return;}
             if(previous!=null){await previous.CancelAndWaitAsync();previous.Close();}
             if(closing||awaitingFileTransfer)return;
-            var current=new FileTransferWindow(session);filesWindow=current;current.Closed+=(_,_)=>{if(ReferenceEquals(filesWindow,current))filesWindow=null;};current.Show();current.Activate();
+            var current=new FileTransferWindow(session);if(IsVisible)current.Owner=this;filesWindow=current;current.Closed+=(_,_)=>{if(ReferenceEquals(filesWindow,current))filesWindow=null;};current.Show();current.Activate();
         }
         finally{openingFiles=false;}
     }
+    // On the MacBook tab, Connection opens over the Mac view instead of leaving it.
+    Window? connectionWindow;
+    void ShowConnection()
+    {
+        if(!remote||appWindow!=null){ShowSetup();return;}
+        if(connectionWindow!=null){connectionWindow.Activate();return;}
+        if(setup.Parent is ScrollViewer old)old.Content=null;
+        var window=new Window{Title="mac-lan - Connection",Owner=this,Width=760,Height=640,MinWidth=560,MinHeight=420,WindowStartupLocation=WindowStartupLocation.CenterOwner,ShowInTaskbar=false,
+            Content=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled}};
+        Glass.Apply(window);
+        window.Closed+=(_,_)=>{if(setup.Parent is ScrollViewer host)host.Content=null;connectionWindow=null;};
+        connectionWindow=window;window.Show();
+    }
     void ShowSetup()
     {
+        connectionWindow?.Close();
         gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
         status.Visibility=Visibility.Visible;body.Background=Brushes.Transparent;
         Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
@@ -228,7 +242,7 @@ internal sealed partial class MainWindow : Window
         {
             case "catalog":bool fresh=connecting;paired=true;connecting=false;clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
                 // A fresh pairing already approved viewing, so close the connection page and show the Mac.
-                if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired)ShowRemote();},DispatcherPriority.Background);
+                if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired){connectionWindow?.Close();ShowRemote();}},DispatcherPriority.Background);
                 Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString(),w.GetProperty("app").GetString()??"Mac app")).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
             case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=AppTitle();}}break;
@@ -276,7 +290,8 @@ internal sealed partial class MainWindow : Window
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
-        if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this)){Native.KeepAbove(this);tabBar.KeepAbove();}
+        // Re-raise only when a taskbar actually came up over the Mac view; raising every tick made the bar flicker.
+        if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this)&&Native.TaskbarAbove(this)){Native.KeepAbove(this);tabBar.KeepAbove();}
         RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":"Click Mac to control"):null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(appWindow!=null)appWindow.Title=AppTitle();
