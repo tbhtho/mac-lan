@@ -14,6 +14,17 @@ function reset(clearPicture=true){
   if(clearPicture){ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 }
 // A reset viewer asks the Mac for a keyframe instead of waiting for the next periodic one.
+// The Mac's current pointer shape (resize arrows, I-beam, hand) replaces the plain arrow.
+// The page only allows blob: images, so the PNG becomes a blob URL; it is a 2x image.
+let cursorUrl=null;
+function setCursor(m){
+  if(typeof m.png!=='string'||m.png.length>65536||!Number.isFinite(m.x)||!Number.isFinite(m.y))return;
+  try{
+    const url=URL.createObjectURL(new Blob([Uint8Array.from(atob(m.png),c=>c.charCodeAt(0))],{type:'image/png'}));
+    canvas.style.cursor=`-webkit-image-set(url("${url}") 2x) ${Math.max(0,Math.round(m.x))} ${Math.max(0,Math.round(m.y))}, default`;
+    if(cursorUrl)URL.revokeObjectURL(cursorUrl);cursorUrl=url;
+  }catch{}
+}
 function recover(message){reset(false);show(message);post({type:'keyframe',epoch:streamEpoch});}
 function epochFor(m,advance=false){
   if(m.epoch===undefined)return streamEpoch===0;
@@ -90,6 +101,7 @@ chrome.webview.addEventListener('message',async e=>{
   const m=e.data;
   if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
   if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
+  if(m.type==='cursor'){setCursor(m);return;}
   if(m.type==='video'){
     if(!epochFor(m,true))return;
     // Older desktop hosts advertise fill; always preserve the received picture's proportions.

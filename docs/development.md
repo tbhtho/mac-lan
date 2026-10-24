@@ -79,3 +79,6 @@ App Priority captures one selected window, not all windows belonging to an app. 
 Transfer staging uses bounded buffers and separate HTTPS, but shares LAN bandwidth with video. Windows needs temporary space for a folder ZIP, and the Mac needs staging and extraction space. See the full [transfer contract](file-transfer.md) for limits and destination rules. There is no Mac-to-Windows transfer, audio, shared clipboard, IME, multi-touch, stylus, or non-US physical-layout support.
 
 [Protocol](protocol.md) · [Architecture](design.md) · [Hardware checklist](manual-validation.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
+
+
+The Mac host embeds the capture and menu Swift sources and Info.plist with `go:embed` under the `nativeembed` build tag. `package-macos-preview.ps1` writes them, gzip-compressed, to the ignored `host/nativeembed` folder before building; only their SHA-256 values are linker flags. Ordinary builds and tests use no tag and embed nothing.

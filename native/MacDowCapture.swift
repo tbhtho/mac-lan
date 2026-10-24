@@ -105,6 +105,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var encodeStart: TimeInterval = 0
     var width = 0, height = 0, fps = 60, bitrate = 8
     var forceKeyframe = false
+    // Caps Lock is a lock state, not a held key: a synthetic key 57 press does not toggle it,
+    // so the helper tracks it and applies it to the events it posts.
+    var capsLock = CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
+    var lastCursor = 0
     // The newest captured image, so a keyframe request can be answered while the screen is still;
     // ScreenCaptureKit sends no frames for an unchanged screen.
     var lastImage: CVImageBuffer?
@@ -312,8 +316,27 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             inbox.fail(.closed)
         }
     }
+    // Windows shows the Mac's real pointer shape (resize arrows, I-beam, hand) over the stream.
+    func reportCursor() {
+        guard let cursor = NSCursor.currentSystem else { return }
+        let size = cursor.image.size
+        guard size.width >= 1, size.height >= 1, size.width <= 64, size.height <= 64,
+              let rep = NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(size.width*2),pixelsHigh:Int(size.height*2),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0) else { return }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
+        cursor.image.draw(in:NSRect(origin:.zero,size:size))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = rep.representation(using:.png,properties:[:]), png.count < 30_000 else { return }
+        var hasher = Hasher(); hasher.combine(png); hasher.combine(cursor.hotSpot.x); hasher.combine(cursor.hotSpot.y)
+        let digest = hasher.finalize()
+        guard digest != lastCursor else { return }
+        lastCursor = digest
+        jsonStatus(["type":"cursor","png":png.base64EncodedString(),"x":Double(cursor.hotSpot.x),"y":Double(cursor.hotSpot.y)])
+    }
     @objc func tick() {
         if now()-lastAlive>0.5 {lastAlive=now();jsonStatus(["type":"captureAlive"])}
+        reportCursor()
         if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll();reportControl("lease-expired",permission:AXIsProcessTrusted()) }
         if now()-watchdogGrace>2 {
             // Stop capture after a dead viewer, even if parent host was killed.
@@ -414,6 +437,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         switch type {
         case "key":
             guard let c=m["code"] as? Int,c>=0,c<=126 else { return };let code=CGKeyCode(c),down=(m["down"] as? Bool)==true
+            if code == 57 {
+                if down { capsLock.toggle(); let event=CGEvent(keyboardEventSource:nil,virtualKey:57,keyDown:true);event?.type = .flagsChanged;event?.flags=modifiers();event?.post(tap:.cghidEventTap) }
+                return
+            }
             if down { keys.insert(code) } else { keys.remove(code) }
             reportHeld()
             let event=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:down);event?.flags=modifiers();event?.post(tap:.cghidEventTap)
@@ -442,6 +469,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         if keys.contains(56)||keys.contains(60){flags.insert(.maskShift)}
         if keys.contains(58)||keys.contains(61){flags.insert(.maskAlternate)}
         if keys.contains(59)||keys.contains(62){flags.insert(.maskControl)}
+        if capsLock {flags.insert(.maskAlphaShift)}
         return flags
     }
     func postButton(_ b:Int,down:Bool) {
