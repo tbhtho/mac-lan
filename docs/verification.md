@@ -21,6 +21,14 @@ because this machine has no Swift toolchain; real control feel, the native
 self-test and the disconnect fix remain pending a Mac build and the user's
 two-computer check.
 
+Release `v0.1.0-alpha.33` binds `803b74b`; the signed-feed commit is `d645dc8`.
+All eight assets were downloaded anonymously and matched their published
+SHA-256 digests and byte counts. A live feed check as a simulated alpha.32
+Windows client selected `mac-lan.exe` and as a simulated alpha.32 Mac client
+selected the compatibility app archive, both at alpha.33. The Mac app is
+certificate-signed, not Developer ID-signed or notarized. Native Swift
+compilation, capture, control and end-to-end latency were not verified here.
+
 ## Alpha.22 - single approval, keyframes on request, matching approval UI
 
 Pairing approval now also approves viewing for that peer until sharing stops
