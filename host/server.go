@@ -187,6 +187,7 @@ type server struct {
 	updating     bool
 	stream       func(func([]byte), func(string), <-chan input) error
 	transfers    *transferReceiver
+	clipboard    *clipboard
 	videoError   string
 	// selected is only accessed while slot is held.
 	selected start
@@ -195,6 +196,10 @@ type server struct {
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/transfer" && s.transfers != nil {
 		s.transfers.serveHTTP(w, r, s.peerAllowed)
+		return
+	}
+	if r.URL.Path == "/clipboard" && s.transfers != nil && s.clipboard != nil {
+		s.serveClipboard(w, r)
 		return
 	}
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)

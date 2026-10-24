@@ -18,6 +18,8 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll",SetLastError=true)] internal static extern bool RegisterHotKey(nint hwnd,int id,uint modifiers,uint key);
     [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(nint hwnd,int id);
+    [DllImport("user32.dll")] internal static extern bool AddClipboardFormatListener(nint hwnd);
+    [DllImport("user32.dll")] internal static extern bool RemoveClipboardFormatListener(nint hwnd);
     public static IReadOnlyList<MonitorArea> Monitors()
     {
         var result=new List<MonitorArea>();

@@ -37,6 +37,7 @@ internal sealed partial class MainWindow : Window
     string appLabel="";
     bool appSized;
     FileTransferWindow? filesWindow;
+    ClipboardSync? clipboard;
     bool remote,closing,connecting,openingFiles,awaitingFileTransfer,quitting;
     string? preferred;
     long lastLease;
@@ -65,7 +66,7 @@ internal sealed partial class MainWindow : Window
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
         Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
         discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
-        SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
+        SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);Native.AddClipboardFormatListener(source.Handle);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
         // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
         Deactivated+=(_,_)=>{Topmost=false;if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");};
         Activated+=(_,_)=>{Topmost=remote;RefreshContext();};
@@ -83,7 +84,7 @@ internal sealed partial class MainWindow : Window
                 e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed");
                 await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
             }
-            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
         };
     }
     internal void Quit(){quitting=true;Close();}
@@ -209,7 +210,7 @@ internal sealed partial class MainWindow : Window
                 else frames.Clear();
             },DispatcherPriority.Background);
         };
-        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
+        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){clipboard?.Dispose();clipboard=null;paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
         return s;
     }
     void HandleMessage(Session s,JsonElement m)
@@ -217,7 +218,10 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":paired=true;connecting=false;Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString(),w.GetProperty("app").GetString()??"Mac app")).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
+            case "catalog":bool fresh=connecting;paired=true;connecting=false;clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
+                // A fresh pairing already approved viewing, so close the connection page and show the Mac.
+                if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired)ShowRemote();},DispatcherPriority.Background);
+                Title="mac-lan - Connected to your Mac";pairButton.Content="Connected";pairButton.IsEnabled=false;streamSection.Visibility=Visibility.Visible;Telemetry.Report("pairing-approved");windows.ItemsSource=m.GetProperty("windows").EnumerateArray().Select(w=>new WindowChoice(w.GetProperty("id").GetUInt32(),w.GetProperty("app").GetString()+" - "+w.GetProperty("title").GetString(),w.GetProperty("app").GetString()??"Mac app")).ToList();status.Text=pairingProgress.Text=s.VideoError is string videoError?"Connected for files. Video is unavailable on your Mac: "+videoError:"Connected. Use MacBook to view the desktop, or Files to send items to your Mac.";SendLease();break;
             case "ready":Telemetry.Report("stream-started");viewProgress.Text="Mac approved viewing. Waiting for the first video frame...";viewProgress.Visibility=Visibility.Visible;status.Text="Mac approved viewing. Waiting for video; control stays off.";RefreshContext();SendLease();break;
             case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=AppTitle();}}break;
             case "video":(appView??desktop).Configure(m);if(appView!=null&&!appSized)FitAppWindow(m);break;
@@ -304,12 +308,13 @@ internal sealed partial class MainWindow : Window
         UpdateControl();
     }
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
-    void Disconnect(){paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
+    void Disconnect(){clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
     void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));}
     nint WndProc(nint hwnd,int msg,nint w,nint l,ref bool handled)
     {
         if(msg==0x312&&w==901){Escape();handled=true;}
+        if(msg==0x031D)clipboard?.WindowsChanged();
         if(msg is 0x007E or 0x02E0){gate.Disarm("display-change");Dispatcher.BeginInvoke(()=>{RefreshMonitors();Position();});}
         return 0;
     }
