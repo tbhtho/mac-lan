@@ -327,7 +327,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
         cursor.image.draw(in:NSRect(origin:.zero,size:size))
         NSGraphicsContext.restoreGraphicsState()
-        guard let png = rep.representation(using:.png,properties:[:]), png.count < 30_000 else { return }
+        guard let png = rep.representation(using:.png,properties:[:]), png.count < 40_000 else { return }
         var hasher = Hasher(); hasher.combine(png); hasher.combine(cursor.hotSpot.x); hasher.combine(cursor.hotSpot.y)
         let digest = hasher.finalize()
         guard digest != lastCursor else { return }

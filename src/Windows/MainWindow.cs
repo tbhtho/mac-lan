@@ -70,9 +70,9 @@ internal sealed partial class MainWindow : Window
         // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
         Deactivated+=(_,_)=>
         {
-            Topmost=false;if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");
+            if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");
             // Another Windows app (or the taskbar) taking focus on this screen means the user went
-            // back to Windows: switch tabs instead of leaving it drawn over a "MacBook" view.
+            // back to Windows: switch tabs. Focus on another monitor leaves the Mac view on top.
             if(remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
         };
         Activated+=(_,_)=>{Topmost=remote;RefreshContext();};
@@ -121,13 +121,13 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
         status.Visibility=Visibility.Visible;body.Background=Brushes.Transparent;
         Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
-        ShowInTaskbar=true;Topmost=false;
+        ShowInTaskbar=true;Topmost=false;root.Margin=new Thickness(0);
         WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;WindowState=WindowState.Normal;Width=840;Height=720;
         if(setup.Parent is ScrollViewer old)old.Content=null;body.Child=new ScrollViewer{Content=setup,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
         tabBar.SetMode(true);Show();
         var selected=DisplayLayout.Select(Native.Monitors(),preferred);Left=(selected.Left+(selected.Width-Width*selected.Dpi/96)/2)*96/selected.Dpi;Top=(selected.Top+Math.Max(12,(selected.Height-Height*selected.Dpi/96)/2))*96/selected.Dpi;Activate();SendLease();
     }
-    void ShowDesktop(){gate.Disarm("tab-change");remote=false;body.Child=null;Hide();tabBar.SetMode(true);RefreshContext();SendLease();status.Text="Windows desktop. Control is released.";}
+    void ShowDesktop(){gate.Disarm("tab-change");remote=false;Topmost=false;root.Margin=new Thickness(0);body.Child=null;Hide();tabBar.SetMode(true);RefreshContext();SendLease();status.Text="Windows desktop. Control is released.";}
     void ShowRemote()
     {
         if(appWindow!=null){appWindow.Activate();return;}
@@ -274,6 +274,7 @@ internal sealed partial class MainWindow : Window
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
+        if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this)){Native.KeepAbove(this);tabBar.KeepAbove();}
         RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":"Click Mac to control"):null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(appWindow!=null)appWindow.Title=AppTitle();
@@ -317,7 +318,7 @@ internal sealed partial class MainWindow : Window
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
     void Disconnect(){clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
-    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));}
+    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;root.Margin=new Thickness(0,TabBarLayout.Dip,0,0);Topmost=true;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));tabBar.KeepAbove();}
     nint WndProc(nint hwnd,int msg,nint w,nint l,ref bool handled)
     {
         if(msg==0x312&&w==901){Escape();handled=true;}
