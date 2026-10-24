@@ -19,6 +19,16 @@ internal static class Native
     [DllImport("user32.dll",SetLastError=true)] internal static extern bool RegisterHotKey(nint hwnd,int id,uint modifiers,uint key);
     [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(nint hwnd,int id);
     [DllImport("user32.dll")] internal static extern bool AddClipboardFormatListener(nint hwnd);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint hwnd,out uint process);
+    [DllImport("user32.dll")] static extern nint MonitorFromWindow(nint hwnd,uint flags);
+    // True when the foreground window belongs to another program and sits on the same monitor as window.
+    internal static bool OtherAppInFrontOn(Window window)
+    {
+        nint foreground=GetForegroundWindow(),own=new WindowInteropHelper(window).Handle;
+        if(foreground==0||foreground==own)return false;
+        GetWindowThreadProcessId(foreground,out uint process);
+        return process!=(uint)Environment.ProcessId&&MonitorFromWindow(foreground,2)==MonitorFromWindow(own,2);
+    }
     [DllImport("user32.dll")] internal static extern bool RemoveClipboardFormatListener(nint hwnd);
     public static IReadOnlyList<MonitorArea> Monitors()
     {

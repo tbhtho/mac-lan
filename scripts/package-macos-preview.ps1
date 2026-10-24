@@ -22,16 +22,22 @@ $sourceHash=Get-Sha256Hex $captureSource
 $compressedSource=New-Object IO.MemoryStream
 $compressor=New-Object IO.Compression.GZipStream($compressedSource,$level,$true)
 try{$compressor.Write($captureSource,0,$captureSource.Length)}finally{$compressor.Dispose()}
-$encodedSource=[Convert]::ToBase64String($compressedSource.ToArray())
-$compressedSource.Dispose()
-if($encodedSource.Length -gt 24000){throw 'Embedded native source exceeds bounded linker configuration'}
+$gzSource=$compressedSource.ToArray();$compressedSource.Dispose()
+if($gzSource.Length -gt 262144){throw 'Embedded native source exceeds its size bound'}
 [byte[]]$menuSource=[IO.File]::ReadAllBytes((Join-Path $PWD 'native/HostUpdater.swift')) + [Text.Encoding]::UTF8.GetBytes("`n") + [IO.File]::ReadAllBytes((Join-Path $PWD 'native/MacDowHostApp.swift'))
 $menuHash=Get-Sha256Hex $menuSource
 $menuStream=[IO.MemoryStream]::new()
 $menuCompressor=[IO.Compression.GZipStream]::new($menuStream,$level,$true)
 try{$menuCompressor.Write($menuSource,0,$menuSource.Length)}finally{$menuCompressor.Dispose()}
-$encodedMenu=[Convert]::ToBase64String($menuStream.ToArray());$menuStream.Dispose()
-$encodedInfo=[Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $PWD 'native/Info.plist')))
+$gzMenu=$menuStream.ToArray();$menuStream.Dispose()
+$infoBytes=[IO.File]::ReadAllBytes((Join-Path $PWD 'native/Info.plist'))
+# The sources are embedded with go:embed (build tag nativeembed) from this ignored folder;
+# as linker flags they outgrew the Windows command-line limit.
+$embedRoot=Join-Path $PWD 'host/nativeembed'
+New-Item -ItemType Directory -Force -Path $embedRoot | Out-Null
+[IO.File]::WriteAllBytes((Join-Path $embedRoot 'capture.swift.gz'),$gzSource)
+[IO.File]::WriteAllBytes((Join-Path $embedRoot 'menu.swift.gz'),$gzMenu)
+[IO.File]::WriteAllBytes((Join-Path $embedRoot 'Info.plist'),$infoBytes)
 $config=Get-Content -LiteralPath 'host/internal/updater/config.json' -Raw | ConvertFrom-Json
 $sourceCommit=(git rev-parse HEAD).Trim()
 if($LASTEXITCODE){throw 'Cannot identify source commit'}
@@ -39,12 +45,9 @@ $isDirty=[bool](git status --porcelain)
 $packageRoot=Join-Path $PWD ('artifacts/macos-preview-'+[guid]::NewGuid().ToString('N'))
 $macRoot=Join-Path $packageRoot 'macos-arm64'
 New-Item -ItemType Directory -Force -Path $macRoot | Out-Null
-$linkFlags="-s -w -X main.NativeCaptureSourceGzip=$encodedSource -X main.NativeCaptureSourceSHA256=$sourceHash"
-$linkFlags+=" -X main.NativeMenuSourceGzip=$encodedMenu -X main.NativeMenuSourceSHA256=$menuHash -X main.NativeMenuInfoBase64=$encodedInfo"
+$linkFlags="-s -w -X main.NativeCaptureSourceSHA256=$sourceHash -X main.NativeMenuSourceSHA256=$menuHash"
 if(-not $PublicUpdate){$linkFlags+=" -X github.com/tbhtho/MAC-DOW/host/internal/diagnostics.Webhook=$diagnosticDestination"}
-# Windows allows 32,767 characters per command line; Go passes long linker flags through a response file.
-if($linkFlags.Length -gt 31500){throw 'Embedded source linker options exceed the Windows command-line budget'}
-go build -C host -trimpath -ldflags $linkFlags -o (Join-Path $macRoot 'MacDowHost') .
+go build -C host -trimpath -tags nativeembed -ldflags $linkFlags -o (Join-Path $macRoot 'MacDowHost') .
 if($LASTEXITCODE){throw 'Mac host cross-build failed'}
 Copy-Item -LiteralPath 'README.md','LICENSE','THIRD_PARTY_NOTICES.md' -Destination $macRoot
 Copy-Item -LiteralPath 'licenses' -Destination $macRoot -Recurse
@@ -52,8 +55,10 @@ Copy-Item -LiteralPath 'licenses' -Destination $macRoot -Recurse
 @{product='MAC-DOW';repositoryId=$config.repositoryId;version=$config.version;os='darwin';arch='arm64';layout='commandline-preview';commit=$sourceCommit} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $macRoot 'MAC-DOW-INSTALL.json')
 @{hostCommit=$sourceCommit;dirty=$isDirty;host='cross-compiled Windows to darwin/arm64, UNRUN';nativeHelper='built on first Mac launch with existing Apple command-line tools';captureSourceSha256=$sourceHash;menuSourceSha256=$menuHash;nativeMacValidated=$false;realCapture='unverified';appBundle='installs menu-bar app on normal launch';publicUpdate=[bool]$PublicUpdate;diagnosticConfig=if($PublicUpdate){'private per-user configuration; no embedded destination'}else{'private bootstrap persists its destination for later updates'}} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $macRoot 'BUILD-PROVENANCE.json')
 # Inspect privately; do not print linker settings containing the destination.
-$binaryText=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path $macRoot 'MacDowHost')))
-if(-not $binaryText.Contains($encodedSource) -or -not $binaryText.Contains($sourceHash) -or -not $binaryText.Contains($encodedMenu) -or -not $binaryText.Contains($menuHash) -or -not $binaryText.Contains($encodedInfo)){throw 'Mac embedded build configuration missing'}
+# Latin-1 maps every byte to one character, so embedded binary data can be searched as text.
+$latin=[Text.Encoding]::GetEncoding(28591)
+$binaryText=$latin.GetString([IO.File]::ReadAllBytes((Join-Path $macRoot 'MacDowHost')))
+if(-not $binaryText.Contains($latin.GetString($gzSource)) -or -not $binaryText.Contains($sourceHash) -or -not $binaryText.Contains($latin.GetString($gzMenu)) -or -not $binaryText.Contains($menuHash) -or -not $binaryText.Contains($latin.GetString($infoBytes))){throw 'Mac embedded build configuration missing'}
 if($PublicUpdate){if($diagnosticDestination -and $binaryText.Contains($diagnosticDestination)){throw 'Public Mac update contains the private diagnostic destination'}}
 elseif(-not $binaryText.Contains($diagnosticDestination)){throw 'Private bootstrap diagnostic configuration missing'}
 python scripts/package-macos-preview.py $macRoot (Join-Path $outputRoot 'mac-lan-macos-arm64-commandline-preview.tar.gz')

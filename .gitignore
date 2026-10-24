@@ -11,3 +11,4 @@ artifacts/
 *.log
 /.release-private/
 __pycache__/
+/host/nativeembed/

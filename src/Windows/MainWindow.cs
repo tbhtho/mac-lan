@@ -68,7 +68,13 @@ internal sealed partial class MainWindow : Window
         discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);Native.AddClipboardFormatListener(source.Handle);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
         // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
-        Deactivated+=(_,_)=>{Topmost=false;if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");};
+        Deactivated+=(_,_)=>
+        {
+            Topmost=false;if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");
+            // Another Windows app (or the taskbar) taking focus on this screen means the user went
+            // back to Windows: switch tabs instead of leaving it drawn over a "MacBook" view.
+            if(remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
+        };
         Activated+=(_,_)=>{Topmost=remote;RefreshContext();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
@@ -226,6 +232,7 @@ internal sealed partial class MainWindow : Window
             case "pong":if(m.TryGetProperty("stamp",out var stamp)){double ms=Stopwatch.GetElapsedTime(stamp.GetInt64()).TotalMilliseconds;if(ms<10000){status.Text=$"{(gate.CanRoute?"CONTROLLING MAC":"VIEW ONLY")} | RTT {ms:F0} ms | {(appView??desktop).VideoStats}";if(appWindow!=null)appWindow.Title=AppTitle();}}break;
             case "video":(appView??desktop).Configure(m);if(appView!=null&&!appSized)FitAppWindow(m);break;
             case "controlStatus":HandleControlStatus(m);break;
+            case "cursor":(appView??desktop).ShowMacCursor(m);break;
             case "error":case "status":var msg=m.TryGetProperty("message",out var v)?v.GetString():"Mac status changed";status.Text=msg;if(t.GetString()=="error"){Telemetry.Report("capture-failed","host-error");viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}if(m.TryGetProperty("paused",out var paused)&&paused.GetBoolean()){gate.Disarm("mac-paused");(appView??desktop).Clear();viewProgress.Text=msg;viewProgress.Visibility=Visibility.Visible;}break;
         }
     }
@@ -429,6 +436,7 @@ internal sealed class RemoteView : WebView2
     }
     static bool MessageEpoch(JsonElement m,out long epoch){epoch=0;return m.TryGetProperty("epoch",out var value)&&value.ValueKind==JsonValueKind.Number&&value.TryGetInt64(out epoch);}
     public void Configure(JsonElement m){config=m;PostConfiguration();}
+    public void ShowMacCursor(JsonElement m){if(ready)CoreWebView2.PostWebMessageAsJson(m.GetRawText());}
     void PostConfiguration()
     {
         if(!ready||config==null)return;
