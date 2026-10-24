@@ -25,6 +25,22 @@ function setCursor(m){
     if(cursorUrl)URL.revokeObjectURL(cursorUrl);cursorUrl=url;
   }catch{}
 }
+// Mac audio: 16-bit stereo PCM at 48 kHz, scheduled back to back about 50 ms ahead.
+// If playback drifts outside 20-250 ms of lead, it restarts at 50 ms instead of piling up.
+let audioContext=null,audioAt=0;
+function playAudio(pcm){
+  if(typeof pcm!=='string'||pcm.length===0||pcm.length>262144)return;
+  try{
+    audioContext??=new AudioContext({sampleRate:48000,latencyHint:'interactive'});
+    const bytes=Uint8Array.from(atob(pcm),c=>c.charCodeAt(0));
+    const samples=new Int16Array(bytes.buffer,0,bytes.byteLength>>1);const frames=samples.length>>1;if(frames===0)return;
+    const buffer=audioContext.createBuffer(2,frames,48000);const left=buffer.getChannelData(0),right=buffer.getChannelData(1);
+    for(let i=0;i<frames;i++){left[i]=samples[2*i]/32768;right[i]=samples[2*i+1]/32768;}
+    const source=audioContext.createBufferSource();source.buffer=buffer;source.connect(audioContext.destination);
+    const now=audioContext.currentTime;if(audioAt<now+0.02||audioAt>now+0.25)audioAt=now+0.05;
+    source.start(audioAt);audioAt+=buffer.duration;
+  }catch{}
+}
 function recover(message){reset(false);show(message);post({type:'keyframe',epoch:streamEpoch});}
 function epochFor(m,advance=false){
   if(m.epoch===undefined)return streamEpoch===0;
@@ -102,6 +118,7 @@ chrome.webview.addEventListener('message',async e=>{
   if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
   if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
   if(m.type==='cursor'){setCursor(m);return;}
+  if(m.type==='audio'){playAudio(m.pcm);return;}
   if(m.type==='video'){
     if(!epochFor(m,true))return;
     // Older desktop hosts advertise fill; always preserve the received picture's proportions.

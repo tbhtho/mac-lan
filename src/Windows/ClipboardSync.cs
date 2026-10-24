@@ -51,7 +51,7 @@ internal sealed class ClipboardSync : IDisposable
             if(!baseline){baseline=true;last??=text;return;}
             if(text.Length==0||text==last)return;
             last=text;
-            try{Clipboard.SetText(text);}catch(System.Runtime.InteropServices.COMException){last=null;}
+            try{await OnClipboardThread(()=>{Clipboard.SetText(text);return true;});}catch(Exception e)when(e is System.Runtime.InteropServices.COMException or TimeoutException){last=null;}
         }
         catch(Exception e)when(e is HttpRequestException or TaskCanceledException or JsonException or OperationCanceledException){}
         finally{polling=false;}
@@ -60,9 +60,10 @@ internal sealed class ClipboardSync : IDisposable
     public async void WindowsChanged()
     {
         if(disposed||target.SessionEnded.IsCancellationRequested)return;
-        string text;
-        try{if(!Clipboard.ContainsText())return;text=Clipboard.GetText();}
-        catch(System.Runtime.InteropServices.COMException){return;}
+        string? text;
+        try{text=await OnClipboardThread(()=>Clipboard.ContainsText()?Clipboard.GetText():null);}
+        catch(Exception e)when(e is System.Runtime.InteropServices.COMException or TimeoutException){return;}
+        if(text==null||disposed)return;
         if(text.Length==0||text==last||System.Text.Encoding.UTF8.GetByteCount(text)>MaxBytes)return;
         last=text;baseline=true;
         try
@@ -71,6 +72,16 @@ internal sealed class ClipboardSync : IDisposable
             using var response=await client.SendAsync(request,target.SessionEnded);
         }
         catch(Exception e)when(e is HttpRequestException or TaskCanceledException or OperationCanceledException){}
+    }
+    // The Windows clipboard can block while the copying app renders its data on demand (editors
+    // often do). Touch it only on a short-lived STA thread with a time limit, never the UI thread,
+    // which also sends the connection heartbeat.
+    static Task<T> OnClipboardThread<T>(Func<T> work)
+    {
+        var result=new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread=new Thread(()=>{try{result.SetResult(work());}catch(Exception e){result.SetException(e);}}){IsBackground=true,Name="mac-lan clipboard"};
+        thread.SetApartmentState(ApartmentState.STA);thread.Start();
+        return result.Task.WaitAsync(TimeSpan.FromSeconds(3));
     }
     public void Dispose(){if(disposed)return;disposed=true;timer.Stop();client.Dispose();}
 }

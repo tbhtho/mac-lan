@@ -40,6 +40,7 @@ type start struct {
 	Quality int    `json:"quality"`
 	Codec   string `json:"codec"`
 	Bitrate int    `json:"bitrate"`
+	Audio   bool   `json:"audio"`
 }
 
 func (s start) valid(windows []window) bool {
@@ -334,6 +335,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	events := make(chan input, 32)
 	frames := newVideoQueue()
+	// About half a second of Mac audio; when full the oldest chunk is dropped, never video.
+	audio := make(chan []byte, 24)
 	status := make(chan statusMessage, 4)
 	done := make(chan struct{})
 	var once sync.Once
@@ -341,7 +344,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 	go func() {
 		defer stop()
-		writeQueuedVideo(done, frames, status, func(text bool, b []byte) error {
+		writeQueuedVideo(done, frames, status, audio, func(text bool, b []byte) error {
 			kind := websocket.BinaryMessage
 			if text {
 				kind = websocket.TextMessage
@@ -392,6 +395,21 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		default:
+		}
+		if len(b) >= 9 && b[0] == 4 {
+			select {
+			case audio <- b:
+			default:
+				select {
+				case <-audio:
+				default:
+				}
+				select {
+				case audio <- b:
+				default:
+				}
+			}
+			return
 		}
 		frames.push(b, time.Now())
 	}

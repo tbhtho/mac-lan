@@ -37,3 +37,18 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   `pbpaste`/`pbcopy`. Windows pushes on `WM_CLIPBOARDUPDATE`, polls the Mac once
   a second, and remembers the last synced text so nothing echoes back. The Mac
   clipboard present at connection time is not copied to Windows.
+
+## Alpha.30 additions
+
+- A start request may carry `"audio": true`. The host then passes `audio` to the
+  capture helper, which adds ScreenCaptureKit audio (48 kHz stereo, excluding its
+  own output) and mutes the default output device until it exits, restoring the
+  previous state on normal exit and SIGTERM.
+- Audio travels as stream packet kind 4: `[4][sequence u32][0 u32][16-bit
+  little-endian interleaved stereo PCM]`, with its own sequence so video gap
+  detection never sees it. The host keeps up to 24 audio packets in a separate
+  queue that drops the oldest when full, writes status lines first, then audio,
+  then video. Windows does not count audio as fresh video and plays it through
+  Web Audio about 50 ms ahead.
+- Windows clipboard access runs on a short-lived STA thread with a 3-second
+  limit, so a slow clipboard owner cannot stall the UI thread and its lease.

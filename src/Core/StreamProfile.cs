@@ -8,5 +8,6 @@ public sealed record StreamProfile(string Label,string Codec)
     public static IReadOnlyList<StreamProfile> Options {get;}=[DefaultHardware,Compatible];
 
     public object CreateStart(uint window,int width=1920,int fps=60,int bitrate=8)=>
-        new{type="start",window,width,fps,quality=70,codec=Codec,bitrate};
+        // audio: this Windows app plays Mac sound; older viewers would misread audio packets.
+        new{type="start",window,width,fps,quality=70,codec=Codec,bitrate,audio=true};
 }

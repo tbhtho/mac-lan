@@ -175,7 +175,7 @@ func TestVideoWriterPrioritizesHeartbeatAfterStalledFrame(t *testing.T) {
 	var order []uint32
 	go func() {
 		defer close(finished)
-		writeQueuedVideo(done, q, status, func(text bool, data []byte) error {
+		writeQueuedVideo(done, q, status, nil, func(text bool, data []byte) error {
 			if text {
 				order = append(order, 0)
 				return nil
@@ -258,5 +258,24 @@ func TestVideoBurstPreservesEncodedDependencies(t *testing.T) {
 			t.Fatalf("writer discarded encoded dependency: got sequence %d, want %d", got, want)
 		}
 		want++
+	}
+}
+
+func TestMacAudioIsWrittenBeforeQueuedVideoAndNeverQueuedAsVideo(t *testing.T) {
+	q := newVideoQueue()
+	q.push(append([]byte{2, 0, 0, 0, 1, 0, 0, 0, 0}, 0xAA), time.Now())
+	audio := make(chan []byte, 1)
+	audio <- []byte{4, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2}
+	done := make(chan struct{})
+	var kinds []byte
+	writeQueuedVideo(done, q, make(chan statusMessage), audio, func(text bool, data []byte) error {
+		kinds = append(kinds, data[0])
+		if len(kinds) == 2 {
+			close(done)
+		}
+		return nil
+	})
+	if len(kinds) != 2 || kinds[0] != 4 || kinds[1] != 2 {
+		t.Fatalf("audio must go out first, got kinds %v", kinds)
 	}
 }
