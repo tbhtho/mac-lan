@@ -165,7 +165,7 @@ internal sealed class Session : IAsyncDisposable
             {
                 using var metadata=JsonDocument.Parse(line);bool lease=metadata.RootElement.GetProperty("type").GetString()=="lease";
                 long began=Stopwatch.GetTimestamp();
-                using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);deadline.CancelAfter(1000);
+                using var deadline=CancellationTokenSource.CreateLinkedTokenSource(stop.Token);deadline.CancelAfter(5000);
                 await socket.SendAsync(Encoding.UTF8.GetBytes(line),WebSocketMessageType.Text,true,deadline.Token).ConfigureAwait(false);
                 long elapsed=(long)Stopwatch.GetElapsedTime(began).TotalMilliseconds;Interlocked.Exchange(ref lastSendDuration,elapsed);Interlocked.Increment(ref sentMessages);
                 if(lease)

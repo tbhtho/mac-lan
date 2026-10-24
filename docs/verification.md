@@ -1,5 +1,24 @@
 # Verification record
 
+## Alpha.35 - tolerate brief viewer transport stalls
+
+The alpha.34 session on 2026-10-24 ended with a Windows `receive-failed` /
+`ConnectionClosedPrematurely`, while the UI tick age was 120 ms, no input had
+been dropped, video was 17 ms old and a pong was 113 ms old. The Mac recorded
+`stream-ended` with code `ok`, not a capture failure. That signature is a
+link-level interruption: the viewer uplink paused long enough for the Mac's
+2-second input-read deadline to close the session, while video continued
+downlink. The Windows WLAN log shows repeated reassociations around that period
+but records no event at the exact second, so the specific link event is inferred
+from the transport evidence, not proven.
+
+Alpha.35 raises the viewer-outage grace from 2 s to 15 s in the native helper and
+the host read deadline from 2 s to 20 s, the Windows per-send deadline from
+1 s to 5 s, and the Mac stream write deadline from 2 s to 10 s. Control still
+releases after the 850 ms lease, so a stall shows a control pause rather than held
+keys, and video resumes when messages flow again. A genuinely closed viewer is
+still detected by EOF and the helper's shutdown.
+
 ## Alpha.34 - native self-test fix and clearer video-off guidance
 
 Alpha.33 was published and its assets verified, but the Mac helper failed its
