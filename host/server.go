@@ -363,7 +363,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if text {
 				kind = websocket.TextMessage
 			}
-			_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			// A short downlink stall must not tear down the session; the native
+			// viewer-outage grace and the input read deadline bound real outages.
+			_ = c.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			return c.WriteMessage(kind, b)
 		})
 	}()
@@ -371,7 +373,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer stop()
 		defer close(events)
 		for {
-			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			// A few seconds of Wi-Fi silence must not end capture: the native lease
+			// releases control after 850 ms, and the helper stops only after 15 s.
+			_ = c.SetReadDeadline(time.Now().Add(20 * time.Second))
 			var e input
 			if c.ReadJSON(&e) != nil || !e.valid() {
 				return

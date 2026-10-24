@@ -33,7 +33,7 @@ record per line. UTC timestamps can be matched with Mac diagnostic timestamps;
   when a session is connected. A stall shorter than the sampling interval may
   only appear as a measured gap on return.
 - Lease state transitions, send gaps of at least 750 ms, sends taking at least
-  250 ms, the one-second send deadline, close status, and categorized native
+  250 ms, the five-second send deadline, close status, and categorized native
   failures. `session-ended` is written on the connection worker, before the UI
   handles the disconnect, preserving evidence if the UI is delayed.
 - Network read/write continuations do not depend on the Windows dispatcher;
@@ -71,6 +71,14 @@ the Windows UI was delayed. An increasing native heartbeat age with a responsive
 UI points toward the Mac/helper or transport. Decoder backlog/recovery alongside
 fresh incoming frames identifies a different boundary from missing packets.
 These are investigation clues, not proof of a specific cause.
+
+An alpha.34 session that ended with `receive-failed` and
+`ConnectionClosedPrematurely`, a UI tick age under one second, zero dropped input
+and a video packet a few milliseconds old was a link stall, not a capture or
+decoder failure. The Mac had closed after its 2-second viewer-read deadline while
+the downlink was still healthy. Alpha.35 waits 15 seconds before stopping capture,
+so the same stall pauses control and keeps video; control still releases at the
+850 ms lease.
 
 The alpha.32 report of `lease-expired` / `generation-revoked` with permission
 still true confirms that control was revoked by the watchdog. It does not by

@@ -433,8 +433,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         if now()-lastAlive>0.5 {lastAlive=now();jsonStatus(["type":"captureAlive"])}
         reportCursor()
         if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll();reportControl("lease-expired",permission:AXIsProcessTrusted()) }
-        if now()-watchdogGrace>2 {
-            // Stop capture after a dead viewer, even if parent host was killed.
+        if now()-watchdogGrace>15 {
+            // Tolerate brief Wi-Fi/driver stalls without ending video; control is still
+            // released after the 850 ms lease. Stop only after a long viewer outage,
+            // even if the parent host was killed.
             shutdown("Viewer heartbeat expired")
         }
         if windowID != 0 {
