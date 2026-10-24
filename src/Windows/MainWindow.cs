@@ -75,7 +75,8 @@ internal sealed partial class MainWindow : Window
             // back to Windows: switch tabs. Focus on another monitor leaves the Mac view on top.
             if(remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
         };
-        Activated+=(_,_)=>{Topmost=remote;RefreshContext();};
+        // Clicking the Mac view brings it forward; put the mac-lan bar back above it right away.
+        Activated+=(_,_)=>{Topmost=remote;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
         Closing+=async(_,e)=>
@@ -290,8 +291,12 @@ internal sealed partial class MainWindow : Window
     void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
-        // Re-raise only when a taskbar actually came up over the Mac view; raising every tick made the bar flicker.
-        if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this)&&Native.TaskbarAbove(this)){Native.KeepAbove(this);tabBar.KeepAbove();}
+        // Re-raise only when something is actually out of order; raising every tick made the bar flicker.
+        if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this))
+        {
+            if(Native.TaskbarAbove(this))Native.KeepAbove(this);
+            if(Native.IsAbove(this,tabBar))tabBar.KeepAbove();
+        }
         RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":"Click Mac to control"):null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(appWindow!=null)appWindow.Title=AppTitle();
