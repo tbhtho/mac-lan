@@ -49,6 +49,19 @@ internal static class Native
         if(ScreenBounds(m.Id) is not var (left,top,width,height)){Position(window,m,false);return;}
         SetWindowPos(new WindowInteropHelper(window).Handle,0,left,top,width,height,0x0010|0x0040|0x0004);
     }
+    [DllImport("user32.dll")] static extern nint GetWindow(nint hwnd,uint command);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(nint hwnd,System.Text.StringBuilder name,int length);
+    // True when a Windows taskbar sits above window in the z-order.
+    public static bool TaskbarAbove(Window window)
+    {
+        var name=new System.Text.StringBuilder(64);
+        for(nint above=GetWindow(new WindowInteropHelper(window).Handle,3);above!=0;above=GetWindow(above,3))
+        {
+            name.Clear();GetClassName(above,name,name.Capacity);
+            if(name.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")return true;
+        }
+        return false;
+    }
     // Re-assert always-on-top without moving or activating; the shell raises its taskbars on focus changes.
     public static void KeepAbove(Window window)=>SetWindowPos(new WindowInteropHelper(window).Handle,-1,0,0,0,0,0x0010|0x0002|0x0001);
     internal static bool ForegroundIsOwnProcess()
