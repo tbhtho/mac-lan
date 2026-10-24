@@ -207,6 +207,8 @@ internal sealed partial class MainWindow : Window
         bool CurrentStream()=>session==s&&s.IsReady&&(remote||appWindow!=null);
         s.Frame+=b=>
         {
+            // Kind 4 is Mac audio; it plays immediately and never enters the video queue.
+            if(b.Length>9&&b[0]==4){Dispatcher.BeginInvoke(()=>{if(CurrentStream())(appView??desktop).PlayAudio(b);});return;}
             frames.Enqueue(b,Environment.TickCount64);
             if(Interlocked.Exchange(ref frameScheduled,1)!=0)return;
             Dispatcher.BeginInvoke(()=>
@@ -397,7 +399,7 @@ internal sealed class RemoteView : WebView2
         try{
             _=CoreWebView2Environment.GetAvailableBrowserVersionString();
             string cache=Path.Combine(Path.GetTempPath(),"mac-lan-WebView",Environment.ProcessId.ToString());
-            var env=await CoreWebView2Environment.CreateAsync(null,cache);
+            var env=await CoreWebView2Environment.CreateAsync(null,cache,new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
             await EnsureCoreWebView2Async(env);
             if(CoreWebView2==null)throw new InvalidOperationException("WebView2 initialization did not produce a runtime.");
             CoreWebView2.Settings.AreDevToolsEnabled=false;CoreWebView2.Settings.AreDefaultContextMenusEnabled=false;CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled=false;CoreWebView2.Settings.IsStatusBarEnabled=false;CoreWebView2.Settings.IsZoomControlEnabled=false;
@@ -437,6 +439,7 @@ internal sealed class RemoteView : WebView2
     }
     static bool MessageEpoch(JsonElement m,out long epoch){epoch=0;return m.TryGetProperty("epoch",out var value)&&value.ValueKind==JsonValueKind.Number&&value.TryGetInt64(out epoch);}
     public void Configure(JsonElement m){config=m;PostConfiguration();}
+    public void PlayAudio(byte[] packet){if(ready)CoreWebView2.PostWebMessageAsJson("{\"type\":\"audio\",\"pcm\":\""+Convert.ToBase64String(packet,9,packet.Length-9)+"\"}");}
     public void ShowMacCursor(JsonElement m){if(ready)CoreWebView2.PostWebMessageAsJson(m.GetRawText());}
     void PostConfiguration()
     {

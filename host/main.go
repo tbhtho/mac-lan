@@ -312,7 +312,11 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 	if bitrate == 0 {
 		bitrate = 8
 	}
-	cmd := exec.Command(helper, "--stream", strconv.FormatUint(uint64(r.Window), 10), strconv.Itoa(r.Width), strconv.Itoa(r.FPS), strconv.Itoa(r.Quality), codec, strconv.Itoa(bitrate))
+	arguments := []string{"--stream", strconv.FormatUint(uint64(r.Window), 10), strconv.Itoa(r.Width), strconv.Itoa(r.FPS), strconv.Itoa(r.Quality), codec, strconv.Itoa(bitrate)}
+	if r.Audio {
+		arguments = append(arguments, "audio")
+	}
+	cmd := exec.Command(helper, arguments...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err

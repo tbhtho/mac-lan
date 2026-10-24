@@ -9,6 +9,31 @@ import CoreImage
 import VideoToolbox
 import ImageIO
 import UniformTypeIdentifiers
+import CoreAudio
+
+// The MacBook's speakers stay silent while Windows plays the stream. The previous mute state
+// is restored on every normal exit path, including SIGTERM.
+var mutedOutput = AudioObjectID(0)
+func muteAddress() -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress(mSelector:kAudioDevicePropertyMute,mScope:kAudioDevicePropertyScopeOutput,mElement:kAudioObjectPropertyElementMain)
+}
+func muteMacOutput() {
+    var device = AudioObjectID(0), size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var address = AudioObjectPropertyAddress(mSelector:kAudioHardwarePropertyDefaultOutputDevice,mScope:kAudioObjectPropertyScopeGlobal,mElement:kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),&address,0,nil,&size,&device) == noErr, device != 0 else { return }
+    var mute = muteAddress()
+    guard AudioObjectHasProperty(device,&mute) else { return }
+    var current = UInt32(0), length = UInt32(MemoryLayout<UInt32>.size)
+    guard AudioObjectGetPropertyData(device,&mute,0,nil,&length,&current) == noErr, current == 0 else { return }
+    var on = UInt32(1)
+    if AudioObjectSetPropertyData(device,&mute,0,nil,length,&on) == noErr { mutedOutput = device }
+}
+func restoreMacOutput() {
+    guard mutedOutput != 0 else { return }
+    var mute = muteAddress(), off = UInt32(0)
+    _ = AudioObjectSetPropertyData(mutedOutput,&mute,0,nil,UInt32(MemoryLayout<UInt32>.size),&off)
+    mutedOutput = 0
+}
 
 // Pure lease model; --self-test never queries permissions, captures, or posts events.
 struct Lease {
@@ -146,13 +171,16 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         // Keep the immediate Windows pointer; omit the delayed duplicate from video only.
         config.queueDepth = 3; config.showsCursor = false
         config.pixelFormat = codec == "h264" ? kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange : kCVPixelFormatType_32BGRA
-        config.capturesAudio = false
+        // Mac sound travels with the picture: 48 kHz stereo, without this helper's own output.
+        config.capturesAudio = audio; config.sampleRate = 48_000; config.channelCount = 2; config.excludesCurrentProcessAudio = true
         config.ignoreShadowsSingleWindow = true
         if codec == "h264" { setupEncoder() }
         else { jsonStatus(["type":"video","codec":"jpeg","width":width,"height":height,"fps":fps,"presentation":"fit"]) }
         stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream!.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "MAC-DOW.capture", qos: .userInteractive))
+        if audio { try stream!.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "mac-lan.audio", qos: .userInteractive)) }
         try await stream!.startCapture()
+        if audio { muteMacOutput() }
         // Input state and watchdog remain serialized on the main queue.
         DispatchQueue.main.async(execute: DispatchWorkItem {
             self.watchdog = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.tick), userInfo: nil, repeats: true)
@@ -213,6 +241,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     func stream(_ stream: SCStream, didStopWithError error: Error) { shutdown("Capture stopped: \(error.localizedDescription)") }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio { sendAudio(sampleBuffer); return }
         guard type == .screen, sampleBuffer.isValid, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         stateLock.lock()
@@ -293,9 +322,50 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         var packet = Data([kind]);var seq = sequence.bigEndian
         var elapsed = UInt32(min(4_000_000_000,max(0,(now()-encodeStart)*1_000_000))).bigEndian
         withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&elapsed) { packet.append(contentsOf:$0) };packet.append(data)
+        writeFramed(packet)
+    }
+    func writeFramed(_ packet:Data) {
         var length = UInt32(packet.count).bigEndian
         var framed = Data();withUnsafeBytes(of:&length) { framed.append(contentsOf:$0) };framed.append(packet)
         do { try FileHandle.standardOutput.write(contentsOf:framed) } catch { shutdown("Viewer transport pipe closed") }
+    }
+    // Audio packets are kind 4 with their own sequence, so video gap detection never sees them:
+    // [4][sequence u32][0 u32][16-bit little-endian stereo PCM at 48 kHz].
+    var audioSequence: UInt32 = 0
+    var audio = false
+    func sendAudio(_ sampleBuffer: CMSampleBuffer) {
+        stateLock.lock(); let active = view; stateLock.unlock()
+        guard active, sampleBuffer.isValid, let format = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let description = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+              description.mFormatID == kAudioFormatLinearPCM, description.mFormatFlags & kAudioFormatFlagIsFloat != 0,
+              description.mBitsPerChannel == 32, description.mChannelsPerFrame > 0 else { return }
+        let frames = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frames > 0, frames <= 48_000 else { return }
+        let channels = Int(description.mChannelsPerFrame)
+        let planar = description.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        var pcm = [Int16](repeating:0,count:frames*2)
+        do {
+            try sampleBuffer.withAudioBufferList { list, _ in
+                for channel in 0..<2 {
+                    let source = min(channel,channels-1)
+                    let buffer = planar ? (source < list.count ? list[source] : list[0]) : list[0]
+                    guard let data = buffer.mData else { continue }
+                    let samples = data.assumingMemoryBound(to:Float.self)
+                    let available = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                    for frame in 0..<frames {
+                        let index = planar ? frame : frame*channels+source
+                        guard index < available else { break }
+                        pcm[frame*2+channel] = Int16(max(-1,min(1,samples[index]))*32767)
+                    }
+                }
+            }
+        } catch { return }
+        outputLock.lock();defer { outputLock.unlock() }
+        audioSequence &+= 1
+        var packet = Data([4]);var seq = audioSequence.bigEndian;var zero = UInt32(0)
+        withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&zero) { packet.append(contentsOf:$0) }
+        pcm.withUnsafeBytes { packet.append(contentsOf:$0) }
+        writeFramed(packet)
     }
     func readInput() {
         let inbox = InputMailbox(receive: { [weak self] message, received in self?.input(message,received:received) }, failure: { [weak self] reason in
@@ -489,6 +559,8 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
 }
 
 signal(SIGPIPE,SIG_IGN)
+atexit { restoreMacOutput() }
+signal(SIGTERM) { _ in restoreMacOutput(); exit(0) }
 let args=CommandLine.arguments
 if args.contains("--release-safe") {
     // Parent supervisor provides only previously acknowledged held inputs; no capture/listener.
@@ -535,9 +607,10 @@ if args.contains("--list") {
         catch { die("Window enumeration failed: \(error)") }
     }
     RunLoop.main.run()
-} else if args.count==8 && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
+} else if (args.count==8 || args.count==9 && args[8]=="audio") && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
           width>=640,width<=1920,validCaptureFPS(fps),quality>=35,quality<=85,bitrate>=2,bitrate<=20,["h264","jpeg"].contains(args[6]) {
     let engine=Engine()
+    engine.audio = args.count==9
     Task { do { try await engine.start(id:id,maxWidth:width,fps:fps,quality:quality,codec:args[6],bitrate:bitrate) } catch { die("Capture setup failed: \(error)") } }
     RunLoop.main.run()
 } else { die("Usage: MacDowCapture --check | --list | --self-test | --stream WINDOW WIDTH FPS QUALITY h264|jpeg MBPS") }

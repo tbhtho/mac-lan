@@ -105,7 +105,7 @@ internal sealed class Session : IAsyncDisposable
             {
                 using var message=new MemoryStream();WebSocketReceiveResult result;
                 do{result=await socket.ReceiveAsync(buffer,stop.Token);if(result.MessageType==WebSocketMessageType.Close){Abort("Mac disconnected.");return;}message.Write(buffer,0,result.Count);if(message.Length>4*1024*1024)throw new InvalidDataException("Oversized frame.");}while(!result.EndOfMessage);
-                if(result.MessageType==WebSocketMessageType.Binary){if(IsReady){LastFrame=Stopwatch.GetTimestamp();Frame?.Invoke(message.ToArray());}}
+                if(result.MessageType==WebSocketMessageType.Binary){if(IsReady){var data=message.ToArray();if(data.Length>0&&data[0]!=4)LastFrame=Stopwatch.GetTimestamp();Frame?.Invoke(data);}}
                 else
                 {
                     using var doc=JsonDocument.Parse(message.ToArray());var value=doc.RootElement.Clone();

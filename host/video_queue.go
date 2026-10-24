@@ -130,7 +130,8 @@ type statusMessage struct {
 // The caller owns the only WebSocket writer and its per-message deadline. Check
 // control/status messages before each video write so a captured-frame backlog
 // cannot starve the pong used by the viewer's control lease.
-func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan statusMessage, write func(text bool, data []byte) error) {
+// Status lines go first, then Mac audio (small, latency-sensitive), then video.
+func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan statusMessage, audio <-chan []byte, write func(text bool, data []byte) error) {
 	writeStatus := func(v statusMessage) bool {
 		err := write(true, []byte(v.line))
 		if v.sent != nil {
@@ -152,6 +153,14 @@ func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan st
 			continue
 		default:
 		}
+		select {
+		case a := <-audio:
+			if write(false, a) != nil {
+				return
+			}
+			continue
+		default:
+		}
 		if b, ok := frames.pop(time.Now()); ok {
 			if write(false, b) != nil {
 				return
@@ -164,6 +173,10 @@ func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan st
 		case <-frames.ready:
 		case v := <-status:
 			if !writeStatus(v) {
+				return
+			}
+		case a := <-audio:
+			if write(false, a) != nil {
 				return
 			}
 		}
