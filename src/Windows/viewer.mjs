@@ -3,6 +3,7 @@ const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0,streamEpoch=0,lastBatch=0;
 let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false;
+let recoveries=0;
 const MAX_BATCH_FRAMES=8,MAX_BATCH_BYTES=4*1024*1024,MAX_BUFFERED_FRAMES=64,MAX_BUFFERED_BYTES=8*1024*1024,MAX_BUFFERED_MS=250;
 let encoded=[],bufferedBytes=0,pumping=false,queueTimer=null,picture=null,paintRequest=null,queuedJpeg=null;
 const input=m=>post({...m,epoch:streamEpoch});
@@ -10,7 +11,7 @@ function show(text){hint.textContent=text;}
 function reset(clearPicture=true){
   renderGeneration++;if(queueTimer!==null){clearTimeout(queueTimer);queueTimer=null;}if(paintRequest!==null){cancelAnimationFrame(paintRequest);paintRequest=null;}
   if(picture){picture.frame.close();picture=null;}if(decoder){try{decoder.close();}catch{}decoder=null;}
-  configuredCodec=null;sequence.reset();pending.clear();encoded=[];bufferedBytes=0;queuedJpeg=null;
+  configuredCodec=null;sequence.reset();pending.clear();encoded=[];bufferedBytes=0;queuedJpeg=null;clearMove();
   if(clearPicture){ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 }
 // A reset viewer asks the Mac for a keyframe instead of waiting for the next periodic one.
@@ -41,7 +42,11 @@ function playAudio(pcm){
     source.start(audioAt);audioAt+=buffer.duration;
   }catch{}
 }
-function recover(message){reset(false);show(message);post({type:'keyframe',epoch:streamEpoch});}
+function recover(message){
+  const code=message.startsWith('Decoder delayed')?'decoder-delayed':message.startsWith('Video sequence')?'sequence-gap':message.startsWith('Decoder reset')?'decoder-error':'frame-error';
+  const health={queueFrames:encoded.length+pending.size,bufferedBytes,decoderQueue:decoder?.decodeQueueSize??0,recoveries:++recoveries};
+  reset(false);show(message);post({type:'keyframe',epoch:streamEpoch,code,...health});
+}
 function epochFor(m,advance=false){
   if(m.epoch===undefined)return streamEpoch===0;
   if(!Number.isSafeInteger(m.epoch)||m.epoch<=0||m.epoch<streamEpoch)return false;
@@ -142,27 +147,41 @@ chrome.webview.addEventListener('message',async e=>{
   }catch(err){if(generation===renderGeneration&&epoch===streamEpoch)recover('Video error: '+err.message);}
   finally{post(batch?{type:'frameAck',epoch:m.epoch,batch:m.batch}:{type:'frameAck'});}
 });
-setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps � encode ${encode.toFixed(1)} ms � local decode/submit ${lastDecode.toFixed(1)} ms � ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
+setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',fps:drawn/Math.max(secs,.1),encodeMs:encode,decodeMs:lastDecode,queueFrames:encoded.length+pending.size,bufferedBytes,decoderQueue:decoder?.decodeQueueSize??0,recoveries,message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps � encode ${encode.toFixed(1)} ms � local decode/submit ${lastDecode.toFixed(1)} ms � ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
 function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height);}
-canvas.addEventListener('pointermove',e=>{if(!armed||activationPointer!==null)return;const p=coords(e);if(p)input({type:'move',...p});});
+// A high-polling mouse reports up to 1000 moves a second. Only the newest absolute
+// position matters, so a burst collapses into one message per animation frame and any
+// order-sensitive event (click, scroll, release) flushes the pending position first.
+let pendingMove=null,moveFrame=0;
+function clearMove(){pendingMove=null;if(moveFrame){cancelAnimationFrame(moveFrame);moveFrame=0;}}
+function sendMove(){
+  if(moveFrame){cancelAnimationFrame(moveFrame);moveFrame=0;}
+  const p=pendingMove;pendingMove=null;
+  if(p&&armed&&activationPointer===null)input({type:'move',...p});
+}
+function queueMove(p){
+  pendingMove=p;
+  if(!moveFrame)moveFrame=requestAnimationFrame(()=>{moveFrame=0;sendMove();});
+}
+canvas.addEventListener('pointermove',e=>{if(!armed||activationPointer!==null)return;const p=coords(e);if(p)queueMove(p);});
 canvas.addEventListener('pointerdown',e=>{
   const p=coords(e);if(!p){e.preventDefault();return;}if(activationPointer!==null||controlRequested)return;if(document.activeElement!==canvas)canvas.focus();
   if(!armed){if(e.button!==0)return;e.preventDefault();activationPointer=e.pointerId;canvas.setPointerCapture(e.pointerId);return;}
-  e.preventDefault();canvas.setPointerCapture(e.pointerId);input({type:'move',...p});input({type:'button',button:e.button,down:true});
+  e.preventDefault();canvas.setPointerCapture(e.pointerId);queueMove(p);sendMove();input({type:'button',button:e.button,down:true});
 });
 canvas.addEventListener('pointerup',e=>{
   const activate=activationPointer===e.pointerId;
   if(activate){activationPointer=null;e.preventDefault();}
-  else if(armed&&activationPointer===null&&canvas.hasPointerCapture(e.pointerId)){e.preventDefault();input({type:'button',button:e.button,down:false});}
+  else if(armed&&activationPointer===null&&canvas.hasPointerCapture(e.pointerId)){e.preventDefault();sendMove();input({type:'button',button:e.button,down:false});}
   if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
   // Commit the consumed click after capture is released. Native focus changes
   // during pointerdown can otherwise cancel that same activation gesture.
   if(activate&&coords(e)){controlRequested=true;input({type:'requestControl'});}
 });
-function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;if(notify)input({type:'blur',reason});}
+function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;clearMove();if(notify)input({type:'blur',reason});}
 canvas.addEventListener('pointercancel',e=>{if(activationPointer===e.pointerId||armed||controlRequested)releaseControl('pointer-cancel');if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener('lostpointercapture',e=>{if(activationPointer===e.pointerId)releaseControl('pointer-cancel');});
-canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
+canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();sendMove();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
 window.addEventListener('blur',()=>releaseControl('viewer-blur'));

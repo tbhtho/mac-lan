@@ -139,7 +139,7 @@ func TestNativeControlStatusOnlyAllowsFixedLabelsAndBooleans(t *testing.T) {
 	if !ok || missing.Permission || missing.Active {
 		t.Fatal("view-only must retain missing Accessibility permission")
 	}
-	for _, code := range []string{"view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked"} {
+	for _, code := range []string{"view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked", "input-overflow"} {
 		line, _ := json.Marshal(map[string]any{"type": "controlStatus", "code": code, "controlPermission": true, "active": code == "ready", "message": "/Users/private-name secret-token 192.168.1.2", "x": 0.23})
 		state, ok := nativeControlStatus(line)
 		if !ok || state.Code != code || !state.Permission || state.Active != (code == "ready") {

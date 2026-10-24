@@ -35,7 +35,7 @@ reasonGate.SetContext(true,true,false,"window-deactivated");
 Check(reasons.SequenceEqual(new[]{"window-deactivated"}),"native deactivation retains its distinct release reason");
 reasonGate.SetContext(true,true,true);reasonGate.Arm();reasons.Clear();reasonGate.Disarm("untrusted arbitrary text");
 Check(reasons.SequenceEqual(new[]{"manual"}),"unknown release reasons cannot enter diagnostics");
-Check(ControlReleaseReasons.All.Count==20&&ControlReleaseReasons.All.All(ControlReleaseReasons.IsKnown),"release reasons use one finite allowlist");
+Check(ControlReleaseReasons.All.Count==21&&ControlReleaseReasons.All.All(ControlReleaseReasons.IsKnown),"release reasons use one finite allowlist");
 
 Check(VideoFreshness.BlockReason(true,9001,10000,10000,10000,1000)==null,"fresh video and native heartbeat permit control");
 Check(VideoFreshness.BlockReason(true,9000,10000,10000,10000,1000)=="video-stale","one second presentation stall remains blocked");

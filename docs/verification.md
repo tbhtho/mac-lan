@@ -1,5 +1,26 @@
 # Verification record
 
+## Alpha.33 - input pressure no longer ends capture
+
+The reported alpha.32 Mac log ended with `capture-failed` / `input-overflow`:
+the native helper exited after its bounded input mailbox overflowed, which left
+Windows on a black screen and the Mac showing that the session ended. Alpha.33
+coalesces absolute pointer moves per animation frame in the viewer,
+drops excess input instead of closing the session in the Windows send queue and
+the Mac host bridge, and answers native mailbox pressure by releasing held input
+and reporting the `input-overflow` control state while capture, video and audio
+continue. The next click resumes control. Alpha.33 also ships the local Windows
+disconnect logger described in [windows-diagnostics.md](windows-diagnostics.md).
+
+The headless suite passed on Windows, including new viewer coalescing checks,
+a Go host test that floods input past its bounded queue and still receives a
+later release, a synthetic C# session test that fills the outgoing queue without
+ending an approved stream, and the native self-check source for coalescing and
+recovery after pressure. The Swift helper was not compiled or self-tested here
+because this machine has no Swift toolchain; real control feel, the native
+self-test and the disconnect fix remain pending a Mac build and the user's
+two-computer check.
+
 ## Alpha.22 - single approval, keyframes on request, matching approval UI
 
 Pairing approval now also approves viewing for that peer until sharing stops

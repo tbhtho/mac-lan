@@ -7,6 +7,8 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT='1'
 $env:GOCACHE=Join-Path $PWD '.cache\go-build'
 $env:GOMODCACHE=Join-Path $PWD '.cache\go-mod'
 $env:GOMAXPROCS='2'
+dotnet run --project tests/Diagnostics.Tests -c Release -p:BuildInParallel=false
+if($LASTEXITCODE){throw 'Local diagnostic logging tests failed'}
 dotnet run --project tests/Core.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Core tests failed'}
 dotnet run --project tests/Video.Tests -c Release -p:BuildInParallel=false

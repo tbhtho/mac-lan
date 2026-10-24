@@ -334,6 +334,20 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events := make(chan input, 32)
+	// Input pressure is never fatal: a move is an absolute position and the viewer
+	// lease repeats control state, so dropped input corrects itself on the wire.
+	dropped, lastDrop := 0, time.Time{}
+	reportDrop := func() {
+		dropped++
+		if now := time.Now(); now.Sub(lastDrop) >= time.Second {
+			lastDrop = now
+			count := dropped
+			if count > 100000 {
+				count = 100000
+			}
+			diagnostics.Emit("mac", "input-dropped", "queue-full", map[string]int{"dropped": count})
+		}
+	}
 	frames := newVideoQueue()
 	// About half a second of Mac audio; when full the oldest chunk is dropped, never video.
 	audio := make(chan []byte, 24)
@@ -382,7 +396,22 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case <-done:
 				return
 			default:
-				return
+				if e.Type == "move" || e.Type == "scroll" {
+					reportDrop()
+					continue
+				}
+				// Lease and release carry safety state; wait briefly for the native
+				// writer rather than losing them with a key still held.
+				wait := time.NewTimer(100 * time.Millisecond)
+				select {
+				case events <- e:
+					wait.Stop()
+				case <-done:
+					wait.Stop()
+					return
+				case <-wait.C:
+					reportDrop()
+				}
 			}
 		}
 	}()

@@ -15,6 +15,15 @@ function runtime({manualDecoder=false}={}){
 function packet(kind,seq,payload){const b=Buffer.alloc(9+payload.length);b[0]=kind;b.writeUInt32BE(seq,1);b.writeUInt32BE(1000,5);Buffer.from(payload).copy(b,9);return {type:'frame',data:b.toString('base64')}}
 const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
 {
+ const h=runtime({manualDecoder:true});await h.send({type:'video',codec:'avc1.42c01f',fps:60,epoch:5});
+ await h.send({...packet(2,1,key),epoch:5});await h.send({...packet(3,2,delta),epoch:5});h.tick(251);
+ const recovery=h.state.messages.find(m=>m.type==='keyframe');
+ assert.equal(recovery?.code,'decoder-delayed','a decoder stall must carry a fixed diagnostic reason to Windows');
+ assert.equal(recovery.queueFrames,2,'recovery evidence must retain the backlog before reset');
+ assert.ok(recovery.bufferedBytes>0);assert.equal(recovery.epoch,5);
+ console.log('PASS decoder recovery reports its reason and pre-reset backlog without frame contents');
+}
+{
  const h=runtime({manualDecoder:true});await h.send({type:'video',codec:'avc1.42c01f',fps:60});
  for(let i=1;i<=10;i++)await h.send(packet(i===1?2:3,i,i===1?key:delta));
  while(h.state.decoders.at(-1).chunks.length)h.decodeOne();h.paint();
@@ -124,7 +133,7 @@ const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
  h.pointer('pointermove');assert.equal(h.state.messages.length,0,'stale armed status cannot reactivate an ended stream');
  h.pointer('pointerdown');h.pointer('pointerup');assert.equal(h.state.messages.at(-1).epoch,2,'a new explicit activation is bound to the current stream');
  await h.send({type:'armed',active:true,epoch:2});h.pointer('pointermove');h.pointer('pointerdown');h.pointer('pointerup');h.pointer('wheel');h.blur();
- assert.deepEqual(h.state.messages.map(m=>m.type),['requestControl','move','move','button','button','scroll','blur']);
+ assert.deepEqual(h.state.messages.map(m=>m.type),['requestControl','move','button','button','scroll','blur']);
  assert.ok(h.state.messages.every(m=>m.epoch===2),'all pointer, activation and release messages carry their stream epoch');
  console.log('PASS clear handshake and input epochs prevent stale armed status or pointer messages crossing streams');
 }
@@ -225,4 +234,22 @@ const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
   assert.deepEqual(h.state.messages.filter(m=>m.type==='button').map(m=>m.down),[true,false]);
  }
  console.log('PASS desktop, App Priority and legacy metadata preserve aspect fit with noninteractive bars');
+}
+{
+ const h=runtime();await h.send({type:'video',codec:'jpeg'});await h.send({type:'armed',active:true});h.state.messages.length=0;
+ for(let i=0;i<200;i++)h.pointer('pointermove',{clientX:100+i,clientY:200});
+ assert.equal(h.state.messages.length,0,'a pointer burst waits for the next animation frame instead of hitting the wire');
+ h.paint();
+ assert.equal(h.state.messages.length,1,'200 hardware moves coalesce into one message');
+ assert.deepEqual([h.state.messages[0].type,h.state.messages[0].epoch],[ 'move',0],'the coalesced move stays an ordinary epoch-bound input');
+ assert.equal(h.state.messages[0].x,299/640,'the newest absolute position survives coalescing');
+ h.state.messages.length=0;h.pointer('pointermove',{clientX:10,clientY:10});h.pointer('pointerdown',{clientX:10,clientY:10});h.pointer('pointerup',{clientX:10,clientY:10});
+ assert.deepEqual(h.state.messages.map(m=>m.type),['move','button','button'],'a click sends one position followed by its press and release');
+ assert.equal(h.state.messages[0].x,10/640,'the Mac receives the press where the user clicked, not an older queued position');
+ h.state.messages.length=0;h.pointer('pointermove',{clientX:20,clientY:20});h.pointer('wheel');
+ assert.deepEqual(h.state.messages.map(m=>m.type),['move','scroll'],'scroll flushes the pending position first');
+ assert.equal(h.state.messages[0].x,20/640,'the flushed position is the newest one');
+ h.state.messages.length=0;h.pointer('pointermove',{clientX:30,clientY:30});await h.send({type:'clear'});h.state.messages.length=0;
+ h.paint();assert.equal(h.state.messages.length,0,'a stream reset discards a pending position from the old picture');
+ console.log('PASS a high-polling pointer coalesces per animation frame and flushes before clicks, scrolls and stream resets');
 }

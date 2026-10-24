@@ -102,7 +102,7 @@ func nativeControlStatus(line []byte) (nativeControlState, bool) {
 		return nativeControlState{}, false
 	}
 	switch status.Code {
-	case "view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked":
+	case "view-only", "ready", "accessibility-missing", "scope-blocked", "lease-expired", "stale-input", "generation-revoked", "input-overflow":
 		return nativeControlState{status.Code, *status.Permission, *status.Active}, true
 	}
 	return nativeControlState{}, false

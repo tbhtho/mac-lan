@@ -71,6 +71,7 @@ func shareable() async throws -> SCShareableContent {
 
 // At most one scheduled main-queue drain and 32 pending input messages.
 // Lease time starts on receipt, never when a delayed main queue processes it.
+// Pressure drops input and releases control; it never ends the video stream.
 enum InputFailure { case overflow, invalid, closed }
 final class InputMailbox {
     let lock=NSLock()
@@ -83,19 +84,33 @@ final class InputMailbox {
     func push(_ message:[String:Any],received:TimeInterval) {
         lock.lock()
         if failed { lock.unlock();return }
-        if message["type"] as? String == "release" { messages.removeAll() }
-        if messages.count>=32 { failed=true;failureReason = .overflow;messages.removeAll() } else { messages.append((message,received)) }
+        let type = message["type"] as? String
+        if type == "release" { messages.removeAll() }
+        if type == "move", let last = messages.last, last.0["type"] as? String == "move" {
+            // Only the newest absolute pointer position matters, so a high-polling
+            // mouse coalesces instead of spending the bounded mailbox.
+            messages[messages.count-1] = (message,received)
+        } else if messages.count>=32 {
+            messages.removeAll(); failed=true; failureReason = .overflow
+        } else {
+            messages.append((message,received))
+        }
         let schedule = !scheduled
         scheduled=true;lock.unlock()
         if schedule { DispatchQueue.main.async { self.drain() } }
     }
     func fail(_ reason:InputFailure){lock.lock();if !failed {failed=true;failureReason=reason};messages.removeAll();let schedule = !scheduled;scheduled=true;lock.unlock();if schedule { DispatchQueue.main.async { self.drain() } }}
     func drain(){
-        lock.lock();let bad=failed;let reason=failureReason;let batch=messages;messages.removeAll();lock.unlock()
-        if bad { failure(reason);return }
-        for (message,received) in batch { receive(message,received) }
-        lock.lock();let again=failed || !messages.isEmpty;if !again { scheduled=false };lock.unlock()
-        if again { DispatchQueue.main.async { self.drain() } }
+        lock.lock()
+        let bad=failed, reason=failureReason, batch=messages
+        messages.removeAll()
+        // Pressure and a protocol fault are reported once; the engine decides whether
+        // to pause control. A closed pipe exits anyway. A push that arrives while this
+        // batch is delivered schedules its own drain.
+        failed=false
+        scheduled=false
+        lock.unlock()
+        if bad { failure(reason) } else { for (message,received) in batch { receive(message,received) } }
     }
 }
 
@@ -370,10 +385,20 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     func readInput() {
         let inbox = InputMailbox(receive: { [weak self] message, received in self?.input(message,received:received) }, failure: { [weak self] reason in
             guard let self else { return }
-            if reason == .closed {
+            switch reason {
+            case .closed:
                 self.releaseAll();status("Windows disconnected; capture stopped");exit(0)
+            case .overflow:
+                // Input pressure pauses control, never capture: video keeps playing while
+                // held keys are released and the user clicks the Mac view again. No paused
+                // status is sent, because Windows treats that as a reason to blank its view.
+                self.revokedGeneration=self.currentGeneration
+                self.releaseAll()
+                self.reportControl("input-overflow",permission:AXIsProcessTrusted())
+                self.paused=true
+            case .invalid:
+                self.shutdown("Native input message invalid")
             }
-            self.shutdown(reason == .overflow ? "Native input mailbox overflow" : "Native input message invalid")
         })
         mailbox = inbox
         DispatchQueue.global(qos:.userInteractive).async {
@@ -593,10 +618,20 @@ if args.contains("--self-test") {
     mailbox.push(["type":"release"],received:2);mailbox.drain();precondition(delivered==1 && !failed)
     let overflowing=InputMailbox(receive:{_,_ in preconditionFailure("overflow must not deliver input")},failure:{reason in precondition(reason == .overflow);failed=true})
     for _ in 0..<33 {overflowing.push(["type":"key"],received:1)};overflowing.drain();precondition(failed)
+    var coalesced:[String]=[],lastMove=0.0
+    let moving=InputMailbox(receive:{message,_ in coalesced.append(message["type"] as? String ?? "");lastMove=message["x"] as? Double ?? 0},failure:{_ in preconditionFailure("coalesced moves must not overflow")})
+    for index in 0..<64 {moving.push(["type":"move","x":Double(index)/64.0],received:1)}
+    moving.push(["type":"button","button":0,"down":true],received:2)
+    moving.drain();precondition(coalesced == ["move","button"] && lastMove == 63.0/64.0)
+    var resumed=0
+    let recovering=InputMailbox(receive:{_,_ in resumed += 1},failure:{reason in precondition(reason == .overflow)})
+    for _ in 0..<33 {recovering.push(["type":"key"],received:1)}
+    recovering.drain();precondition(resumed == 0)
+    recovering.push(["type":"key"],received:2);recovering.drain();precondition(resumed == 1)
     var closed=false
     let closing=InputMailbox(receive:{_,_ in preconditionFailure("closed input must not deliver messages")},failure:{reason in precondition(reason == .closed);closed=true})
     closing.push(["type":"key"],received:1);closing.fail(.closed);closing.drain();precondition(closed)
-    print("PASS native 60 fps bounds, lease expiration/release and bounded/urgent mailbox; no permission checks, capture or input")
+    print("PASS native 60 fps bounds, lease expiration/release, bounded/urgent mailbox, pointer coalescing and recovery after input pressure; no permission checks, capture or input")
     exit(0)
 }
 if args.contains("--check") { exit(existingPermissions() ? 0 : 2) }
