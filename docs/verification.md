@@ -1,5 +1,20 @@
 # Verification record
 
+## Alpha.34 - native self-test fix and clearer video-off guidance
+
+Alpha.33 was published and its assets verified, but the Mac helper failed its
+built-in self-test on first launch (`native-build-failed`, code
+`self-test-failed`), so video could not start. The failing check recorded the
+pointer x position from every delivered message; the button message that
+follows the coalesced move has no x and reset it to zero, so the assertion
+failed. Alpha.34 records x only for moves. A failing self-test now also saves
+its output to the Mac cache's `last-build-error.txt` instead of reporting only
+`self-test-failed`.
+
+Alpha.34 also fixes the remaining "MAC-DOW" wording in the Windows discovery
+message and makes the "Video is off on your Mac" panel show the actual Mac setup
+failure, instead of Screen Recording steps, when permissions are not the cause.
+
 ## Alpha.33 - input pressure no longer ends capture
 
 The reported alpha.32 Mac log ended with `capture-failed` / `input-overflow`:

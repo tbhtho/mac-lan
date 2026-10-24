@@ -204,8 +204,13 @@ func (b nativeBuilder) resolve(ctx context.Context, sibling string) (path string
 		return "", err
 	}
 	stage = "self-test-failed"
-	if _, err = b.command(ctx, 15*time.Second, temporaryHelper, []string{"--self-test"}, nil); err != nil {
-		return "", fmt.Errorf("new native capture self-test failed: %w", err)
+	selfTestOutput, selfTestErr := b.command(ctx, 15*time.Second, temporaryHelper, []string{"--self-test"}, nil)
+	if selfTestErr != nil {
+		// A crashing self-test prints the failed precondition; keep that local evidence.
+		if logPath := saveNativeBuildError(root, temp, selfTestOutput, selfTestErr); logPath != "" {
+			return "", fmt.Errorf("new native capture self-test failed (local details saved to %s): %w", logPath, selfTestErr)
+		}
+		return "", fmt.Errorf("new native capture self-test failed: %w", selfTestErr)
 	}
 	binarySHA, err := nativeFileSHA(temporaryHelper, nativeBinaryLimit)
 	if err != nil {

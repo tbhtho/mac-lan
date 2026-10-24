@@ -37,6 +37,6 @@ From alpha.14, both apps check for signed updates at startup and every six hours
 
 The public Mac package has no embedded diagnostic destination. Existing Mac-only diagnostic configuration is preserved locally. Mac diagnostics contain fixed event codes and counters, never screen pixels, input contents, pairing secrets, or transfer names and contents. Windows diagnostics stay local.
 
-Alpha.33 adds [detailed Windows disconnect logs](docs/windows-diagnostics.md), saved automatically in `%LOCALAPPDATA%\MAC-DOW\diagnostics`. Open **Connection → Display and diagnostics → Open logs folder** after a failure. Logs include heartbeat timing, transport errors, control state and decoder health, with automatic rotation. Earlier downloads contain only the earlier basic logging.
+Alpha.34 adds [detailed Windows disconnect logs](docs/windows-diagnostics.md), saved automatically in `%LOCALAPPDATA%\MAC-DOW\diagnostics`. Open **Connection → Display and diagnostics → Open logs folder** after a failure. Logs include heartbeat timing, transport errors, control state and decoder health, with automatic rotation. Earlier downloads contain only the earlier basic logging.
 
 [Development and earlier releases](docs/development.md) · [Protocol](docs/protocol.md) · [Architecture](docs/design.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT license](LICENSE)

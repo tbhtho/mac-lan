@@ -1,6 +1,6 @@
 # Windows disconnect diagnostics
 
-Alpha.33 adds detailed local logging. Earlier downloads have only the earlier
+Alpha.34 adds detailed local logging. Earlier downloads have only the earlier
 basic Windows event log. The new Windows logger records the native status messages
 already sent by the paired Mac, so it also works with an older Mac host.
 
@@ -77,7 +77,7 @@ still true confirms that control was revoked by the watchdog. It does not by
 itself explain why heartbeats were late or why the stream ended. The watchdog
 and deliberate click-to-control requirements remain unchanged.
 
-Alpha.33 treats input pressure as a control event, not a disconnect. A
+Alpha.34 treats input pressure as a control event, not a disconnect. A
 Mac `capture-failed` record with code `input-overflow` in alpha.32 meant the
 native helper exited after its bounded input mailbox overflowed. Now pointer
 moves are coalesced per animation frame, excess input is dropped rather than
@@ -97,5 +97,5 @@ names/contents. Sharing a log is a separate user action.
 `./scripts/test.ps1` includes isolated log persistence/rotation/error/privacy
 checks, synthetic loopback TLS disconnect regressions, and decoder recovery
 tests. These tests do not establish the cause of the user's Fluxframe failure or
-prove two-computer behavior. The user must reproduce the failure with alpha.33
+prove two-computer behavior. The user must reproduce the failure with alpha.34
 to collect that evidence.
