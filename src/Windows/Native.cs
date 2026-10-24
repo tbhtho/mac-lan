@@ -51,6 +51,14 @@ internal static class Native
     }
     [DllImport("user32.dll")] static extern nint GetWindow(nint hwnd,uint command);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(nint hwnd,System.Text.StringBuilder name,int length);
+    // True when upper is above lower in the z-order.
+    public static bool IsAbove(Window upper,Window lower)
+    {
+        nint target=new WindowInteropHelper(upper).Handle;
+        for(nint above=GetWindow(new WindowInteropHelper(lower).Handle,3);above!=0;above=GetWindow(above,3))
+            if(above==target)return true;
+        return false;
+    }
     // True when a Windows taskbar sits above window in the z-order.
     public static bool TaskbarAbove(Window window)
     {
