@@ -143,6 +143,10 @@ func (e input) valid() bool {
 	}
 	return false
 }
+func isCursorStatus(line string) bool {
+	var probe struct{ Type string }
+	return json.Unmarshal([]byte(line), &probe) == nil && probe.Type == "cursor"
+}
 func privateIP(s string) bool {
 	ip := net.ParseIP(s)
 	if ip == nil {
@@ -392,7 +396,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		frames.push(b, time.Now())
 	}
 	report := func(line string) {
-		if len(line) > 2048 {
+		// Status text stays short; only the Mac pointer image may be larger.
+		if len(line) > 2048 && (len(line) > 60000 || !isCursorStatus(line)) {
 			return
 		}
 		if !json.Valid([]byte(line)) {

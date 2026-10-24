@@ -88,11 +88,13 @@ internal sealed class TabBar : Window,IDisposable
     nint Hook(nint hwnd,int message,nint w,nint l,ref bool handled)
     {
         if(message==CallbackMessage&&w==1&&!queued&&!positioning){queued=true;Dispatcher.BeginInvoke(()=>{queued=false;Reposition();},DispatcherPriority.Background);}
-        if(message==CallbackMessage&&w==2)Topmost=l==0;
+        // A full-screen window normally sends the bar below it; mac-lan's own Mac view must not.
+        if(message==CallbackMessage&&w==2)Topmost=l==0||Native.ForegroundIsOwnProcess();
         if(message==0x0006&&registered){var d=Data();d.Param=w==0?0:1;SHAppBarMessage(6,ref d);}
         return 0;
     }
     void Undock(){if(!registered)return;var data=Data();SHAppBarMessage(1,ref data);registered=false;Telemetry.Report("bar-restored","ok");}
     public void Suspend(){Undock();Hide();}
+    public void KeepAbove(){if(IsVisible){Topmost=true;Native.KeepAbove(this);}}
     public void Dispose(){if(disposed)return;disposed=true;Close();}
 }
