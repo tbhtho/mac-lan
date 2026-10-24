@@ -169,6 +169,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 		return errors.New("Cannot locate the Mac Downloads folder")
 	}
 	s.transfers = newTransferReceiver(filepath.Join(userHome, "Downloads", "mac-lan"))
+	s.clipboard = macClipboard()
 	s.videoError = videoError
 	s.catalog = func() ([]window, error) {
 		if videoError != "" {

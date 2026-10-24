@@ -27,3 +27,13 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   the capture helper forces the next encoded frame to be a keyframe. Periodic
   keyframes are a 2-second backup. Windows never sends this to hosts without the
   flag, because older hosts end the session on unknown input.
+
+## Alpha.27 additions
+
+- `GET`/`PUT /clipboard` on the session listener share plain UTF-8 text (at most
+  256 KiB) with the paired Windows PC. Requests need the current pairing's
+  transfer bearer token from the paired peer, exactly like `/transfer`; the
+  token is revoked when the session ends. The Mac reads and writes text with
+  `pbpaste`/`pbcopy`. Windows pushes on `WM_CLIPBOARDUPDATE`, polls the Mac once
+  a second, and remembers the last synced text so nothing echoes back. The Mac
+  clipboard present at connection time is not copied to Windows.

@@ -100,16 +100,34 @@ func transferError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "message": message})
 }
 
+// authorizedLocked reports whether r carries the current pairing's bearer token from its paired peer.
+func (t *transferReceiver) authorizedLocked(r *http.Request, peer string) bool {
+	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	credential := t.credential
+	return bearer && credential != nil && credential.ctx.Err() == nil && credential.peer == peer && len(token) == 64 &&
+		subtle.ConstantTimeCompare([]byte(token), []byte(credential.token)) == 1
+}
+
+// authorized checks a non-transfer request (such as the shared clipboard) against the same pairing.
+func (t *transferReceiver) authorized(r *http.Request, peerAllowed func(string) bool) bool {
+	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || peerAllowed == nil || !peerAllowed(peer) || r.Header.Get("Origin") != "" {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.authorizedLocked(r, peer)
+}
+
 func (t *transferReceiver) serveHTTP(w http.ResponseWriter, r *http.Request, peerAllowed func(string) bool) {
 	peer, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil || peerAllowed == nil || !peerAllowed(peer) || r.Method != http.MethodPost || r.Header.Get("Origin") != "" {
 		transferError(w, http.StatusForbidden, "Pair with this Mac before sending files.")
 		return
 	}
-	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	t.mu.Lock()
 	credential := t.credential
-	if !bearer || credential == nil || credential.ctx.Err() != nil || credential.peer != peer || len(token) != 64 || subtle.ConstantTimeCompare([]byte(token), []byte(credential.token)) != 1 {
+	if !t.authorizedLocked(r, peer) {
 		t.mu.Unlock()
 		transferError(w, http.StatusForbidden, "Pair with this Mac before sending files.")
 		return
