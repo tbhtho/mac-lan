@@ -15,6 +15,13 @@ Alpha.34 also fixes the remaining "MAC-DOW" wording in the Windows discovery
 message and makes the "Video is off on your Mac" panel show the actual Mac setup
 failure, instead of Screen Recording steps, when permissions are not the cause.
 
+Release `v0.1.0-alpha.34` binds `ffbd2a8`; the signed-feed commit is `b3c4409`.
+All eight assets were downloaded anonymously and matched their published SHA-256
+digests and byte counts. A live feed check selected alpha.34 from simulated
+alpha.32 and alpha.33 Windows and Mac clients. The Mac app is certificate-signed,
+not Developer ID-signed or notarized. The corrected native self-test has not been
+compiled on Apple Silicon here; the Mac compiles and self-tests it at first launch.
+
 ## Alpha.33 - input pressure no longer ends capture
 
 The reported alpha.32 Mac log ended with `capture-failed` / `input-overflow`:
