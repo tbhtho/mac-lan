@@ -164,15 +164,20 @@ internal sealed partial class MainWindow : Window
         DockPanel.SetDock(viewProgress,Dock.Top);panel.Children.Add(viewProgress);panel.Children.Add(view);return panel;
     }
     // Discovery runs by itself while the setup page is open and nothing is paired; a refresh keeps the chosen Mac.
-    // The Mac refused video (usually Screen Recording). Stay on the MacBook tab and say how to fix it
-    // instead of sending the user back to the connection page.
-    void ShowVideoUnavailable()
+    // The Mac refused video. Distinguish a permission problem from a native setup
+    // failure instead of always sending the user to Screen Recording settings.
+    void ShowVideoUnavailable(string? reason)
     {
         gate.Disarm("tab-change");remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
+        bool permission=reason?.Contains("Screen Recording",StringComparison.OrdinalIgnoreCase)==true;
         var notice=new StackPanel{MaxWidth=560,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         notice.Children.Add(new TextBlock{Text="Video is off on your Mac",FontSize=22,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,10)});
-        notice.Children.Add(new TextBlock{Text="macOS has not allowed Screen Recording for this copy of mac-lan. A newly installed or updated mac-lan can need permission again, even when the switch in System Settings already looks on.",Foreground=Glass.Muted,LineHeight=21,Margin=new Thickness(0,0,0,14)});
-        notice.Children.Add(new TextBlock{Text="On your Mac:\n1.  System Settings → Privacy & Security → Screen Recording: select mac-lan and remove it with the – button.\n2.  In the mac-lan menu-bar icon, choose Allow Screen Recording… and turn mac-lan on.\n3.  Quit mac-lan from its menu and open it again.\n4.  Here, open Connection and connect again.\n\nDo the same under Accessibility if the menu still shows Allow Keyboard and Mouse….",LineHeight=22});
+        notice.Children.Add(new TextBlock{Text=permission
+            ? "macOS has not allowed Screen Recording for this copy of mac-lan. A newly installed or updated mac-lan can need permission again, even when the switch in System Settings already looks on."
+            : "mac-lan on your Mac could not prepare video. "+(reason??"The Mac did not report a reason.")+" File transfer is still available.",Foreground=Glass.Muted,LineHeight=21,Margin=new Thickness(0,0,0,14)});
+        notice.Children.Add(new TextBlock{Text=permission
+            ? "On your Mac:\n1.  System Settings → Privacy & Security → Screen Recording: select mac-lan and remove it with the – button.\n2.  In the mac-lan menu-bar icon, choose Allow Screen Recording… and turn mac-lan on.\n3.  Quit mac-lan from its menu and open it again.\n4.  Here, open Connection and connect again.\n\nDo the same under Accessibility if the menu still shows Allow Keyboard and Mouse…."
+            : "On your Mac, open the mac-lan menu and restart sharing. The Mac diagnostic record contains a fixed failure code for this attempt; if it happens again, update mac-lan on the Mac and share that record.",LineHeight=22});
         status.Visibility=Visibility.Collapsed;body.Background=Brushes.Transparent;body.Child=notice;
         Show();Position(false);tabBar.SetMode(false);Activate();SendLease();
     }
@@ -258,7 +263,7 @@ internal sealed partial class MainWindow : Window
     void Start(bool app)
     {
         if(session==null||!session.IsPaired){status.Text="Connect to your Mac first, then choose what to view.";return;}
-        if(session.VideoError is string videoError){if(app){ShowSetup();status.Text=pairingProgress.Text="Connected for files. Video is unavailable on your Mac: "+videoError;}else ShowVideoUnavailable();return;}
+        if(session.VideoError is string videoError){if(app){ShowSetup();status.Text=pairingProgress.Text="Connected for files. Video is unavailable on your Mac: "+videoError;}else ShowVideoUnavailable(videoError);return;}
         if(session.IsReady||session.IsStarting){ShowRemote();return;}
         if(session.MaxFPS<60){ShowSetup();status.Text=pairingProgress.Text=$"Update mac-lan on your Mac for 60 fps. The connected Mac host supports up to {session.MaxFPS} fps.";return;}
         uint id=0;if(app){if(windows.SelectedItem is not WindowChoice selected){status.Text="Select a specific window first.";return;}id=selected.ID;appLabel=selected.App;appSized=false;}

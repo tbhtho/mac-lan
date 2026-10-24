@@ -25,7 +25,7 @@ func main() {
 		if err != nil {
 			message = err.Error()
 		} else if len(hosts) == 0 {
-			message = "No Mac appeared. Keep MAC-DOW running on your Mac and use the same Wi-Fi or Ethernet. If you have the previous Mac version, update it: that version could not announce itself to Windows."
+			message = "No Mac appeared. Keep mac-lan running on your Mac and use the same Wi-Fi or Ethernet. If you have the previous Mac version, update it: that version could not announce itself to Windows."
 		}
 		json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": err == nil, "message": message, "hosts": hosts})
 		return

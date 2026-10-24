@@ -70,20 +70,27 @@ These notes are historical; older ZIP, manual token, and Terminal-only update in
 
 ## Runtime boundaries
 
-Alpha.33 has [local disconnect diagnostics](windows-diagnostics.md)
+Alpha.34 has [local disconnect diagnostics](windows-diagnostics.md)
 with background disk writes, connection/run correlation, bounded file rotation,
 and transport/UI/decoder timing. Use `./scripts/test.ps1` for the headless logger,
 synthetic disconnect and viewer regressions. No current-source logging change
 establishes that the Fluxframe disconnect is fixed.
 
 The alpha.32 Mac diagnostic `capture-failed` with code `input-overflow` recorded the
-native helper leaving capture because its bounded input mailbox overflowed. Alpha.33
+native helper leaving capture because its bounded input mailbox overflowed. Alpha.34
 removes that fatal exit at every hop: the viewer coalesces absolute pointer
 moves to one per animation frame, the Windows session and the Mac host drop excess
 input instead of disconnecting, and the native mailbox coalesces moves and answers
 pressure by releasing held input and pausing control with `input-overflow`. Video,
 audio and the session stay up; the next click resumes control. The pressure source
 for a specific report is still inferred from the fixed code, not measured.
+
+Alpha.33 shipped the same input fix but its native helper failed the new self-test
+on first launch, so video could not start; alpha.34 corrects that check (the button
+message that follows a move cleared the recorded pointer coordinate) and saves a
+failing self-test's output to the Mac's `last-build-error.txt`. Alpha.34 also fixes
+the remaining "MAC-DOW" wording in Windows discovery and shows the actual Mac setup
+failure instead of Screen Recording steps when permissions are not the cause.
 
 Direct LAN TLS 1.3 and WebSockets carry video and input, with ephemeral launch identity, local pairing approval, one controller, and separate video approval. There is no cloud relay, STUN/TURN, saved pairing, daemon, or automatic login startup. An older command-line mode printed a temporary token and fingerprint and accepted `--listen`; the normal discovery flow needs neither manual entry nor a selected interface argument.
 

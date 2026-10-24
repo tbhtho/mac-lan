@@ -619,7 +619,11 @@ if args.contains("--self-test") {
     let overflowing=InputMailbox(receive:{_,_ in preconditionFailure("overflow must not deliver input")},failure:{reason in precondition(reason == .overflow);failed=true})
     for _ in 0..<33 {overflowing.push(["type":"key"],received:1)};overflowing.drain();precondition(failed)
     var coalesced:[String]=[],lastMove=0.0
-    let moving=InputMailbox(receive:{message,_ in coalesced.append(message["type"] as? String ?? "");lastMove=message["x"] as? Double ?? 0},failure:{_ in preconditionFailure("coalesced moves must not overflow")})
+    let moving=InputMailbox(receive:{message,_ in
+        let type=message["type"] as? String ?? ""
+        coalesced.append(type)
+        if type == "move" { lastMove=message["x"] as? Double ?? 0 }
+    },failure:{_ in preconditionFailure("coalesced moves must not overflow")})
     for index in 0..<64 {moving.push(["type":"move","x":Double(index)/64.0],received:1)}
     moving.push(["type":"button","button":0,"down":true],received:2)
     moving.drain();precondition(coalesced == ["move","button"] && lastMove == 63.0/64.0)
