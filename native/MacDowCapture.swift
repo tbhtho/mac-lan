@@ -105,6 +105,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var encodeStart: TimeInterval = 0
     var width = 0, height = 0, fps = 60, bitrate = 8
     var forceKeyframe = false
+    // The newest captured image, so a keyframe request can be answered while the screen is still;
+    // ScreenCaptureKit sends no frames for an unchanged screen.
+    var lastImage: CVImageBuffer?
+    var lastEncoded = CMTime.zero
 
     func start(id: CGWindowID, maxWidth: Int, fps: Int, quality: Int, codec: String, bitrate: Int) async throws {
         self.windowID = id; self.fps = fps; self.quality = Double(quality)/100; self.mode = codec; self.bitrate = bitrate
@@ -206,15 +210,17 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) { shutdown("Capture stopped: \(error.localizedDescription)") }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, sampleBuffer.isValid, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         stateLock.lock()
-        guard view, !inFlight else { stateLock.unlock(); return }
+        lastImage = image
+        // Encoder timestamps must rise; a frame older than a re-sent keyframe is dropped.
+        guard view, !inFlight, CMTimeCompare(time, lastEncoded) > 0 else { stateLock.unlock(); return }
         inFlight = true; encodeStart = now()
         let force = forceKeyframe; forceKeyframe = false
+        if mode == "h264" { lastEncoded = time }
         stateLock.unlock()
-        if mode == "h264", let encoder {
-            let options: CFDictionary? = force ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue!] as CFDictionary : nil
-            let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer), duration: .invalid, frameProperties: options, sourceFrameRefcon: nil, infoFlagsOut: nil)
-            if result != noErr { stateLock.lock(); inFlight=false; stateLock.unlock(); status("Video encode failed: \(result)",paused:true) }
+        if mode == "h264" {
+            encodeH264(image, time: time, force: force)
         } else {
             defer { stateLock.lock(); inFlight = false; stateLock.unlock() }
             autoreleasepool {
@@ -226,6 +232,23 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
                 if CGImageDestinationFinalize(dest) { writePacket(kind:1,data:data as Data) }
             }
         }
+    }
+    func encodeH264(_ image: CVImageBuffer, time: CMTime, force: Bool) {
+        guard let encoder else { stateLock.lock(); inFlight=false; stateLock.unlock(); return }
+        let options: CFDictionary? = force ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue!] as CFDictionary : nil
+        let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: time, duration: .invalid, frameProperties: options, sourceFrameRefcon: nil, infoFlagsOut: nil)
+        if result != noErr { stateLock.lock(); inFlight=false; stateLock.unlock(); status("Video encode failed: \(result)",paused:true) }
+    }
+    // Answer a keyframe request now by re-encoding the newest image; if a frame is already
+    // being encoded, the next captured frame becomes the keyframe instead.
+    func resendKeyframe() {
+        stateLock.lock()
+        guard mode == "h264", view, !inFlight, let image = lastImage else { forceKeyframe = true; stateLock.unlock(); return }
+        let host = CMClockGetTime(CMClockGetHostTimeClock())
+        let time = CMTimeCompare(host, lastEncoded) > 0 ? host : CMTimeAdd(lastEncoded, CMTime(value: 1, timescale: 600))
+        inFlight = true; encodeStart = now(); forceKeyframe = false; lastEncoded = time
+        stateLock.unlock()
+        encodeH264(image, time: time, force: true)
     }
     func encoded(_ sample: CMSampleBuffer) {
         guard let format = CMSampleBufferGetFormatDescription(sample), let block = CMSampleBufferGetDataBuffer(sample) else { return }
@@ -363,7 +386,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     }
     func input(_ m:[String:Any],received:TimeInterval) {
         guard let type=m["type"] as? String else { return }
-        if type == "keyframe" { stateLock.lock();forceKeyframe=true;stateLock.unlock();return }
+        if type == "keyframe" { resendKeyframe();return }
         if type == "release" { revokedGeneration=currentGeneration;releaseAll();reportControl("view-only",permission:AXIsProcessTrusted());return }
         if type == "lease" {
             watchdogGrace=received
