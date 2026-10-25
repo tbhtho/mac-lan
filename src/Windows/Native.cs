@@ -138,6 +138,6 @@ internal sealed class KeyboardHook : IDisposable
     }
     // Control ended: keep swallowing releases of keys the Mac received, so Windows never
     // sees a stray Windows-key or Alt release, then remove the hook once they are all up.
-    public void Release(){if(hook==0)return;if(router.OwnsKeys)releasing=true;else Dispose();}
+    public void Release(){if(hook==0)return;router.ReleaseControl();if(router.OwnsKeys)releasing=true;else Dispose();}
     public void Dispose(){releasing=false;if(hook!=0){UnhookWindowsHookEx(hook);hook=0;}}
 }

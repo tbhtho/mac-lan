@@ -98,7 +98,56 @@ Check(KeyMap.MacCode(0x5B) == 59 && KeyMap.MacCode(0x5C) == 62, "Windows keys ma
 Check(KeyMap.MacCode(0xA2) == 55 && KeyMap.MacCode(0xA3) == 54 && KeyMap.MacCode(0x56) == 9, "Ctrl+V is Command+V");
 var router = new KeyRouter();
 bool Keys(KeyDecision d,params (int,bool)[] expected)=>d.Route==KeyRoute.Sequence&&d.Keys!.SequenceEqual(expected);
+foreach(int commandKey in new[]{0xA2,0xA3,0x11,0xA4,0x12})
+{
+    var shortcut=new KeyRouter();
+    Check(shortcut.Route(commandKey,true,true).Route==KeyRoute.Remote,"Command-mapped modifier still reaches the Mac: "+commandKey);
+    Check(shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow&&shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow,"Command-mapped Space and its repeat cannot open Spotlight: "+commandKey);
+    shortcut.Route(commandKey,false,true);
+    Check(shortcut.OwnsKeys&&shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow,"Space remains suppressed after the modifier is released first: "+commandKey);
+    Check(shortcut.Route(0x20,false,true).Route==KeyRoute.Swallow&&!shortcut.OwnsKeys,"suppressed Space release stays out of Windows and drains key ownership: "+commandKey);
+}
+{
+    bool outsideControl=true;var shortcut=new KeyRouter(key=>outsideControl&&key==0xA2);
+    Check(shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow&&shortcut.OwnsKeys,"Ctrl already held when control begins cannot make Space open Spotlight");
+    outsideControl=false;
+    Check(shortcut.Route(0x20,true,false).Route==KeyRoute.Swallow&&shortcut.Route(0x20,false,false).Route==KeyRoute.Swallow&&!shortcut.OwnsKeys,"focus loss still drains a suppressed Space without leaking repeats or release");
+}
+{
+    var shortcut=new KeyRouter();shortcut.Route(0xA2,true,true);shortcut.Route(0xA0,true,true);
+    Check(shortcut.Route(0x20,true,true)==new KeyDecision(KeyRoute.Remote,49),"Ctrl+Shift+Space still reaches the Mac app instead of being blocked with Spotlight");
+    Check(shortcut.Route(0x20,false,true)==new KeyDecision(KeyRoute.Remote,49),"Ctrl+Shift+Space keeps its matching remote key release");
+    shortcut.Reset();shortcut.Route(0xA5,true,true);
+    Check(shortcut.Route(0x20,true,true)==new KeyDecision(KeyRoute.Remote,49),"right Alt+Space remains Option+Space");
+    shortcut.Reset();shortcut.Route(0xA2,true,true);
+    Check(shortcut.Route(0x43,true,true)==new KeyDecision(KeyRoute.Remote,8),"blocking Spotlight does not change Ctrl+C routing");
+}
+{
+    var shortcut=new KeyRouter();shortcut.Route(0x20,true,true);shortcut.Route(0xA2,true,true);
+    Check(shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow,"a Space repeat after pressing Ctrl cannot open Spotlight");
+    Check(shortcut.Route(0x20,false,true)==new KeyDecision(KeyRoute.Remote,49),"a Space originally pressed on the Mac still receives its release");
+    shortcut.Route(0xA2,false,true);Check(!shortcut.OwnsKeys,"Space-first ordering cannot leave remote keys held");
+}
+{
+    var shortcut=new KeyRouter();shortcut.Route(0x5C,true,true);
+    Check(Keys(shortcut.Route(0x5C,false,true),(55,true),(49,true),(49,false),(55,false)),"the right Windows key alone also keeps Spotlight search");
+}
 Check(router.Route(0x5B,true,true).Route == KeyRoute.Swallow && router.Route(0x5B,true,true).Route == KeyRoute.Swallow, "Windows key press waits to see whether it is a tap");
+foreach(int modifier in new[]{0xA0,0xA1,0x10,0xA5})
+{
+    var outside=new KeyRouter(key=>key==modifier);outside.Route(0xA2,true,true);
+    Check(outside.Route(0x20,true,true).Route==KeyRoute.Swallow,"a modifier held before control cannot disguise plain Command+Space on the Mac: "+modifier);
+    var local=new KeyRouter();local.Route(modifier,true,false);local.Route(0xA2,true,true);
+    Check(local.Route(0x20,true,true).Route==KeyRoute.Swallow,"a locally pressed modifier cannot bypass Spotlight suppression: "+modifier);
+    var resumed=new KeyRouter();resumed.Route(modifier,true,true);resumed.ReleaseControl();resumed.Route(0xA2,true,true);
+    Check(resumed.Route(0x20,true,true).Route==KeyRoute.Swallow,"a modifier revoked during a pause cannot bypass Spotlight suppression after resuming: "+modifier);
+    resumed.Route(0xA2,false,false);resumed.Route(0x20,false,false);resumed.Route(modifier,false,false);
+    Check(!resumed.OwnsKeys,"revoked modifier and suppressed Space releases fully drain ownership: "+modifier);
+}
+{
+    var paused=new KeyRouter();paused.Route(0x5B,true,true);paused.ReleaseControl();
+    Check(paused.OwnsKeys&&paused.Route(0x5B,false,true).Route==KeyRoute.Swallow&&!paused.OwnsKeys,"a Windows press interrupted by control loss cannot reopen Spotlight after resuming");
+}
 Check(Keys(router.Route(0x5B,false,true),(55,true),(49,true),(49,false),(55,false)) && !router.OwnsKeys, "Windows key tapped alone opens Spotlight");
 router.Route(0x5B,true,true);
 Check(Keys(router.Route(0x52,true,true),(59,true),(15,true)), "Windows key with another key becomes Control");
