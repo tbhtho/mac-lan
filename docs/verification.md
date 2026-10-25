@@ -1,5 +1,104 @@
 # Verification record
 
+## Alpha.36 release preparation
+
+The user authorized publication of the combined automatic MacBook control,
+Windows monitor handoff, optional saved top-bar auto-hide and stability changes. Alpha.36 packaging uses clean
+committed source. The candidate tests and code reviews below establish the
+headless baseline; final release artifact, feed and anonymous-download evidence
+will be recorded after publication. Physical monitor movement, native Mac
+execution and FluxFrame startup remain user hardware checks.
+
+Final alpha.36 source validation passed `./scripts/test.ps1`: 88 core/control/
+auto-hide checks, 24 workspace/preferences checks, 40 video/audio checks,
+54 synthetic TLS session checks, remaining .NET/Node suites, Go tests/vet and
+the Windows Release build with zero warnings/errors. Evidence:
+`.cache/alpha36-final-tests.log`. Auto-hide review's inactive-bar focus clearing
+finding was corrected and re-reviewed; no actionable findings remained.
+
+The auto-hide state and preference regressions failed before implementation and
+passed afterward. They cover delayed hide, immediate edge reveal, interaction
+hold, returning pointer, disabling, startup recovery and persistence/corruption
+fallback. Native bar reveal/fullscreen/focus behavior remains unverified here.
+
+## Unreleased MacBook control and monitor handoff - 2026-10-25
+
+The user requested automatic full-desktop control on MacBook selection and
+temporary relocation of Windows apps from that display to an available monitor.
+The combined candidate includes the earlier stability fixes below. Tab selection
+now supplies automatic-control intent; confirmed Accessibility, approved sharing,
+fresh video/native heartbeat and foreground focus remain required. Manual Stop,
+tab exit, disconnect, shutdown and hook failure cancel automatic intent. App
+Priority retains its existing click activation.
+
+The monitor controller saves successfully moved windows, maps bounds to another
+monitor, and restores on Windows/setup selection, disconnect, normal quit and
+display changes. New windows are checked once per second. Minimized windows are
+left alone; restoration of an app minimized while away is deferred until it is
+unminimized while mac-lan runs. Native calls avoid activation. Review found and
+corrected maximized focus stealing, incompatible minimized flags and stale HWND
+bookkeeping; the latter has a failing-then-passing controller regression.
+
+`./scripts/test.ps1` passed after final code changes: 78 core/control checks,
+20 desktop-workspace checks, 40 video/audio checks, 54 synthetic TLS session
+checks, the remaining .NET and Node suites, Go tests/vet and the Windows Release
+build with zero warnings/errors. Evidence:
+`.cache/mac-tab-workspace-tests-2026-10-25.log`. Both changes were reviewed with no
+remaining actionable findings. Tests never repositioned a real desktop window.
+
+The self-contained Windows x64 candidate is
+`artifacts/mac-tab-candidate-2026-10-25-06f7e798/mac-lan.exe`, 149,765,665 bytes,
+SHA-256 `7054ad1bf65f2f04a1ab4d7fe04f099ef74b729ce1e06aea1850b9da1f0e4a73`.
+It records base `8039bf4` plus uncommitted source/test hashes, a source patch and
+new source files. Its package identity declares `dirty: true`; it retains the
+alpha.35 base version and is not published or available through the update feed.
+The earlier candidate and releases were preserved. The exact EXE passed
+`test-standalone.ps1` with embedded viewer/helper/theme and available WebView2,
+without starting UI, capture, input hooks or window movement. Evidence:
+`.cache/mac-tab-standalone-2026-10-25.log`.
+
+No Mac source or binary changed. Native Mac capture, actual first-click behavior,
+foreign-app positioning, maximized/mixed-DPI/hotplug behavior and FluxFrame startup
+still need the user's hardware test. Refused/elevated windows, Snap groups and
+hard-crash restoration remain limits in the [handoff contract](desktop-workspace.md).
+
+## Unreleased Windows stability candidate - 2026-10-25
+
+Three current-source defects were reproduced and corrected: `Session.Send`
+filtered out capable hosts' decoder keyframe requests; every audio packet
+scheduled another WPF callback without a queue bound; and browser side-button
+events could reach the host's intentionally strict input validator and end the
+session. The viewer also releases control when the final button of a chord would
+otherwise leave a forwarded button held, including across decoder recovery.
+
+The keyframe synthetic TLS regression, audio flood with a blocked scheduler, and
+side-button/chord regressions failed before their respective fixes and passed
+afterward. `./scripts/test.ps1` passed after the final code changes: 54 session
+checks, 40 video/audio queue checks, the other .NET suites, Node viewer/race/DOM/
+software-codec checks, Go tests and vet, and the Windows Release build with zero
+warnings/errors. Evidence is in `.cache/stability-tests-2026-10-25-final.log`.
+Code review's chord finding was fixed and re-reviewed with no remaining findings.
+
+The separate local candidate is
+`artifacts/stability-candidate-2026-10-25-2c476ec7/mac-lan.exe`, a self-contained
+Windows x64 EXE of 149,749,281 bytes, SHA-256
+`05cdf131a64f35e17c950ac672b1df9077acedd4de94b3f6027f74706ce54156`.
+Its provenance records base commit `8039bf4` plus uncommitted source/test hashes,
+and the executable's package identity declares `dirty: true`. It retains the
+alpha.35 base version and is not a published release. The adjacent provenance,
+patch and new source file identify the candidate changes. Existing release
+artifacts and the signed feed were not replaced.
+
+`test-standalone.ps1 -Executable <candidate>` passed: embedded viewer/helper/theme
+present, installed WebView2 available, and no UI, capture or input hooks started.
+The bundled updater identifies itself as alpha.35. No Mac source changed, native
+Mac build ran, or FluxFrame app was launched. FluxFrame has unrelated dirty work
+and was inspected read-only. The latest reported two-computer disconnect remains
+unreproduced; only old startup events were present in the available Windows log.
+The tests establish the specific fixes, not real-hardware startup stability or
+measured frame rate/latency. Audio shedding may cause gaps under load, and only
+the pending WPF audio stage has the new bound.
+
 ## Alpha.35 - tolerate brief viewer transport stalls
 
 The alpha.34 session on 2026-10-24 ended with a Windows `receive-failed` /

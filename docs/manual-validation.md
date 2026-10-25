@@ -1,5 +1,36 @@
 # Hardware acceptance checklist
 
+## Alpha.36 Windows checks
+
+- Enable **Bar → Auto-hide top bar**: it should tuck away after leaving, reveal
+  at the selected display's top edge, and stay open for its menu and keyboard
+  navigation. Disable it to restore the full reserved bar. Restart to check the
+  saved choice. Test Windows/MacBook tabs, both displays/DPI scales, Escape and
+  App Priority suspend/return without stealing focus from another application.
+- Select MacBook with approved sharing, Accessibility and fresh video: keyboard
+  and mouse must work without another desktop activation click. Missing permission
+  or stale video must still block input. Returning to Windows and the emergency
+  shortcut release held input; manual Stop must stay stopped across timer ticks.
+- With two monitors, put normal and maximized Windows apps on the MacBook display.
+  Select MacBook: those apps must move to the other display without taking focus.
+  Apps already on the other display must keep their positions. Select Windows:
+  moved windows must return to their saved positions and sizes without waking a
+  minimized app. Test actual snapped geometry; Snap groups are not recreated.
+- Minimized apps before switching must remain untouched. Restore one while MacBook
+  is open and verify relocation; minimize a moved app and verify its return after
+  unminimizing while mac-lan is still running.
+- Repeat switches, open/close source-display apps, change the selected monitor,
+  disconnect, and quit normally. Check restoration, different DPI, negative origins
+  and monitor unplug/replug. A one-monitor setup must not move other apps.
+- Open FluxFrame on each computer. Record video recovery/control behavior and the
+  Windows disconnect log if streaming ends. Headless tests do not prove this run.
+
+## Earlier acceptance notes
+
+The older click-activation and stretched full-desktop expectations below describe
+earlier previews. The current candidate checks above and current README supersede
+those particular expectations; the remaining platform checks still matter.
+
 The user reported successful native compilation, permission checks, pairing and live video in alpha.10. Actual delivered fps was not measured, and input was not armed because the user clicked directly into the view-only desktop. Alpha.11 adds click activation, a single local cursor and a filled 1080p stream; those changes still require Mac validation. Development checks remain headless and have not captured a real screen, installed input hooks, injected input or changed permissions/firewall/router settings. Current Accessibility permission is unknown.
 
 After native Apple Silicon compilation succeeds and the user explicitly grants the necessary Mac access:

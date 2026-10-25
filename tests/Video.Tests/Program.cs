@@ -24,6 +24,54 @@ if(args.Contains("--fixture")){Console.WriteLine(JsonSerializer.Serialize(new[]{
 int checks=0;
 void Check(bool condition,string description){if(!condition)throw new Exception(description);checks++;Console.WriteLine("PASS "+description);}
 {
+    var scheduled=new Queue<Action>();var heard=new List<uint>();long now=0;
+    var audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>heard.Add(Sequence(packet)),()=>now);
+    for(uint i=1;i<=1000;i++)audio.Enqueue(Packet(4,i,4096));
+    Check(scheduled.Count==1,"an audio flood during a UI stall schedules only one dispatcher callback");
+    scheduled.Dequeue()();
+    Check(heard.Count==8&&scheduled.Count==1,"one audio drain yields after eight packets so UI and video work can run");
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.SequenceEqual(Enumerable.Range(977,24).Select(i=>(uint)i)),"audio pressure retains only the newest 24 packets within 96 KiB");
+    audio.Enqueue(Packet(4,1001));now=251;
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.Count==24,"audio older than 250ms is discarded instead of replaying after an application launch stall");
+    audio.Enqueue(Packet(4,1002));
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.Last()==1002&&heard.Count==25,"fresh audio schedules and plays normally after stale work drains");
+}
+{
+    var scheduled=new Queue<Action>();var heard=new List<uint>();
+    var audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>heard.Add(Sequence(packet)),()=>0);
+    audio.Enqueue(Packet(4,1,60*1024));audio.Enqueue(Packet(4,2,60*1024));
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.SequenceEqual(new uint[]{2}),"audio bytes stay bounded independently of packet count");
+    audio.Enqueue(Packet(4,3,100*1024));audio.Enqueue(Packet(2,4));audio.Enqueue(new byte[9]);
+    Check(scheduled.Count==0,"oversized and non-audio packets cannot enter the audio dispatcher queue");
+}
+{
+    var scheduled=new Queue<Action>();var heard=new List<uint>();AudioDispatchQueue audio=null!;
+    audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>{heard.Add(Sequence(packet));if(Sequence(packet)==1)audio.Enqueue(Packet(4,2));},()=>0);
+    audio.Enqueue(Packet(4,1));scheduled.Dequeue()();
+    Check(scheduled.Count==1,"audio arriving during playback receives one follow-up callback");
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.SequenceEqual(new uint[]{1,2}),"audio arriving during a drain is never lost or delivered twice");
+}
+{
+    var scheduled=new System.Collections.Concurrent.ConcurrentQueue<Action>();var heard=new List<uint>();
+    var audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>heard.Add(Sequence(packet)),()=>0);
+    Parallel.For(1,2001,i=>audio.Enqueue(Packet(4,(uint)i,4096)));
+    Check(scheduled.Count==1&&audio.Count==24,"concurrent audio producers preserve both queue and callback bounds");
+    while(scheduled.TryDequeue(out var callback))callback();
+    Check(heard.Count==24&&heard.Distinct().Count()==24&&audio.Count==0,"concurrent arrival drains each retained audio packet once");
+}
+{
+    var scheduled=new Queue<Action>();var heard=new List<uint>();long now=0;
+    var audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>{heard.Add(Sequence(packet));now=251;},()=>now);
+    audio.Enqueue(Packet(4,1));audio.Enqueue(Packet(4,2));
+    scheduled.Dequeue()();
+    Check(heard.SequenceEqual(new uint[]{1}),"a playback callback delayed by work cannot replay the remainder of a stale audio batch");
+}
+{
     var queue=new EncodedFrameQueue();queue.Enqueue(Packet(3,1),0);
     Check(queue.Count==0,"H264 deltas cannot enter before an independent keyframe");
     queue.Enqueue(Packet(2,2),1);queue.Enqueue(Packet(3,3),2);queue.Enqueue(Packet(3,4),3);

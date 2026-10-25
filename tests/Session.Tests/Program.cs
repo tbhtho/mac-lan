@@ -18,6 +18,33 @@ void Check(bool condition,string message){if(!condition)throw new Exception(mess
 string diagnosticRoot=Path.Combine(Path.GetTempPath(),"mac-lan-session-test-"+Guid.NewGuid().ToString("N"));
 await using var testDiagnostics=new DiagnosticLog(diagnosticRoot,"synthetic-test" );
 
+foreach(bool supportsKeyframes in new[]{true,false})
+await using(var peer=new LocalPeer())
+await using(var session=new Session(testDiagnostics))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var ready=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();if(m.GetProperty("type").GetString()=="ready")ready.TrySetResult();};
+    session.Send(new{type="keyframe"});
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,keyframes=supportsKeyframes,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(new{type="keyframe"});
+    session.Send(StreamProfile.DefaultHardware.CreateStart(0));
+    Check((await peer.Next()).GetProperty("type").GetString()=="start","keyframe requests cannot precede stream approval");
+    session.Send(new{type="keyframe"});
+    await peer.Send(new{type="ready"});await ready.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    session.Send(new{type="keyframe"});
+    session.Send(new{type="lease",active=false});
+    var next=await peer.Next();
+    if(supportsKeyframes)
+    {
+        Check(next.GetProperty("type").GetString()=="keyframe","a decoder recovery request reaches an approved capable Mac instead of being silently filtered");
+        next=await peer.Next();
+    }
+    Check(next.GetProperty("type").GetString()=="lease","older hosts never receive unsupported keyframe input, and recovery preserves the session");
+}
+
 await using(var peer=new LocalPeer())
 await using(var session=new Session(testDiagnostics))
 {

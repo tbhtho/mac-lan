@@ -21,7 +21,8 @@ internal sealed class Session : IAsyncDisposable
     ulong loggedGeneration;
     long lastUiTick=Stopwatch.GetTimestamp(),lastHealth;
     int uiStalled;
-    internal int VideoQueueFrames=0,VideoQueueBytes=0,PendingAudioDispatches=0;
+    internal int VideoQueueFrames=0,VideoQueueBytes=0;
+    internal AudioDispatchQueue? AudioQueue {get;set;}
     internal Session(DiagnosticLog? diagnostics=null){this.diagnostics=diagnostics??Telemetry.Log;Log("session-created");}
     internal void Log(string name,string code="ok",object? state=null,Exception? error=null)=>diagnostics.Record(name,code,state??Snapshot(),DiagnosticId,error);
     internal void UiTick()
@@ -51,7 +52,7 @@ internal sealed class Session : IAsyncDisposable
     object Snapshot()=>new{phase=Volatile.Read(ref phase),socketState=socket.State.ToString(),closeStatus=(int?)socket.CloseStatus,closeDescriptionLength=socket.CloseStatusDescription?.Length??0,
         videoPackets=Interlocked.Read(ref videoPackets),audioPackets=Interlocked.Read(ref audioPackets),receivedBytes=Interlocked.Read(ref receivedBytes),sentMessages=Interlocked.Read(ref sentMessages),sendQueueDepth=outgoing.Reader.Count,
         lastVideoAgeMs=Age(LastFrame),lastNativeAgeMs=Age(NativeAlive),lastPongAgeMs=Age(Interlocked.Read(ref lastPong)),lastLeaseQueuedAgeMs=Age(Interlocked.Read(ref lastLeaseQueued)),lastLeaseSentAgeMs=Age(Interlocked.Read(ref lastLeaseSent)),
-        maxLeaseSendGapMs=Interlocked.Read(ref maxLeaseSendGap),lastSendDurationMs=Interlocked.Read(ref lastSendDuration),lastRttMs=Interlocked.Read(ref lastRtt),droppedInput=Interlocked.Read(ref droppedInput),uiTickAgeMs=Age(Interlocked.Read(ref lastUiTick)),videoQueueFrames=Volatile.Read(ref VideoQueueFrames),videoQueueBytes=Volatile.Read(ref VideoQueueBytes),pendingAudioDispatches=Volatile.Read(ref PendingAudioDispatches),hostError=DiagnosticHostFields.Failure(remoteError)};
+        maxLeaseSendGapMs=Interlocked.Read(ref maxLeaseSendGap),lastSendDurationMs=Interlocked.Read(ref lastSendDuration),lastRttMs=Interlocked.Read(ref lastRtt),droppedInput=Interlocked.Read(ref droppedInput),uiTickAgeMs=Age(Interlocked.Read(ref lastUiTick)),videoQueueFrames=Volatile.Read(ref VideoQueueFrames),videoQueueBytes=Volatile.Read(ref VideoQueueBytes),pendingAudioDispatches=AudioQueue?.Count??0,hostError=DiagnosticHostFields.Failure(remoteError)};
     readonly ClientWebSocket socket=new();
     readonly CancellationTokenSource stop=new();
     readonly Channel<string> outgoing=Channel.CreateBounded<string>(new BoundedChannelOptions(64){SingleReader=true,FullMode=BoundedChannelFullMode.Wait});
@@ -132,7 +133,7 @@ internal sealed class Session : IAsyncDisposable
                 // A new host accepts idle keepalives so large file transfers do not expire before video starts.
                 if(!message.TryGetProperty("active",out var active)||active.ValueKind!=JsonValueKind.False||!message.TryGetProperty("view",out var view)||view.ValueKind!=JsonValueKind.False)return;
             }
-            else if(phase!=Ready||type is not ("release" or "lease" or "key" or "move" or "button" or "scroll"))return;
+            else if(phase!=Ready||type is not ("release" or "lease" or "key" or "move" or "button" or "scroll" or "keyframe")||type=="keyframe"&&!SupportsKeyframes)return;
             if(!outgoing.Writer.TryWrite(message.GetRawText()))
             {
                 // Input pressure never ends an approved stream: a move is an absolute

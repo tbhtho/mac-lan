@@ -21,6 +21,11 @@ internal static class Native
     [DllImport("user32.dll")] internal static extern bool AddClipboardFormatListener(nint hwnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint hwnd,out uint process);
     [DllImport("user32.dll")] static extern nint MonitorFromWindow(nint hwnd,uint flags);
+    internal static string? WindowMonitorId(nint window)
+    {
+        var info=new Info{Size=Marshal.SizeOf<Info>(),Device=""};
+        return GetMonitorInfo(MonitorFromWindow(window,2),ref info)?info.Device:null;
+    }
     // True when the foreground window belongs to another program and sits on the same monitor as window.
     internal static bool OtherAppInFrontOn(Window window)
     {
