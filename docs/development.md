@@ -50,6 +50,49 @@ Build Windows and both Mac layouts from clean committed source, then publish fro
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
+## Alpha.36 stability and desktop behavior
+
+Windows now forwards a viewer's keyframe request only after stream approval and
+only when the Mac advertises support. Previously `Session.Send` silently rejected
+that message, leaving a recovering decoder waiting for a periodic keyframe even
+though the native helper supports immediate re-encoding of an unchanged screen.
+
+Audio reaches WPF through one scheduled background drain per connection, retaining
+at most 24 queued packets or 96 KiB. Each drain handles at most eight packets and
+drops chunks older than 250 ms. This bounds pending dispatcher work during an
+application launch; overload may cause an audio gap rather than replay stale
+sound. It does not establish a bound on all downstream WebView/audio work.
+The `pendingAudioDispatches` diagnostic now counts queued PCM packets.
+
+The viewer ignores extra mouse buttons outside 0/1/2 instead of sending messages
+the host deliberately rejects by closing the session. A mixed-button chord that
+would leave a forwarded press held safely releases control. The focused MacBook
+tab resumes automatically; App Priority retains explicit click activation.
+Host input validation, pairing and the native 850 ms control lease are unchanged.
+These Windows changes first ship in alpha.36. FluxFrame startup
+on both computers and the cause of the latest reported disconnect still need a
+hardware retest with current logs; the local log available during this pass only
+contained older startup events.
+
+Selecting MacBook requests automatic control from Windows alpha.36. It waits for stream approval, confirmed Accessibility permission, a fresh
+presented picture/native heartbeat and foreground focus; it retries on presented
+frames, control status, activation and the UI timer. Focus loss or stale video
+releases input immediately, and control resumes when those prerequisites return.
+Manual Stop, leaving the tab, disconnect, shutdown or keyboard acquisition failure
+cancels automatic intent. The emergency shortcut leaves the MacBook tab, so a
+later tick cannot re-enable it. App Priority retains explicit click activation.
+The alpha.35 Mac protocol already supports these leases; its older dialogs may
+still refer to clicking. No native capture/menu source changes are required;
+the matching alpha.36 Mac package updates release identity only. This replaces the earlier development decision requiring an extra
+activation click on the full desktop.
+
+The full-desktop MacBook tab also uses a [Windows monitor handoff](desktop-workspace.md).
+`DesktopWorkspace` saves successfully moved app windows, selects another monitor,
+maps their bounds to its DPI/work area, and restores on tab exit, disconnect,
+normal quit or display change. `DesktopWindows` contains the native adapter;
+`tests/Desktop.Tests` exercises its controller with synthetic windows only.
+Physical window movement and app-specific behavior remain unverified headlessly.
+
 ## Earlier development context
 
 These notes are historical; older ZIP, manual token, and Terminal-only update instructions are not the current quick start.

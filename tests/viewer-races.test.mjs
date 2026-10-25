@@ -15,6 +15,28 @@ function runtime({manualDecoder=false}={}){
 function packet(kind,seq,payload){const b=Buffer.alloc(9+payload.length);b[0]=kind;b.writeUInt32BE(seq,1);b.writeUInt32BE(1000,5);Buffer.from(payload).copy(b,9);return {type:'frame',data:b.toString('base64')}}
 const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
 {
+ const h=runtime();await h.send({type:'armed',active:true});h.state.messages.length=0;
+ for(const button of [3,4]){h.pointer('pointerdown',{button});h.pointer('pointerup',{button});}
+ assert.equal(h.state.messages.filter(m=>m.type==='button').length,0,'browser back/forward buttons must not send input the Mac rejects by closing the session');
+ for(const button of [0,1,2]){h.pointer('pointerdown',{button});h.pointer('pointerup',{button});}
+ assert.deepEqual(h.state.messages.filter(m=>m.type==='button').map(m=>[m.button,m.down]),[[0,true],[0,false],[1,true],[1,false],[2,true],[2,false]]);
+ console.log('PASS unsupported mouse buttons cannot terminate sharing while ordinary buttons retain press/release order');
+}
+for(const recoverDuringChord of [false,true]){
+ const h=runtime({manualDecoder:true});await h.send({type:'video',codec:'avc1.42c01f',fps:60});await h.send({type:'armed',active:true});h.state.messages.length=0;
+ // Pointer Events report down only for the first button and up only for the
+ // final one. A side button can therefore own the last up of a mixed chord.
+ h.pointer('pointerdown',{button:0,buttons:1});
+ if(recoverDuringChord){await h.send(packet(2,1,key));h.tick(251);}
+ h.pointer('pointermove',{button:3,buttons:9});
+ h.pointer('pointermove',{button:0,buttons:8});
+ h.pointer('pointerup',{button:3,buttons:0});
+ assert.equal(h.state.messages.filter(m=>m.type==='blur'&&m.reason==='pointer-cancel').length,1,'a mixed supported/unsupported chord must release control instead of leaving the Mac mouse held');
+ const count=h.state.messages.length;h.pointer('pointermove');h.paint();assert.equal(h.state.messages.length,count,'chord cancellation suppresses more input until deliberate reactivation');
+ assert.equal(h.state.messages.filter(m=>m.type==='button'&&m.button>2).length,0);
+ console.log('PASS an unsupported final chord release cannot strand a supported Mac mouse button');
+}
+{
  const h=runtime({manualDecoder:true});await h.send({type:'video',codec:'avc1.42c01f',fps:60,epoch:5});
  await h.send({...packet(2,1,key),epoch:5});await h.send({...packet(3,2,delta),epoch:5});h.tick(251);
  const recovery=h.state.messages.find(m=>m.type==='keyframe');

@@ -3,6 +3,25 @@ using MacDow.Core;
 int count = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); count++; Console.WriteLine("PASS " + name); }
 var gate = new ControlGate();
+{
+    var bar=new TabBarAutoHide();
+    Check(bar.Revealed&&!bar.Enabled&&!bar.Update(false,false,false,1000),"the default top bar remains visible without auto-hide enabled");
+    bar.Configure(true);bar.Update(false,false,false,1000);
+    Check(bar.Revealed&&!bar.Update(false,false,false,1599),"auto-hide gives the pointer time to return before hiding");
+    Check(bar.Update(false,false,false,1600)&&!bar.Revealed,"the top bar tucks away after the pointer leaves");
+    Check(bar.Update(true,false,false,1601)&&bar.Revealed,"touching the monitor edge reveals the full bar immediately");
+    bar.Update(false,true,false,5000);
+    Check(bar.Revealed&&!bar.Update(false,true,false,9000),"using buttons inside the revealed bar keeps it open");
+    bar.Update(false,false,true,10000);bar.Update(false,false,true,20000);
+    Check(bar.Revealed,"an open bar menu cannot hide while its controls are in use");
+    bar.Update(false,false,false,20001);bar.Update(false,true,false,20500);bar.Update(false,false,false,21000);
+    Check(bar.Revealed&&!bar.Update(false,false,false,21599)&&bar.Update(false,false,false,21600),"returning to the bar cancels the old hide timer and a later departure gets a full delay");
+    bar.Configure(false);
+    Check(bar.Revealed&&!bar.Enabled&&!bar.Update(false,false,false,30000),"disabling auto-hide restores the always-visible bar");
+    var restored=new TabBarAutoHide(true);
+    Check(!restored.Revealed&&restored.Enabled,"a saved auto-hide preference starts with the bar tucked away");
+    Check(restored.Update(true,false,false,0)&&restored.Revealed,"the hidden startup bar remains recoverable from its edge");
+}
 Check(!gate.Arm(), "disconnected cannot arm");
 gate.SetContext(true, true, true);
 Check(!gate.CanRoute, "connection stays view only");
@@ -16,6 +35,35 @@ foreach (var context in new[] { (false,true,true), (true,false,true), (true,true
 }
 for (int i = 0; i < 100; i++) { gate.Arm(); gate.Disarm(); }
 Check(releases >= 103, "repeated switches release every time");
+
+var automaticGate=new ControlGate();
+automaticGate.SetContext(false,true,true);automaticGate.RequestAutomaticControl();
+Check(!automaticGate.TryAutomaticArm(true,true),"selecting Mac waits for the approved session before activating control");
+automaticGate.SetContext(true,true,true);
+Check(!automaticGate.TryAutomaticArm(null,true)&&!automaticGate.TryAutomaticArm(false,true),"automatic control waits for confirmed Accessibility permission");
+Check(!automaticGate.TryAutomaticArm(true,false),"automatic control waits for a fresh presented frame and native heartbeat");
+Check(automaticGate.TryAutomaticArm(true,true)&&automaticGate.CanRoute,"selecting Mac activates ready control without a separate desktop click");
+Check(!automaticGate.TryAutomaticArm(true,true),"a ready Mac tab does not repeatedly acquire control or create generations");
+automaticGate.SetContext(true,true,false);
+Check(!automaticGate.CanRoute&&!automaticGate.TryAutomaticArm(true,true),"focus loss immediately releases automatic control");
+automaticGate.SetContext(true,true,true);
+Check(automaticGate.TryAutomaticArm(true,true),"returning focus to the selected Mac tab automatically resumes ready control");
+automaticGate.Disarm("video-stale");
+Check(!automaticGate.TryAutomaticArm(true,false)&&automaticGate.TryAutomaticArm(true,true),"automatic control resumes only after stale video recovers");
+automaticGate.Disarm("mac-watchdog");
+Check(automaticGate.TryAutomaticArm(true,true),"the selected Mac tab resumes control after a native watchdog pause");
+automaticGate.Disarm("manual");
+Check(!automaticGate.TryAutomaticArm(true,true),"manual Stop control remains stopped across readiness ticks");
+automaticGate.RequestAutomaticControl();Check(automaticGate.TryAutomaticArm(true,true),"selecting Mac again explicitly restores automatic control after Stop");
+automaticGate.SetContext(true,false,true);
+Check(!automaticGate.CanRoute&&!automaticGate.TryAutomaticArm(true,true),"the Windows tab releases input and cancels automatic control");
+automaticGate.SetContext(true,true,true);
+Check(!automaticGate.TryAutomaticArm(true,true),"an unrelated context update cannot select the Mac tab for the user");
+automaticGate.RequestAutomaticControl();automaticGate.TryAutomaticArm(true,true);
+automaticGate.SetContext(false,true,true);automaticGate.SetContext(true,true,true);
+Check(!automaticGate.TryAutomaticArm(true,true),"a disconnected session cannot automatically revive in a replacement connection");
+automaticGate.RequestAutomaticControl();automaticGate.TryAutomaticArm(true,true);automaticGate.Disarm("keyboard-unavailable");
+Check(!automaticGate.TryAutomaticArm(true,true),"keyboard acquisition failure does not trigger a hook retry loop");
 
 var reasons=new List<string?>();var reasonGate=new ControlGate();reasonGate.Released+=reasons.Add;
 reasonGate.SetContext(true,true,true);reasonGate.Arm();reasons.Clear();

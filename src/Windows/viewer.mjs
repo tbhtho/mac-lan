@@ -2,7 +2,7 @@ import {parseFrame,SequenceGate,mapPointer,videoFrameDuration} from './viewer-co
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0,streamEpoch=0,lastBatch=0;
-let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false;
+let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false,heldPointerButtons=0;
 let recoveries=0;
 const MAX_BATCH_FRAMES=8,MAX_BATCH_BYTES=4*1024*1024,MAX_BUFFERED_FRAMES=64,MAX_BUFFERED_BYTES=8*1024*1024,MAX_BUFFERED_MS=250;
 let encoded=[],bufferedBytes=0,pumping=false,queueTimer=null,picture=null,paintRequest=null,queuedJpeg=null;
@@ -120,8 +120,8 @@ async function receivePacket(p,queuedAt=performance.now()){
 }
 chrome.webview.addEventListener('message',async e=>{
   const m=e.data;
-  if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
-  if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
+  if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;if(!next)heldPointerButtons=0;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
+  if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;heldPointerButtons=0;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
   if(m.type==='cursor'){setCursor(m);return;}
   if(m.type==='audio'){playAudio(m.pcm);return;}
   if(m.type==='video'){
@@ -165,20 +165,32 @@ function queueMove(p){
 }
 canvas.addEventListener('pointermove',e=>{if(!armed||activationPointer!==null)return;const p=coords(e);if(p)queueMove(p);});
 canvas.addEventListener('pointerdown',e=>{
+  if(!Number.isInteger(e.button)||e.button<0||e.button>2){e.preventDefault();return;}
   const p=coords(e);if(!p){e.preventDefault();return;}if(activationPointer!==null||controlRequested)return;if(document.activeElement!==canvas)canvas.focus();
   if(!armed){if(e.button!==0)return;e.preventDefault();activationPointer=e.pointerId;canvas.setPointerCapture(e.pointerId);return;}
-  e.preventDefault();canvas.setPointerCapture(e.pointerId);queueMove(p);sendMove();input({type:'button',button:e.button,down:true});
+  e.preventDefault();canvas.setPointerCapture(e.pointerId);queueMove(p);sendMove();heldPointerButtons|=1<<e.button;input({type:'button',button:e.button,down:true});
 });
 canvas.addEventListener('pointerup',e=>{
+  if(!Number.isInteger(e.button)||e.button<0||e.button>2){
+    e.preventDefault();
+    if(heldPointerButtons)releaseControl('pointer-cancel');
+    if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
+    return;
+  }
   const activate=activationPointer===e.pointerId;
   if(activate){activationPointer=null;e.preventDefault();}
-  else if(armed&&activationPointer===null&&canvas.hasPointerCapture(e.pointerId)){e.preventDefault();sendMove();input({type:'button',button:e.button,down:false});}
+  else if(armed&&activationPointer===null&&canvas.hasPointerCapture(e.pointerId)){
+    e.preventDefault();sendMove();heldPointerButtons&=~(1<<e.button);input({type:'button',button:e.button,down:false});
+    // The final up may belong to a different button than the first down.
+    // Revoke control if that chord left any forwarded press unreleased.
+    if(heldPointerButtons)releaseControl('pointer-cancel');
+  }
   if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);
   // Commit the consumed click after capture is released. Native focus changes
   // during pointerdown can otherwise cancel that same activation gesture.
   if(activate&&coords(e)){controlRequested=true;input({type:'requestControl'});}
 });
-function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;clearMove();if(notify)input({type:'blur',reason});}
+function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;heldPointerButtons=0;clearMove();if(notify)input({type:'blur',reason});}
 canvas.addEventListener('pointercancel',e=>{if(activationPointer===e.pointerId||armed||controlRequested)releaseControl('pointer-cancel');if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener('lostpointercapture',e=>{if(activationPointer===e.pointerId)releaseControl('pointer-cancel');});
 canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();sendMove();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});

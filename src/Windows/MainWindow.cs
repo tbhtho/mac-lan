@@ -46,6 +46,8 @@ internal sealed partial class MainWindow : Window
     string? controlIssue;
     HwndSource? source;
     readonly TabBar tabBar;
+    readonly DesktopWorkspace desktopWorkspace=new(new DesktopWindows());
+    long lastWorkspaceRefresh;
     readonly StackPanel streamSection=new(){Visibility=Visibility.Collapsed};
     readonly TextBlock viewProgress=new(){Text="Waiting for Mac video...",Foreground=Ink,FontSize=15,Margin=new Thickness(16,12,16,12)};
     Button pairButton=null!;
@@ -58,9 +60,11 @@ internal sealed partial class MainWindow : Window
         Glass.Apply(this);Content=root;
         updatesButton.Click+=(_,_)=>ShowUpdates();
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
+        tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
         monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
-        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;BuildSetup();
+        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;desktop.Presented+=TryAutomaticControl;BuildSetup();
         keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
         gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
@@ -73,10 +77,10 @@ internal sealed partial class MainWindow : Window
             if(appWindow==null)gate.SetContext(session?.IsReady==true,remote,false,"window-deactivated");
             // Another Windows app (or the taskbar) taking focus on this screen means the user went
             // back to Windows: switch tabs. Focus on another monitor leaves the Mac view on top.
-            if(remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
+            if(!closing&&remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(!closing&&remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
         };
         // Clicking the Mac view brings it forward; put the mac-lan bar back above it right away.
-        Activated+=(_,_)=>{Topmost=remote;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();};
+        Activated+=(_,_)=>{Topmost=remote;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();TryAutomaticControl();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
         Closing+=async(_,e)=>
@@ -91,7 +95,7 @@ internal sealed partial class MainWindow : Window
                 e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed","app-closed");
                 await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
             }
-            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed","app-closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");desktopWorkspace.Restore();keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed","app-closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
         };
     }
     internal void Quit(){quitting=true;Close();}
@@ -133,7 +137,7 @@ internal sealed partial class MainWindow : Window
     void ShowSetup()
     {
         connectionWindow?.Close();
-        gate.Disarm("tab-change");remote=false;if(appWindow!=null){appWindow.Activate();return;}
+        gate.Disarm("tab-change");remote=false;desktopWorkspace.Restore();if(appWindow!=null){appWindow.Activate();return;}
         status.Visibility=Visibility.Visible;body.Background=Brushes.Transparent;
         Title=paired?"mac-lan - Connected to your Mac":"mac-lan - Connect your Mac";
         ShowInTaskbar=true;Topmost=false;root.Margin=new Thickness(0);
@@ -142,13 +146,14 @@ internal sealed partial class MainWindow : Window
         tabBar.SetMode(true);Show();
         var selected=DisplayLayout.Select(Native.Monitors(),preferred);Left=(selected.Left+(selected.Width-Width*selected.Dpi/96)/2)*96/selected.Dpi;Top=(selected.Top+Math.Max(12,(selected.Height-Height*selected.Dpi/96)/2))*96/selected.Dpi;Activate();SendLease();
     }
-    void ShowDesktop(){gate.Disarm("tab-change");remote=false;Topmost=false;root.Margin=new Thickness(0);body.Child=null;Hide();tabBar.SetMode(true);RefreshContext();SendLease();status.Text="Windows desktop. Control is released.";}
+    void ShowDesktop(){gate.Disarm("tab-change");remote=false;Topmost=false;root.Margin=new Thickness(0);body.Child=null;Hide();desktopWorkspace.Restore();tabBar.SetMode(true);RefreshContext();SendLease();status.Text="Windows desktop. Control is released.";}
     void ShowRemote()
     {
         if(appWindow!=null){appWindow.Activate();return;}
         if(session?.IsPaired!=true){ShowSetup();return;}
+        gate.RequestAutomaticControl();
         if(!session.IsReady&&!session.IsStarting){Start(false);return;}
-        remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();RefreshContext();SendLease();UpdateControl();
+        remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();RefreshContext();TryAutomaticControl();SendLease();UpdateControl();
     }
     FrameworkElement RemotePanel(RemoteView view)
     {
@@ -225,10 +230,13 @@ internal sealed partial class MainWindow : Window
         // callback from an old connection cannot consume a new stream's frames.
         var frames=new EncodedFrameQueue();int frameScheduled=0;
         bool CurrentStream()=>session==s&&s.IsReady&&(remote||appWindow!=null);
+        var audio=new AudioDispatchQueue(action=>Dispatcher.BeginInvoke(action,DispatcherPriority.Background),b=>{if(CurrentStream())(appView??desktop).PlayAudio(b);});
+        s.AudioQueue=audio;
         s.Frame+=b=>
         {
-            // Kind 4 is Mac audio; it plays immediately and never enters the video queue.
-            if(b.Length>9&&b[0]==4){Interlocked.Increment(ref s.PendingAudioDispatches);Dispatcher.BeginInvoke(()=>{Interlocked.Decrement(ref s.PendingAudioDispatches);if(CurrentStream())(appView??desktop).PlayAudio(b);});return;}
+            // One bounded background drain prevents audio from flooding the UI when
+            // application startup delays it. Old PCM may be shed independently.
+            if(b.Length>9&&b[0]==4){audio.Enqueue(b);return;}
             frames.Enqueue(b,Environment.TickCount64);
             Volatile.Write(ref s.VideoQueueFrames,frames.Count);Volatile.Write(ref s.VideoQueueBytes,frames.Bytes);
             if(Interlocked.Exchange(ref frameScheduled,1)!=0)return;
@@ -240,7 +248,7 @@ internal sealed partial class MainWindow : Window
                 Volatile.Write(ref s.VideoQueueFrames,frames.Count);Volatile.Write(ref s.VideoQueueBytes,frames.Bytes);
             },DispatcherPriority.Background);
         };
-        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){clipboard?.Dispose();clipboard=null;paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
+        s.Ended+=why=>Dispatcher.BeginInvoke(()=>{if(session==s){desktopWorkspace.Restore();clipboard?.Dispose();clipboard=null;paired=false;connecting=false;pairButton.Content="Connect";pairButton.IsEnabled=nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;streamSection.Visibility=Visibility.Collapsed;Telemetry.Report("stream-ended");gate.Disarm("disconnected");(appView??desktop).Clear();status.Text=pairingProgress.Text=why;viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;if(appWindow!=null)appWindow.Title=AppTitle();}});
         return s;
     }
     void HandleMessage(Session s,JsonElement m)
@@ -270,13 +278,13 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
-            remote=false;body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
+            remote=false;desktopWorkspace.Restore();body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
             appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed","app-window-closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
         }
-        else{remote=true;ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);}
+        else{remote=true;gate.RequestAutomaticControl();ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();}
         var profile=codec.SelectedItem as StreamProfile??StreamProfile.DefaultHardware;
         session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
@@ -289,6 +297,12 @@ internal sealed partial class MainWindow : Window
         try{keyboard.Install();controlIssue=null;controlGeneration++;LogDiagnostic("control-armed","ok",UiHealth());SendLease();UpdateControl();}catch(Exception ex){LogDiagnostic("control-failed","keyboard-unavailable",error:ex);gate.Disarm("keyboard-unavailable");status.Text="Cannot acquire keyboard: "+ex.Message;}
     }
     void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
+    void TryAutomaticControl()
+    {
+        if(!remote||appWindow!=null||closing)return;
+        RefreshContext();
+        if(gate.TryAutomaticArm(controlPermission,CanControlVideo()))Arm();
+    }
     bool OwnerIsForeground()=>Native.GetForegroundWindow()==new WindowInteropHelper(appWindow??this).Handle;
     void RefreshContext()=>gate.SetContext(session?.IsReady==true,remote||appWindow!=null,OwnerIsForeground());
     void UpdateControl(){control.Content=gate.CanRoute?"Stop control":"Control Mac";control.Background=gate.CanRoute?Glass.Warn:Glass.Fill;control.Foreground=gate.CanRoute?Brushes.Black:Ink;control.IsEnabled=gate.CanRoute||session?.IsReady==true&&CanControlVideo();control.ToolTip=control.IsEnabled?"Keyboard and mouse control is optional.":"Available once fresh Mac video arrives.";(appView??desktop).SetArmed(gate.CanRoute);}
@@ -299,6 +313,7 @@ internal sealed partial class MainWindow : Window
     void Tick()
     {
         session?.UiTick();
+        if(lastWorkspaceRefresh==0||Environment.TickCount64-lastWorkspaceRefresh>=1000){lastWorkspaceRefresh=Environment.TickCount64;RefreshDesktopWorkspace();}
         if(session?.IsPaired==true&&(lastUiHealth==0||Stopwatch.GetElapsedTime(lastUiHealth).TotalSeconds>=5)){lastUiHealth=Stopwatch.GetTimestamp();LogDiagnostic("ui-health","ok",UiHealth());}
         // Re-raise only when something is actually out of order; raising every tick made the bar flicker.
         if(remote&&appWindow==null&&IsVisible&&!Native.OtherAppInFrontOn(this))
@@ -306,7 +321,7 @@ internal sealed partial class MainWindow : Window
             if(Native.TaskbarAbove(this))Native.KeepAbove(this);
             if(Native.IsAbove(this,tabBar))tabBar.KeepAbove();
         }
-        RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":"Click Mac to control"):null);
+        RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);TryAutomaticControl();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":remote?"Control paused":"Click Mac to control"):null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(appWindow!=null)appWindow.Title=AppTitle();
         SendLease();
@@ -334,18 +349,18 @@ internal sealed partial class MainWindow : Window
         {
             controlIssue="Allow Accessibility on your Mac to control";
             if(gate.CanRoute)gate.Disarm("mac-permission");
-            status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";
+            status.Text=remote?"Allow mac-lan under Accessibility on your Mac. Control starts automatically on the MacBook tab once permission and video are ready.":"On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";
             UpdateControl();return;
         }
         switch(code.GetString())
         {
             case "ready":controlIssue=null;break;
-            case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text="On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";break;
+            case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text=remote?"Allow mac-lan under Accessibility on your Mac. Control starts automatically on the MacBook tab once permission and video are ready.":"On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";break;
             case "scope-blocked":controlIssue="Control paused: refocus the selected Mac window";gate.Disarm("mac-scope");break;
-            case "lease-expired":case "stale-input":case "generation-revoked":controlIssue="Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
-            case "input-overflow":controlIssue="Control paused: Mac input was too fast";gate.Disarm("mac-input-pressure");status.Text="Mac input was faster than it could be applied. Click the Mac view again to resume control; video keeps playing.";break;
+            case "lease-expired":case "stale-input":case "generation-revoked":controlIssue=remote?"Control recovering automatically":"Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
+            case "input-overflow":controlIssue="Control paused: Mac input was too fast";gate.Disarm("mac-input-pressure");status.Text=remote?"Mac input was faster than it could be applied. Control recovers automatically on the MacBook tab; video keeps playing.":"Mac input was faster than it could be applied. Click the Mac view again to resume control; video keeps playing.";break;
         }
-        UpdateControl();
+        TryAutomaticControl();UpdateControl();
     }
     void ReportVideo(string stats){ if(stats.StartsWith("WebView2 runtime unavailable")){status.Text=stats;viewProgress.Text=stats;viewProgress.Visibility=Visibility.Visible;Telemetry.Report("decode-failed","WebView2");} }
     long lastUiHealth;
@@ -358,14 +373,19 @@ internal sealed partial class MainWindow : Window
         try{Directory.CreateDirectory(Telemetry.DirectoryPath);Process.Start(new ProcessStartInfo("explorer.exe"){Arguments="\""+Telemetry.DirectoryPath+"\"",UseShellExecute=true});}
         catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){LogDiagnostic("logs-folder-failed","open",error:ex);status.Text="Logs folder: "+Telemetry.DirectoryPath;}
     }
-    void Disconnect(){clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
+    void Disconnect(){desktopWorkspace.Restore();clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
-    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;root.Margin=new Thickness(0,TabBarLayout.Dip,0,0);Topmost=true;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));tabBar.KeepAbove();}
+    void RefreshDesktopWorkspace()
+    {
+        if(!remote||appWindow!=null||session?.IsPaired!=true||closing){desktopWorkspace.Restore();return;}
+        var all=Native.Monitors();if(all.Count>0)desktopWorkspace.Activate(DisplayLayout.Select(all,preferred).Id,all);
+    }
+    void Position(bool? strip=null){var all=Native.Monitors();if(all.Count==0||!remote)return;root.Margin=new Thickness(0,tabBar.VideoTopInset,0,0);Topmost=true;Native.PositionCovering(this,DisplayLayout.Select(all,preferred));tabBar.KeepAbove();RefreshDesktopWorkspace();}
     nint WndProc(nint hwnd,int msg,nint w,nint l,ref bool handled)
     {
         if(msg==0x312&&w==901){Escape();handled=true;}
         if(msg==0x031D)clipboard?.WindowsChanged();
-        if(msg is 0x007E or 0x02E0){gate.Disarm("display-change");Dispatcher.BeginInvoke(()=>{RefreshMonitors();Position();});}
+        if(msg is 0x007E or 0x02E0){gate.Disarm("display-change");Dispatcher.BeginInvoke(()=>{desktopWorkspace.Restore();RefreshMonitors();Position();});}
         return 0;
     }
     void ShowUpdates()
@@ -419,6 +439,7 @@ internal sealed class RemoteView : WebView2
     readonly Action<string,string,object?,Exception?> diagnostic;
     long lastDiagnostic;
     public event Action? VideoInvalidated;
+    public event Action? Presented;
     public event Action? KeyframeNeeded;
     public long LastPresented{get;private set;}
     public string VideoStats{get;private set;}="waiting for video";
@@ -463,7 +484,7 @@ internal sealed class RemoteView : WebView2
                     if(type=="loaded"){diagnostic("viewer-loaded","ok",null,null);ready=true;ResetEpoch();SetArmed(armed);}
                     else if(type=="presented")
                     {
-                        if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)&&currentStream?.Invoke()==true)LastPresented=Stopwatch.GetTimestamp();
+                        if(MessageEpoch(m,out long epoch)&&bridge.IsCurrent(epoch)&&currentStream?.Invoke()==true){LastPresented=Stopwatch.GetTimestamp();Presented?.Invoke();}
                     }
                     else if(type=="frameAck")
                     {

@@ -11,6 +11,8 @@ dotnet run --project tests/Diagnostics.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Local diagnostic logging tests failed'}
 dotnet run --project tests/Core.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Core tests failed'}
+dotnet run --project tests/Desktop.Tests -c Release -p:BuildInParallel=false
+if($LASTEXITCODE){throw 'Desktop workspace tests failed'}
 dotnet run --project tests/Video.Tests -c Release -p:BuildInParallel=false
 if($LASTEXITCODE){throw 'Encoded video queue tests failed'}
 node tests/video-pipeline.test.mjs
