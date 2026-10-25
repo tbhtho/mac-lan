@@ -1,23 +1,63 @@
 # Verification record
 
-## Alpha.37 preparation - keep Spotlight on the Windows key
+## Alpha.37 - keep Spotlight on the Windows key
 
-The exact Ctrl/left-Alt-to-Command Space path was reproduced by a failing routing
-regression. Plain Command-mapped Space is suppressed while Mac control is active;
-Windows-key taps retain their Spotlight sequence. Tests cover both Ctrl keys,
-generic modifiers, repeats and release ordering, focus loss, outside-held Ctrl,
-Space-first remote release and unchanged app shortcuts. Review also reproduced an outside-held Shift/Option bypass and stale modifier
-state after resuming. Modifier exemptions now depend on remotely forwarded keys;
-control release transfers their physical ownership to suppression until key-up.
-The revised source has 135 passing keyboard/core checks. Native key injection and
-actual Spotlight/FluxFrame behavior remain user hardware checks. Final package/feed evidence follows publication.
+[Release v0.1.0-alpha.37](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.37)
+binds source `806cdc5666286d98a1a8c52bb3f56bfea9a35c0d`; signed-feed commit
+`740fee3`. Plain Ctrl+Space and left Alt+Space are suppressed while controlling
+the Mac, instead of becoming Command+Space. Either Windows key tapped alone
+retains the Spotlight sequence. Ctrl+Shift+Space, right Alt+Space, Ctrl+C/V and
+Windows-key combinations preserve their existing routing.
 
-The final source passed `./scripts/test.ps1`: 135 core/keyboard checks plus
-desktop/preferences, video/audio, session, transfer, updater, presentation and
-Node suites, Go tests/vet, and the Windows Release build with zero warnings or
-errors. Evidence: `.cache/alpha37-final-tests.log`. The modifier and resume-state
-review findings were corrected, tested red/green and re-reviewed with no further
-actionable findings.
+Regression tests failed before the fixes and passed afterward. They cover
+left/right/generic modifiers, repeats and release ordering, outside-held and
+locally pressed Shift/Option, focus loss, pause/resume state, Space pressed
+before Ctrl, and interrupted Windows-key taps. Control release now transfers
+native-released key ownership into suppression until physical key-up; held keys
+must be released/re-pressed after a pause. Review findings were fixed and
+re-reviewed without remaining actionable findings.
+
+The final `./scripts/test.ps1` passed 135 core/keyboard checks and all remaining
+.NET, Node and Go suites/vet, plus the Windows Release build with zero warnings
+or errors. The packaged single EXE passed standalone checks without UI, hooks,
+capture or key injection. Clean package identities, certificate signature,
+credential checks and matching source/native hashes passed before publication.
+
+All eight release assets were downloaded anonymously and matched local and
+GitHub sizes/hashes. The canonical Mac archive and legacy alias are identical.
+The downloaded packages passed the verifier again, and the normal public feed
+included alpha.37 with a valid signature and matching bindings.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7,336,269 | `1ed9121b897d0422934b7cc044e73344be20b791ef1b413f6ba9a1dfdc3f3af0` |
+| SHA256SUMS-0.1.0-alpha.37.txt | 660 | `68e412294c160ab1b2efc44380d1df3d2546caed235217ca74f96bb980360354` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3,670,257 | `66c8dc919f7e81fa50d138b80317e4f38feadfbe1afd24085a622c9e2e5d68d5` |
+| mac-lan-macos-arm64.dmg | 18,135,040 | `fbf89988e11b430d45c4f43c7a6447e4c36ee399229ffa57bb1ccf8e08ebe8a2` |
+| mac-lan-macos-arm64.tar.gz | 7,336,269 | `1ed9121b897d0422934b7cc044e73344be20b791ef1b413f6ba9a1dfdc3f3af0` |
+| mac-lan-setup.exe | 46,004,490 | `620197fed0d27e3df70f98260fd67ee40c6757ba777b60bfbdad12c8b6d63b98` |
+| mac-lan-source-0.1.0-alpha.37.zip | 433,217 | `c76518a93edd9d2bb6606c116b932c92959cd5e227ad937cbac1338217ff5e92` |
+| mac-lan.exe | 149,773,858 | `124125a728a0f5476dcc5bc835e2c400b151d22076247ef93c6a0c41d41e5b2f` |
+
+The live updater test passed alpha.14 → alpha.37 in a temporary Windows install,
+preserving the original EXE and neighboring sentinel without relaunching. It
+also staged and verified the public signed Mac app without Darwin execution.
+The user's installed alpha.36 returned `available` for alpha.37 at `806cdc5`
+from its read-only `--update-check`. No installed/running app was replaced or
+restarted by validation. Earlier releases and staging artifacts were preserved.
+
+Evidence: `.cache/alpha37-final-tests.log`, `.cache/alpha37-standalone.log`,
+`.cache/alpha37-validate.log`, `.cache/alpha37-publish.log`,
+`.cache/alpha37-anonymous-b97376d0/verification.json`,
+`.cache/alpha37-live-update.log` and `.cache/alpha37-installed-check.json`.
+The [public checksum list](https://github.com/tbhtho/mac-lan/releases/download/v0.1.0-alpha.37/SHA256SUMS-0.1.0-alpha.37.txt)
+contains package/source hashes.
+
+This changes Windows routing only. The Mac launcher is cross-compiled and
+certificate-signed; native capture/menu sources and OS shortcut/permission
+settings are unchanged. No native Mac build, real keyboard injection, Spotlight
+interaction or FluxFrame shortcut execution was performed. Actual shortcut
+behavior remains a user hardware check.
 
 ## Alpha.36 - automatic MacBook control, monitor handoff and auto-hide
 
