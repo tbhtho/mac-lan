@@ -50,6 +50,23 @@ Build Windows and both Mac layouts from clean committed source, then publish fro
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
+## Alpha.37 Spotlight shortcut handling
+
+Ctrl and left Alt normally map to Mac Command. Their plain Space chord is now
+suppressed while Mac control owns keyboard input, so only the Windows-key tap
+synthesizes Command+Space for Spotlight. Ctrl+Shift+Space, right Alt+Space,
+Windows-key combinations, and ordinary Ctrl+C/V keep their existing routing.
+
+The router retains ownership of a suppressed Space until physical release,
+including repeats after Ctrl release or focus loss. Modifier exemptions use only
+keys actually forwarded to the Mac. When control releases, native-released keys
+move to suppression until physical release, so resuming cannot reuse stale
+modifier state. Release/re-press held modifiers after a pause. A Space press
+already sent to the Mac still gets its matching remote release while active. This changes Windows routing
+only; no Mac keyboard settings, shortcuts, permissions or native source change.
+FluxFrame's Mac Quick Apply binding remains Ctrl+Shift+Space in its source;
+mac-lan does not silently remap Ctrl+Space to a different app command.
+
 ## Alpha.36 stability and desktop behavior
 
 Windows now forwards a viewer's keyframe request only after stream approval and

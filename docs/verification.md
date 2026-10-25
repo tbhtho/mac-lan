@@ -1,5 +1,24 @@
 # Verification record
 
+## Alpha.37 preparation - keep Spotlight on the Windows key
+
+The exact Ctrl/left-Alt-to-Command Space path was reproduced by a failing routing
+regression. Plain Command-mapped Space is suppressed while Mac control is active;
+Windows-key taps retain their Spotlight sequence. Tests cover both Ctrl keys,
+generic modifiers, repeats and release ordering, focus loss, outside-held Ctrl,
+Space-first remote release and unchanged app shortcuts. Review also reproduced an outside-held Shift/Option bypass and stale modifier
+state after resuming. Modifier exemptions now depend on remotely forwarded keys;
+control release transfers their physical ownership to suppression until key-up.
+The revised source has 135 passing keyboard/core checks. Native key injection and
+actual Spotlight/FluxFrame behavior remain user hardware checks. Final package/feed evidence follows publication.
+
+The final source passed `./scripts/test.ps1`: 135 core/keyboard checks plus
+desktop/preferences, video/audio, session, transfer, updater, presentation and
+Node suites, Go tests/vet, and the Windows Release build with zero warnings or
+errors. Evidence: `.cache/alpha37-final-tests.log`. The modifier and resume-state
+review findings were corrected, tested red/green and re-reviewed with no further
+actionable findings.
+
 ## Alpha.36 - automatic MacBook control, monitor handoff and auto-hide
 
 [Release v0.1.0-alpha.36](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.36)

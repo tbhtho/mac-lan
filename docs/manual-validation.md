@@ -1,5 +1,15 @@
 # Hardware acceptance checklist
 
+## Alpha.37 keyboard check
+
+While controlling the Mac, plain left/right Ctrl+Space and left Alt+Space must
+not open Spotlight. Tapping either Windows key alone must still open it.
+Ctrl+Shift+Space must still reach a Mac application, including FluxFrame Quick
+Apply; Ctrl+C/V and right Alt+Space keep their mappings. Test repeats, releasing
+Ctrl before Space, holding Space before Ctrl, and focus loss with keys held.
+No key or modifier should remain stuck, and Windows-side Ctrl+Space while not
+controlling the Mac must remain local.
+
 ## Alpha.36 Windows checks
 
 - Enable **Bar → Auto-hide top bar**: it should tuck away after leaving, reveal
