@@ -18,7 +18,8 @@ Atomic preference writes use a separate file under the legacy settings directory
   close/suspend timer cleanup and current-user preference path.
 - [x] Read-only review and final full suite. Inactive-bar focus clearing found
   during review was fixed and re-reviewed. Final source suite passes.
-- [ ] Signed release packaging and public download/feed verification.
+- [x] Signed alpha.36 packaging, eight anonymous downloads, feed signature and
+  live updater verification. See `docs/verification.md` for exact identities.
 
 No real desktop UI is opened or operated during development validation. Physical
 edge reveal, mixed DPI, fullscreen and focus behavior need the user's test.

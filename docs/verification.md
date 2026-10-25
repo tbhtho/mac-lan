@@ -1,25 +1,64 @@
 # Verification record
 
-## Alpha.36 release preparation
+## Alpha.36 - automatic MacBook control, monitor handoff and auto-hide
 
-The user authorized publication of the combined automatic MacBook control,
-Windows monitor handoff, optional saved top-bar auto-hide and stability changes. Alpha.36 packaging uses clean
-committed source. The candidate tests and code reviews below establish the
-headless baseline; final release artifact, feed and anonymous-download evidence
-will be recorded after publication. Physical monitor movement, native Mac
-execution and FluxFrame startup remain user hardware checks.
+[Release v0.1.0-alpha.36](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.36)
+binds source `c21347fa616f9afeace3ebf1fb723b04f3b5b41e`; its signed-feed commit is
+`0843427`. Windows now requests control on MacBook selection, temporarily moves
+eligible Windows apps to another display, and offers **Bar → Auto-hide top bar**.
+The release also includes keyframe recovery, bounded pending audio and mouse
+button fixes described below. Permissions, fresh video, foreground focus and the
+native control lease still apply.
 
-Final alpha.36 source validation passed `./scripts/test.ps1`: 88 core/control/
-auto-hide checks, 24 workspace/preferences checks, 40 video/audio checks,
-54 synthetic TLS session checks, remaining .NET/Node suites, Go tests/vet and
-the Windows Release build with zero warnings/errors. Evidence:
-`.cache/alpha36-final-tests.log`. Auto-hide review's inactive-bar focus clearing
-finding was corrected and re-reviewed; no actionable findings remained.
+The final source passed `./scripts/test.ps1`: 88 core/control/auto-hide checks,
+24 desktop workspace/preferences checks, 40 video/audio checks, 54 synthetic TLS
+session checks, remaining .NET/Node suites, Go tests/vet and the Windows Release
+build with zero warnings/errors. Code review findings for focus, minimized
+placement, HWND reuse and pointer chords were corrected and re-reviewed.
+`test-standalone.ps1` passed against the exact clean release EXE, with embedded
+viewer/helper/theme and an existing WebView2 runtime. No UI, capture, input hooks
+or real desktop window movement started during those checks.
 
-The auto-hide state and preference regressions failed before implementation and
-passed afterward. They cover delayed hide, immediate edge reveal, interaction
-hold, returning pointer, disabling, startup recovery and persistence/corruption
-fallback. Native bar reveal/fullscreen/focus behavior remains unverified here.
+All eight public artifacts were downloaded anonymously. Names, byte counts and
+SHA-256 hashes matched the release metadata and local packages; the tag and
+package provenance identify the source above. The canonical Mac app archive and
+its legacy feed alias are byte-identical. Downloaded Windows/Mac identities,
+credential scans, ARM64 layout, certificate signature and native source hashes
+passed the package verifier. The public feed signature/bindings verified and
+its normal production URL included alpha.36.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7,336,195 | `7d73590827bcabc317e670dadb35bee321e78c6eb336ce5c96c7c8dddcdd03ea` |
+| SHA256SUMS-0.1.0-alpha.36.txt | 660 | `31986db6925e33d179b068e388766912a957cd552a12608e08ac2d266270ea32` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3,670,187 | `6ac245464429eae0c52be59fc9895a3c3712e8664c6b696de2c7cfa9e669dfa0` |
+| mac-lan-macos-arm64.dmg | 18,135,040 | `6acb33b0ea990fe2e36ab233705f09cb5301ea4f89d44bf8a3c53d864b30d61c` |
+| mac-lan-macos-arm64.tar.gz | 7,336,195 | `7d73590827bcabc317e670dadb35bee321e78c6eb336ce5c96c7c8dddcdd03ea` |
+| mac-lan-setup.exe | 45,995,838 | `9e318a3fb83e556075c343f1575ad720d3b8785f2bfbdf6d9ce4acb040827602` |
+| mac-lan-source-0.1.0-alpha.36.zip | 429,545 | `0508551158578a7076b9472b9effed76a50080685f5a98e6a42b86a556231cce` |
+| mac-lan.exe | 149,773,858 | `79b39b80a76f386d006c1f6f7dd765d452255b71b36c7f5d4792ffe83ddda663` |
+
+The opt-in live updater test passed an actual alpha.14 → alpha.36 Windows
+replacement in a temporary install, preserving the old release and a neighboring
+sentinel without relaunching. It also staged and verified the public signed Mac
+app archive without Darwin execution. A separate read-only `--update-check`
+from the user's installed alpha.35 returned `available` for alpha.36 at `c21347f`.
+The installed/running app was not replaced or restarted by these checks.
+
+Evidence: `.cache/alpha36-final-tests.log`, `.cache/alpha36-standalone.log`,
+`.cache/alpha36-validate.log`, `.cache/alpha36-publish.log`,
+`.cache/alpha36-anonymous-818dddf8/verification.json`,
+`.cache/alpha36-live-update.log` and `.cache/alpha36-installed-check.json`.
+The public [checksum list](https://github.com/tbhtho/mac-lan/releases/download/v0.1.0-alpha.36/SHA256SUMS-0.1.0-alpha.36.txt)
+contains the downloadable package/source hashes.
+
+The Mac launcher was cross-compiled on Windows and signed with the existing
+mac-lan certificate. Its native capture/menu sources are unchanged from alpha.35;
+no native Mac build/execution was performed. Physical window movement,
+maximized/mixed-DPI/hotplug behavior, edge reveal/fullscreen/focus behavior,
+FluxFrame startup and real two-computer update/relaunch remain the user's hardware
+checks. This is not evidence of measured throughput or latency. See the
+[monitor/bar contract](desktop-workspace.md) and [hardware checklist](manual-validation.md).
 
 ## Unreleased MacBook control and monitor handoff - 2026-10-25
 
