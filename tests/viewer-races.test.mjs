@@ -22,6 +22,13 @@ const key=[0,0,0,1,0x67,0x42,0xc0,0x1f,0,0,0,1,0x65],delta=[0,0,0,1,0x41];
  assert.deepEqual(h.state.messages.filter(m=>m.type==='button').map(m=>[m.button,m.down]),[[0,true],[0,false],[1,true],[1,false],[2,true],[2,false]]);
  console.log('PASS unsupported mouse buttons cannot terminate sharing while ordinary buttons retain press/release order');
 }
+{
+ const h=runtime();await h.send({type:'armed',active:true});h.state.messages.length=0;
+ for(let click=1;click<=3;click++){h.pointer('pointerdown',{detail:click});h.pointer('pointerup',{detail:click});}
+ assert.deepEqual(h.state.messages.filter(m=>m.type==='button').map(m=>[m.button,m.down]),[[0,true],[0,false],[0,true],[0,false],[0,true],[0,false]],'all double/triple click edges reach the Mac, which reconstructs native click counts');
+ assert.deepEqual(h.state.messages.map(m=>m.type),['move','button','button','move','button','button','move','button','button']);
+ console.log('PASS double/triple clicks preserve every edge and flush position before each down');
+}
 for(const recoverDuringChord of [false,true]){
  const h=runtime({manualDecoder:true});await h.send({type:'video',codec:'avc1.42c01f',fps:60});await h.send({type:'armed',active:true});h.state.messages.length=0;
  // Pointer Events report down only for the first button and up only for the

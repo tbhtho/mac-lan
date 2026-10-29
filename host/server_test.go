@@ -224,6 +224,157 @@ func TestInputPressureDoesNotEndApprovedCapture(t *testing.T) {
 	}
 }
 
+func TestInputPressureReleasesHeldEdgesBeforeRenewedLease(t *testing.T) {
+	for _, scenario := range []struct {
+		kind       string
+		rounds     int
+		focusLoss  bool
+		disconnect bool
+	}{
+		{"key", 1, false, false}, {"button", 1, false, false}, {"key", 3, false, false}, {"button", 3, false, false}, {"key", 3, true, false}, {"button", 3, true, false}, {"key", 3, true, true}, {"button", 3, true, true},
+		{"pending-keyframe", 3, false, false},
+	} {
+		kind := scenario.kind
+		preserveKeyframe := kind == "pending-keyframe"
+		if preserveKeyframe {
+			kind = "key"
+		}
+		t.Run(scenario.kind+"-rounds-"+strconv.Itoa(scenario.rounds)+"-focus-loss-"+strconv.FormatBool(scenario.focusLoss)+"-disconnect-"+strconv.FormatBool(scenario.disconnect), func(t *testing.T) {
+			held := make(chan struct{})
+			resume := make(chan struct{})
+			observed := make(chan []input, 1)
+			s := &server{token: strings.Repeat("2", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+				catalog: func() ([]window, error) { return nil, nil }, consent: func(start) bool { return true },
+				stream: func(send func([]byte), _ func(string), events <-chan input) error {
+					first, ok := <-events
+					if !ok || first.Type != kind || !first.Down {
+						return errors.New("missing fixture press")
+					}
+					close(held)
+					<-resume
+					var batch []input
+					for e := range events {
+						batch = append(batch, e)
+						if e.Type == "lease" {
+							observed <- batch
+							send([]byte{9})
+							for range events {
+							}
+							return nil
+						}
+					}
+					return nil
+				},
+			}
+			c := connectFixture(t, s)
+			// Cleanup unblocks the fixture even if an assertion below fails.
+			t.Cleanup(func() {
+				select {
+				case <-resume:
+				default:
+					close(resume)
+				}
+			})
+			for _, e := range []any{start{Type: "start", FPS: 60, Width: 1280, Quality: 70}, input{Type: kind, Code: 55, Button: 0, Down: true}} {
+				if err := c.WriteJSON(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case <-held:
+			case <-time.After(time.Second):
+				t.Fatal("fixture did not hold input")
+			}
+			// A competing controller cannot own another producer or receive this
+			// session's recovery release while its consumer is stalled.
+			rejected := httptest.NewRecorder()
+			s.ServeHTTP(rejected, httptest.NewRequest("GET", "https://fixture/", nil))
+			if rejected.Code != 409 {
+				t.Fatalf("second controller was not rejected: %d", rejected.Code)
+			}
+			for round := 0; round < scenario.rounds; round++ {
+				if preserveKeyframe {
+					for i := 0; i < 3; i++ {
+						if err := c.WriteJSON(input{Type: "keyframe"}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				for i := 0; i < 32; i++ {
+					if err := c.WriteJSON(input{Type: "move", X: 0.5, Y: 0.5}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				edge := input{Type: kind, Code: 55, Button: 0, Down: false}
+				if scenario.focusLoss {
+					edge = input{Type: "release", Reason: "foreground-lost"}
+				}
+				if err := c.WriteJSON(edge); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.WriteJSON(input{Type: "lease", Active: true, View: true, Generation: 1, Stamp: int64(round + 1)}); err != nil {
+					t.Fatal(err)
+				}
+				// Receiving this pong proves the reader passed the up's timeout. No
+				// scheduler-dependent sleep is needed to hold the native consumer.
+				for {
+					var message map[string]any
+					if err := c.ReadJSON(&message); err != nil {
+						t.Fatal(err)
+					}
+					if message["type"] == "pong" {
+						if message["stamp"] != float64(round+1) {
+							t.Fatal("out-of-order lease acknowledgement")
+						}
+						break
+					}
+				}
+			}
+			s.connectionMu.Lock()
+			connectionDone := s.activeDone
+			s.connectionMu.Unlock()
+			if scenario.disconnect {
+				c.Close()
+			}
+			close(resume)
+			select {
+			case batch := <-observed:
+				var types []string
+				for _, event := range batch {
+					types = append(types, event.Type)
+				}
+				want := "release,lease"
+				if preserveKeyframe {
+					want = "release,keyframe,lease"
+				}
+				if strings.Join(types, ",") != want {
+					t.Fatalf("overflow must discard stale input and release before renewed lease, got %v", batch)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("native input did not resume")
+			}
+			if scenario.disconnect {
+				select {
+				case <-connectionDone:
+				case <-time.After(time.Second):
+					t.Fatal("disconnect during recovery stranded the session")
+				}
+				select {
+				case s.slot <- struct{}{}:
+					<-s.slot
+				case <-time.After(time.Second):
+					t.Fatal("disconnected session retained controller ownership")
+				}
+				return
+			}
+			kind, frame, err := c.ReadMessage()
+			if err != nil || kind != websocket.BinaryMessage || !bytes.Equal(frame, []byte{9}) {
+				t.Fatalf("video did not survive input pressure: %v", err)
+			}
+		})
+	}
+}
+
 func TestPrivateLANOnly(t *testing.T) {
 	for _, s := range []string{"10.1.2.3", "172.16.1.1", "192.168.1.5"} {
 		if !privateIP(s) {

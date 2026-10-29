@@ -42,6 +42,95 @@ That script also defaults to no embedded diagnostic destination. A private nativ
 
 The optional [native workflow](../.github/workflows/native-build.yml) has no push/tag trigger. It requires explicit confirmation that sufficient included free Actions minutes exist. It has not provided proof of current native capture or control. Do not start paid CI or broaden account permissions as an incidental publishing step.
 
+## Remote mouse multi-clicks (local fix)
+
+The Mac capture helper now sets `mouseEventClickState` on synthetic mouse events.
+Previously every press/release was posted without a multi-click count, so remote
+double-clicks could not reliably open Finder items or select words. Windows already
+forwards all click edges and does not need a protocol change for this fix.
+
+The helper counts successive presses using receive time, the Mac's double-click
+interval (0.5 seconds if AppKit cannot supply one), and a four-point movement
+tolerance. Matching releases and drags retain their press count. Movement beyond
+the tolerance, button/modifier changes, and control release or generation changes
+break the sequence. Duplicate downs and unmatched ups are ignored. This preserves
+existing event flags, button mapping, permissions and transfer behavior.
+
+`MacDowCapture --self-test` checks single/double/triple click sequences, timing,
+movement, buttons, modifiers and reset, and inspects unposted native events.
+The viewer race tests verify repeated click edges and position ordering.
+These headless tests do not establish end-to-end Windows-to-Mac behavior; the
+user should check Finder opening, word/paragraph selection, dragging, right-click
+and modifier clicks after deliberately restarting with the new Mac build.
+No app replacement, relaunch, publishing or OS setting change is part of this fix.
+
+## Local cursor and congestion improvements
+
+Cursor polling still runs every 100 ms and redraws the current image, preserving
+animated cursors. It now compares a bounded raster plus size/hotspot before PNG
+encoding. Unchanged cursors skip compression; failed or oversized encodes retry.
+Synthetic 64/128-pixel fixtures measured roughly 0.04/0.085 ms per encode and hash,
+versus 0.0006/0.0026 ms for copying and comparing the raster. This is a small idle
+CPU saving, not evidence of lower Windows-to-Mac latency or faster streaming.
+
+The host's 32-event input channel previously dropped discrete events after a
+100 ms full-queue wait. Dropping an up event while later renewing the control
+lease could strand a held key/button. On that timeout, the sole producer now
+clears queued input and inserts release before any later events. This pauses
+control safely while keeping video connected; ordinary movement shedding and
+the native permission/scope/lease checks are unchanged. The regression uses a
+blocked fake native consumer and a pong barrier, reproduces both lost key-up and
+button-up on the old code, then verifies release-before-lease and surviving video.
+
+Existing tests already cover video age/count/byte bounds, keyframe recovery,
+heartbeat priority and obsolete viewer epochs. Native self-tests additionally
+check that movement coalescing preserves click edges and receipt timestamps.
+Windows logs already expose RTT, send/lease gaps, queue depth/bytes, UI/native/video
+freshness, encode/decode time and recovery counts. These are stage-local measures;
+they are not an end-to-end frame-age measurement. No diagnostic schema or remote
+reporting changes were necessary. The Windows outgoing queue is a separate
+pressure boundary, covered by the corresponding fix below.
+
+Additional mock regressions cover three successive overflow rounds, focus-loss
+release, disconnect during recovery, rejection of a second controller, and
+release-before-EOF across three fresh capture-helper runs. The host input reader
+is the sole producer of its per-session channel; the controller slot remains
+owned until capture cleanup returns. These tests do not exercise real OS input.
+For race-testing the subprocess fixtures, use `GORACE=atexit_sleep_ms=0`: the race
+runtime's default one-second exit sleep otherwise exceeds the helper's existing
+one-second shutdown grace. This changes test instrumentation only.
+
+Windows `Session.Send` likewise dropped key/button releases when its 64-entry
+outgoing channel filled. It now drains stale pending messages and queues release
+on key/button/release/lease overflow while preserving the ready session. Movement
+and scrolling retain existing shedding behavior. The channel supports multiple
+readers because recovery and the transport writer can now consume concurrently;
+the existing lifecycle lock serializes producers and abort. An earlier message
+already taken by the writer finishes before the recovery release.
+
+`QueuePressureChecks` runs from the normal .NET 10 session tests. A local
+`assessment/QueuePressure.net8.csproj` additionally links the actual Session and
+Core sources, unchanged, into an isolated .NET 8 harness with a deterministic
+mock consumer. It reproduced the original lost release, then passed repeated
+overflow, ordinary ordering, movement shedding, abort/fresh-session isolation,
+and four-producer/concurrent-consumer checks. Only the harness targets .NET 8;
+production remains .NET 10. No SDK was installed. This does not validate Windows
+integration or the full .NET 10 test suite.
+
+Both input-queue recovery paths retain one queued keyframe request after release,
+so unrelated video recovery is not lost with stale input. Regression tests first
+reproduced the lost request on each endpoint. Pre-ready input cannot clear queued
+authentication/start messages. `SocketWriterChecks` additionally invokes the
+actual `Session.WriteLoop` and `ClientWebSocket` against a plain loopback fake
+peer: it verifies release/keyframe/lease wire order, two fresh session boundaries,
+and cancellation during a genuinely pending send. The blocked-send fixture uses
+an oversized 16 MiB test-only payload with send buffering disabled on its own
+client socket. Windows otherwise completes the overlapped send after buffering
+the payload, so a small receive buffer alone does not prove a pending send.
+This is not a valid Mac input message or a production throughput measurement.
+No certificate is generated by this fixture. Run local SDK commands with
+`DOTNET_GENERATE_ASPNET_CERTIFICATE=false` and a workspace `DOTNET_CLI_HOME`.
+
 ## Publishing
 
 Use [signed update publishing](update-feed-publishing.md) for the feed, pinned-key verification, immutable artifact identities, and private-key handling. Publish public artifacts without the Mac diagnostic destination. Do not rewrite published Git history to improve presentation or replace an old asset under its existing version.

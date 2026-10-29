@@ -44,6 +44,41 @@ struct Lease {
     mutating func release() { active = false; deadline = 0 }
 }
 
+// CGEvent does not infer multi-clicks from successive synthetic button events.
+// Keep the down count on its matching up and drag; invalidate the next click
+// after movement, a different button/modifier, or a control-session boundary.
+struct ClickSequence {
+    var button: Int?
+    var origin = CGPoint.zero
+    var time: TimeInterval = 0
+    var flags: UInt64 = 0
+    var count: Int64 = 0
+    var held: [Int:Int64] = [:]
+    static let tolerance: CGFloat = 4
+
+    mutating func move(to point: CGPoint) {
+        if abs(point.x-origin.x)>Self.tolerance || abs(point.y-origin.y)>Self.tolerance { button=nil }
+    }
+    mutating func down(_ b: Int, at point: CGPoint, time: TimeInterval, interval: TimeInterval, flags: UInt64) -> Int64 {
+        move(to:point)
+        let follows = held.isEmpty && button==b && self.flags==flags && time>=self.time && time-self.time<=interval
+        count = follows && count<Int64.max ? count+1 : 1
+        button=held.isEmpty ? b : nil;origin=point;self.time=time;self.flags=flags;held[b]=count
+        return count
+    }
+    mutating func up(_ b: Int) -> Int64 { held.removeValue(forKey:b) ?? 1 }
+    mutating func reset() { self=ClickSequence() }
+}
+
+func mouseButtonEvent(_ b: Int, down: Bool, point: CGPoint, flags: CGEventFlags, count: Int64) -> CGEvent? {
+    let button:CGMouseButton=b==0 ? .left : b==2 ? .right : .center
+    let type:CGEventType=b==0 ? (down ? .leftMouseDown:.leftMouseUp) : b==2 ? (down ? .rightMouseDown:.rightMouseUp) : (down ? .otherMouseDown:.otherMouseUp)
+    let event=CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:point,mouseButton:button)
+    event?.flags=flags
+    event?.setIntegerValueField(.mouseEventClickState,value:count)
+    return event
+}
+
 func status(_ message: String, paused: Bool = false) {
     let value: [String: Any] = ["type": "status", "message": message, "paused": paused]
     if let b = try? JSONSerialization.data(withJSONObject: value) { try? FileHandle.standardError.write(contentsOf:b + Data([10])) }
@@ -114,6 +149,26 @@ final class InputMailbox {
     }
 }
 
+struct CursorRaster: Equatable {
+    var pixels: Data
+    var width: Int
+    var height: Int
+    var bytesPerRow: Int
+    var size: CGSize
+    var hotSpot: CGPoint
+}
+
+struct CursorEncodingCache {
+    private var previous: CursorRaster?
+    mutating func encodeIfChanged(_ raster: CursorRaster, encode: () -> Data?) -> Data? {
+        guard previous != raster else { return nil }
+        guard let png=encode(), !png.isEmpty, png.count<40_000 else { return nil }
+        // Failed encodes must remain eligible for retry on the next tick.
+        previous=raster
+        return png
+    }
+}
+
 final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var stream: SCStream?
     var selected: SCWindow?
@@ -124,6 +179,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var lease = Lease()
     var keys = Set<CGKeyCode>(), buttons = Set<Int>()
     var point = CGPoint.zero
+    var clicks = ClickSequence()
     var watchdog: Timer?
     var watchdogGrace = now()
     var paused = false
@@ -148,7 +204,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     // Caps Lock is a lock state, not a held key: a synthetic key 57 press does not toggle it,
     // so the helper tracks it and applies it to the events it posts.
     var capsLock = CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
-    var lastCursor = 0
+    var cursorEncoding = CursorEncodingCache()
     // The newest captured image, so a keyframe request can be answered while the screen is still;
     // ScreenCaptureKit sends no frames for an unchanged screen.
     var lastImage: CVImageBuffer?
@@ -418,15 +474,16 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard size.width >= 1, size.height >= 1, size.width <= 64, size.height <= 64,
               let rep = NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:Int(size.width*2),pixelsHigh:Int(size.height*2),bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0) else { return }
         rep.size = size
+        guard let pixels=rep.bitmapData else { return }
+        let byteCount=rep.bytesPerRow*rep.pixelsHigh
+        // Clear transparent pixels and row padding for deterministic comparisons.
+        memset(pixels,0,byteCount)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
         cursor.image.draw(in:NSRect(origin:.zero,size:size))
         NSGraphicsContext.restoreGraphicsState()
-        guard let png = rep.representation(using:.png,properties:[:]), png.count < 40_000 else { return }
-        var hasher = Hasher(); hasher.combine(png); hasher.combine(cursor.hotSpot.x); hasher.combine(cursor.hotSpot.y)
-        let digest = hasher.finalize()
-        guard digest != lastCursor else { return }
-        lastCursor = digest
+        let raster=CursorRaster(pixels:Data(bytes:pixels,count:byteCount),width:rep.pixelsWide,height:rep.pixelsHigh,bytesPerRow:rep.bytesPerRow,size:size,hotSpot:cursor.hotSpot)
+        guard let png=cursorEncoding.encodeIfChanged(raster,encode:{rep.representation(using:.png,properties:[:])}) else { return }
         jsonStatus(["type":"cursor","png":png.base64EncodedString(),"x":Double(cursor.hotSpot.x),"y":Double(cursor.hotSpot.y)])
     }
     @objc func tick() {
@@ -518,6 +575,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             guard generation>0,generation != revokedGeneration else { releaseAll();reportControl("generation-revoked",permission:permission);return }
             guard received+0.85>now() else { releaseAll();reportControl("stale-input",permission:permission);return }
             if generation != currentGeneration {
+                clicks.reset()
                 currentGeneration=generation
                 if windowID != 0 { NSRunningApplication(processIdentifier:owner)?.activate(options:[]) }
             }
@@ -545,14 +603,19 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             guard let x=m["x"] as? Double,let y=m["y"] as? Double,x>=0,x<1,y>=0,y<1 else { return }
             point=CGPoint(x:frame.minX+x*frame.width,y:frame.minY+y*frame.height)
             guard pointerAllowsInput(point) else{revoke("Control paused: pointer target is outside the captured window or is occluded");return}
+            clicks.move(to:point)
             let type:CGEventType=buttons.contains(0) ? .leftMouseDragged : buttons.contains(2) ? .rightMouseDragged : buttons.contains(1) ? .otherMouseDragged : .mouseMoved
             let button:CGMouseButton=buttons.contains(2) ? .right : buttons.contains(1) ? .center : .left
-            let event=CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:point,mouseButton:button);event?.flags=modifiers();event?.post(tap:.cghidEventTap)
+            let event=CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:point,mouseButton:button);event?.flags=modifiers()
+            let heldButton=buttons.contains(0) ? 0 : buttons.contains(2) ? 2 : 1
+            event?.setIntegerValueField(.mouseEventClickState,value:clicks.held[heldButton] ?? 0)
+            event?.post(tap:.cghidEventTap)
         case "button":
             guard let b=m["button"] as? Int,b>=0,b<=2 else { return };let down=(m["down"] as? Bool)==true
+            guard buttons.contains(b) != down else { return }
             if down && !pointerAllowsInput(point){revoke("Control paused: excluded window under pointer");return}
             if down { buttons.insert(b) } else { buttons.remove(b) }
-            reportHeld();postButton(b,down:down)
+            reportHeld();postButton(b,down:down,received:received)
         case "scroll":
             guard let d=m["delta"] as? Int,abs(d)<=2400 else { return }
             guard pointerAllowsInput(point) else{revoke("Control paused: excluded scroll target");return}
@@ -569,10 +632,12 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         if capsLock {flags.insert(.maskAlphaShift)}
         return flags
     }
-    func postButton(_ b:Int,down:Bool) {
-        let button:CGMouseButton=b==0 ? .left : b==2 ? .right : .center
-        let type:CGEventType=b==0 ? (down ? .leftMouseDown:.leftMouseUp) : b==2 ? (down ? .rightMouseDown:.rightMouseUp) : (down ? .otherMouseDown:.otherMouseUp)
-        let event=CGEvent(mouseEventSource:nil,mouseType:type,mouseCursorPosition:point,mouseButton:button);event?.flags=modifiers();event?.post(tap:.cghidEventTap)
+    func postButton(_ b:Int,down:Bool,received:TimeInterval=now()) {
+        let flags=modifiers()
+        let configured=NSEvent.doubleClickInterval
+        let interval=configured>0 ? configured : 0.5
+        let count=down ? clicks.down(b,at:point,time:received,interval:interval,flags:flags.rawValue) : clicks.up(b)
+        mouseButtonEvent(b,down:down,point:point,flags:flags,count:count)?.post(tap:.cghidEventTap)
     }
     func reportHeld() { jsonStatus(["type":"held","keys":keys.map{Int($0)},"buttons":Array(buttons),"x":point.x,"y":point.y]) }
     func releaseAll() {
@@ -581,6 +646,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         for code in held { let e=CGEvent(keyboardEventSource:nil,virtualKey:code,keyDown:false);e?.flags=[];e?.post(tap:.cghidEventTap) }
         let heldButtons=buttons;buttons.removeAll()
         for b in heldButtons { postButton(b,down:false) }
+        clicks.reset()
         if !held.isEmpty || !heldButtons.isEmpty { reportHeld() }
     }
 }
@@ -605,6 +671,66 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
+    var cursorCache=CursorEncodingCache(), encodes=0
+    let raster=CursorRaster(pixels:Data([0,0,0,0]),width:1,height:1,bytesPerRow:4,size:CGSize(width:1,height:1),hotSpot:.zero)
+    let encode:()->Data? = { encodes += 1; return Data([1,2,3]) }
+    precondition(cursorCache.encodeIfChanged(raster,encode:encode) != nil && encodes==1)
+    for _ in 0..<100 { precondition(cursorCache.encodeIfChanged(raster,encode:encode)==nil) }
+    precondition(encodes==1)
+    var changes:[CursorRaster]=[]
+    var changed=raster;changed.pixels[0]=255;changes.append(changed)
+    changed=raster;changed.hotSpot.x=1;changes.append(changed)
+    changed=raster;changed.size.width=0.5;changes.append(changed)
+    changed=raster;changed.width=2;changes.append(changed)
+    changed=raster;changed.height=2;changes.append(changed)
+    changed=raster;changed.bytesPerRow=8;changes.append(changed)
+    for change in changes {
+        precondition(cursorCache.encodeIfChanged(change,encode:encode) != nil)
+        precondition(cursorCache.encodeIfChanged(raster,encode:encode) != nil)
+    }
+    changed=raster;changed.hotSpot.y=1
+    precondition(cursorCache.encodeIfChanged(changed,encode:{nil})==nil)
+    precondition(cursorCache.encodeIfChanged(changed,encode:{Data(repeating:0,count:40_000)})==nil)
+    precondition(cursorCache.encodeIfChanged(changed,encode:{Data()})==nil)
+    precondition(cursorCache.encodeIfChanged(changed,encode:encode) != nil)
+    print("PASS unchanged cursor skips encoding; pixel, hotspot, geometry changes and failed-encode retries preserved")
+    // Construct and inspect real CGEvents, but never post them or query permissions.
+    var clicks=ClickSequence()
+    let p=CGPoint(x:100,y:100)
+    for (index,t) in [1.0,1.2,1.4].enumerated() {
+        let count=clicks.down(0,at:p,time:t,interval:0.5,flags:0)
+        precondition(count==Int64(index+1))
+        let down=mouseButtonEvent(0,down:true,point:p,flags:[],count:count)!
+        let up=mouseButtonEvent(0,down:false,point:p,flags:[],count:clicks.up(0))!
+        precondition(down.type == .leftMouseDown && up.type == .leftMouseUp)
+        precondition(down.getIntegerValueField(.mouseEventClickState)==count && up.getIntegerValueField(.mouseEventClickState)==count)
+    }
+    precondition(clicks.down(0,at:p,time:2,interval:0.5,flags:0)==1);_ = clicks.up(0)
+    // Small hand jitter still combines; moving away and back breaks the sequence.
+    precondition(clicks.down(0,at:CGPoint(x:103,y:102),time:2.2,interval:0.5,flags:0)==2)
+    clicks.move(to:CGPoint(x:120,y:100));clicks.move(to:p)
+    precondition(clicks.held[0]==2 && clicks.up(0)==2)
+    precondition(clicks.down(0,at:p,time:2.3,interval:0.5,flags:0)==1);_ = clicks.up(0)
+    for b in [2,1,0] {
+        precondition(clicks.down(b,at:p,time:2.4,interval:0.5,flags:0)==1)
+        let event=mouseButtonEvent(b,down:false,point:p,flags:[.maskShift,.maskCommand],count:clicks.up(b))!
+        precondition(event.type == (b==0 ? .leftMouseUp : b==2 ? .rightMouseUp : .otherMouseUp))
+        precondition(event.getIntegerValueField(.mouseEventButtonNumber)==(b==0 ? 0 : b==2 ? 1 : 2))
+        precondition(event.flags.contains(.maskShift) && event.flags.contains(.maskCommand) && event.location==p)
+    }
+    precondition(clicks.down(0,at:p,time:2.5,interval:0.5,flags:CGEventFlags.maskShift.rawValue)==1);_ = clicks.up(0)
+    clicks.reset()
+    precondition(clicks.down(0,at:p,time:2.6,interval:0.5,flags:0)==1)
+    // A chord cannot continue the preceding click sequence; each up retains its down.
+    precondition(clicks.down(2,at:p,time:2.7,interval:0.5,flags:0)==1)
+    precondition(clicks.up(0)==1 && clicks.up(2)==1)
+    precondition(clicks.down(2,at:p,time:2.8,interval:0.5,flags:0)==1);_ = clicks.up(2)
+    clicks.reset()
+    precondition(clicks.held.isEmpty && clicks.button==nil)
+    precondition(clicks.down(0,at:p,time:3,interval:0.1,flags:0)==1);_ = clicks.up(0)
+    precondition(clicks.down(0,at:p,time:3.2,interval:0.1,flags:0)==1);_ = clicks.up(0)
+    precondition(clicks.down(0,at:CGPoint(x:110,y:100),time:3.3,interval:0.5,flags:0)==1)
+    print("PASS synthetic single/double/triple click counts, paired up, timing, movement/drag, buttons, modifiers and release reset; no events posted")
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 2560, sourceHeight: 1600, pointPixelScale: 1) == (1920, 1200))
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 2) == (1920, 1200))
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 1) == (1280, 800))
@@ -629,6 +755,17 @@ if args.contains("--self-test") {
     for index in 0..<64 {moving.push(["type":"move","x":Double(index)/64.0],received:1)}
     moving.push(["type":"button","button":0,"down":true],received:2)
     moving.drain();precondition(coalesced == ["move","button"] && lastMove == 63.0/64.0)
+    var ordered:[String]=[], timestamps:[TimeInterval]=[]
+    let edges=InputMailbox(receive:{message,received in
+        ordered.append("\(message["type"] as! String):\(message["value"] as! Int)");timestamps.append(received)
+    },failure:{_ in preconditionFailure("coalesced edge fixture must remain bounded")})
+    for i in 0..<64 {edges.push(["type":"move","value":i],received:Double(i))}
+    edges.push(["type":"button","value":1],received:64)
+    for i in 65..<129 {edges.push(["type":"move","value":i],received:Double(i))}
+    edges.push(["type":"button","value":0],received:129)
+    edges.drain()
+    precondition(ordered == ["move:63","button:1","move:128","button:0"] && timestamps == [63,64,128,129])
+    print("PASS coalescing preserves button edges, newest positions and original receipt times")
     var resumed=0
     let recovering=InputMailbox(receive:{_,_ in resumed += 1},failure:{reason in precondition(reason == .overflow)})
     for _ in 0..<33 {recovering.push(["type":"key"],received:1)}

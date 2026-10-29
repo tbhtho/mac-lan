@@ -334,8 +334,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events := make(chan input, 32)
-	// Input pressure is never fatal: a move is an absolute position and the viewer
-	// lease repeats control state, so dropped input corrects itself on the wire.
+	// Input pressure keeps video alive. Moves may be dropped, but a lost discrete
+	// edge must release control: subsequent leases cannot reconstruct a key-up.
 	dropped, lastDrop := 0, time.Time{}
 	reportDrop := func() {
 		dropped++
@@ -415,6 +415,23 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				case <-wait.C:
 					reportDrop()
+					// This goroutine is the channel's sole producer. Clear stale
+					// queued input and reserve its next delivery for release, before
+					// any later lease can renew a key/button whose up was lost.
+					requestKeyframe := false
+				drain:
+					for {
+						select {
+						case pending := <-events:
+							requestKeyframe = requestKeyframe || pending.Type == "keyframe"
+						default:
+							break drain
+						}
+					}
+					events <- input{Type: "release"}
+					if requestKeyframe {
+						events <- input{Type: "keyframe"}
+					}
 				}
 			}
 		}

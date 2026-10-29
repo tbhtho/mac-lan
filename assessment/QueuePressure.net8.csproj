@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/Core/*.cs" />
+    <Compile Include="../src/Windows/Session.cs" />
+    <Compile Include="../src/Windows/FileTransferTarget.cs" />
+    <Compile Include="../src/Windows/DiagnosticLog.cs" />
+    <Compile Include="../src/Windows/Telemetry.cs" />
+    <Compile Include="../src/Windows/DiagnosticHostFields.cs" />
+    <Compile Include="../tests/Session.Tests/QueuePressureChecks.cs" />
+    <Compile Include="../tests/Session.Tests/SocketWriterChecks.cs" />
+    <Compile Include="QueuePressureMain.cs" />
+  </ItemGroup>
+</Project>
