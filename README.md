@@ -34,10 +34,10 @@ Alpha.36 also adds video recovery requests after decoder stalls, bounded pending
 
 ## Updates
 
-The local source fix for remote double/triple clicks is described in
+Alpha.38 supplies native click counts for remote double/triple clicks, described in
 [development notes](docs/development.md#remote-mouse-multi-clicks-local-fix).
-It requires rebuilding the Mac host; the published alpha.37 package does not contain it.
-Local source changes also skip unchanged cursor PNG encoding and release held input
+Update the Mac host to receive the fix; alpha.37 does not contain it.
+Alpha.38 also skips unchanged cursor PNG encoding and releases held input
 if the Mac or Windows input queue cannot accept a discrete event; see the
 [optimization notes](docs/development.md#local-cursor-and-congestion-improvements).
 
