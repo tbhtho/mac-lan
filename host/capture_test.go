@@ -21,10 +21,24 @@ func TestMain(m *testing.M) {
 		if mode == "setup" {
 			message = "Capture setup failed: fixture error /Users/private-name secret-token 192.168.1.2"
 		}
-		if mode == "disconnect" {
+		if mode == "disconnect" || mode == "held-disconnect" {
 			var e input
 			dec := json.NewDecoder(os.Stdin)
+			var sequence []string
 			for dec.Decode(&e) == nil {
+				sequence = append(sequence, e.Type)
+				if mode == "held-disconnect" {
+					h := heldState{Type: "held"}
+					if e.Type != "release" {
+						h.Keys = []int{55}
+						h.Buttons = []int{2}
+					}
+					json.NewEncoder(os.Stderr).Encode(h)
+				}
+			}
+			if mode == "held-disconnect" && strings.Join(sequence, ",") != "key,button,release" {
+				fmt.Fprintln(os.Stderr, "fixture did not receive owned input followed by release before EOF")
+				os.Exit(4)
 			}
 			json.NewEncoder(os.Stderr).Encode(map[string]any{"type": "status", "paused": false, "message": "Windows disconnected; capture stopped"})
 			os.Stdout.Close()
@@ -62,6 +76,24 @@ func TestCaptureDisconnectAllowsCleanNativeExit(t *testing.T) {
 	close(events)
 	if err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events); err != nil {
 		t.Fatalf("normal viewer disconnect must not become capture-failed: %v", err)
+	}
+}
+
+func TestCaptureDisconnectReleasesOwnedKeysAndButtonsBeforeEOF(t *testing.T) {
+	t.Setenv("MACDOW_CAPTURE_FIXTURE", "held-disconnect")
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Repeated runs model fresh helpers on reconnect, not a reused held snapshot.
+	for attempt := 0; attempt < 3; attempt++ {
+		events := make(chan input, 2)
+		events <- input{Type: "key", Code: 55, Down: true}
+		events <- input{Type: "button", Button: 2, Down: true}
+		close(events)
+		if err := runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events); err != nil {
+			t.Fatalf("attempt %d: disconnect did not release owned input: %v", attempt, err)
+		}
 	}
 }
 

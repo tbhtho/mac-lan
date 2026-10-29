@@ -55,7 +55,9 @@ internal sealed class Session : IAsyncDisposable
         maxLeaseSendGapMs=Interlocked.Read(ref maxLeaseSendGap),lastSendDurationMs=Interlocked.Read(ref lastSendDuration),lastRttMs=Interlocked.Read(ref lastRtt),droppedInput=Interlocked.Read(ref droppedInput),uiTickAgeMs=Age(Interlocked.Read(ref lastUiTick)),videoQueueFrames=Volatile.Read(ref VideoQueueFrames),videoQueueBytes=Volatile.Read(ref VideoQueueBytes),pendingAudioDispatches=AudioQueue?.Count??0,hostError=DiagnosticHostFields.Failure(remoteError)};
     readonly ClientWebSocket socket=new();
     readonly CancellationTokenSource stop=new();
-    readonly Channel<string> outgoing=Channel.CreateBounded<string>(new BoundedChannelOptions(64){SingleReader=true,FullMode=BoundedChannelFullMode.Wait});
+    // The writer consumes normally; Send also drains stale entries on discrete
+    // input overflow. Channel must support those concurrent readers.
+    readonly Channel<string> outgoing=Channel.CreateBounded<string>(new BoundedChannelOptions(64){SingleReader=false,FullMode=BoundedChannelFullMode.Wait});
     readonly object lifecycle=new();
     const int New=0,Authenticating=1,Paired=2,Starting=3,Ready=4,Stopped=5;
     int phase;
@@ -136,9 +138,22 @@ internal sealed class Session : IAsyncDisposable
             else if(phase!=Ready||type is not ("release" or "lease" or "key" or "move" or "button" or "scroll" or "keyframe")||type=="keyframe"&&!SupportsKeyframes)return;
             if(!outgoing.Writer.TryWrite(message.GetRawText()))
             {
-                // Input pressure never ends an approved stream: a move is an absolute
-                // position and the next lease repeats control state, so dropped input
-                // corrects itself on the next 250 ms heartbeat.
+                // A later lease cannot reconstruct a lost key/button up. Send is
+                // serialized by lifecycle, so after discarding stale work this
+                // release precedes every later producer. The writer can have at
+                // most one earlier message in flight; it completes before release.
+                if(phase==Ready&&(type is "key" or "button" or "release" or "lease"))
+                {
+                    bool requestKeyframe=false;
+                    while(outgoing.Reader.TryRead(out var pending))
+                    {
+                        using var item=JsonDocument.Parse(pending);
+                        requestKeyframe|=item.RootElement.GetProperty("type").GetString()=="keyframe";
+                    }
+                    outgoing.Writer.TryWrite("{\"type\":\"release\"}");
+                    // Video recovery is independent of discarded input state.
+                    if(requestKeyframe)outgoing.Writer.TryWrite("{\"type\":\"keyframe\"}");
+                }
                 Interlocked.Increment(ref droppedInput);
                 long previous=Interlocked.Read(ref lastInputDrop);
                 if(previous==0||Stopwatch.GetElapsedTime(previous).TotalMilliseconds>=1000)

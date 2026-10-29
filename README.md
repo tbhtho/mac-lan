@@ -34,6 +34,13 @@ Alpha.36 also adds video recovery requests after decoder stalls, bounded pending
 
 ## Updates
 
+The local source fix for remote double/triple clicks is described in
+[development notes](docs/development.md#remote-mouse-multi-clicks-local-fix).
+It requires rebuilding the Mac host; the published alpha.37 package does not contain it.
+Local source changes also skip unchanged cursor PNG encoding and release held input
+if the Mac or Windows input queue cannot accept a discrete event; see the
+[optimization notes](docs/development.md#local-cursor-and-congestion-improvements).
+
 Install **alpha.14 or later on both computers once** from this repository's [public releases](https://github.com/tbhtho/mac-lan/releases). Earlier builds used a withdrawn feed and cannot discover this update. Close both apps before replacing them; settings and the Mac's existing private diagnostic configuration stay in their current locations.
 
 From alpha.14, both apps check for signed updates at startup and every six hours, download a newer preview automatically, and offer **Restart to update**. No GitHub sign-in is needed. Downloads keep sharing running; installation waits for your restart choice. Windows update checks can be disabled in Updates; the Mac menu shows when an update is ready. An alpha.14 command-line host updates through a compatibility package: its next normal launch installs and opens **~/Applications/mac-lan.app**, preserving the old extracted folder. Manual installation of the app archive is also available. After restarting, pair and approve viewing again before activating control. Earlier private diagnostic bootstrap packages are not public downloads.

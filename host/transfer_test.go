@@ -167,7 +167,13 @@ func TestTransferRequiresCurrentPairingPeerAndNonBrowserLANRequest(t *testing.T)
 
 func TestTransferRejectsUnsafeNamesLengthsAndKindsBeforeWriting(t *testing.T) {
 	for _, scenario := range []string{"../clip", "a/b", `a\b`, "a:b", ".", "..", "\x00", "\x1f", strings.Repeat("a", 241), "bad-base64", "bad-kind", "unknown-length", "too-large", "short-body", "extra-body"} {
-		t.Run(scenario, func(t *testing.T) {
+		name := scenario
+		if len(name) > 100 {
+			// TempDir includes the test name; keep its directory component within
+			// filesystem limits while still testing the full overlong input.
+			name = "overlong-name"
+		}
+		t.Run(name, func(t *testing.T) {
 			receiver, token, _ := transferFixture(t)
 			r := transferRequest(token, scenario, "file", []byte("fixture"))
 			switch scenario {

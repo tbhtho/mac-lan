@@ -12,6 +12,8 @@ using System.Threading.Channels;
 using MacDow.Core;
 using MacDow.Windows;
 
+await QueuePressureChecks.Run();
+await SocketWriterChecks.Run();
 int checks=0;
 void Check(bool condition,string message){if(!condition)throw new Exception(message);checks++;Console.WriteLine("PASS "+message);}
 
