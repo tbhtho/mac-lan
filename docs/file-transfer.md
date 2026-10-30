@@ -1,3 +1,15 @@
+# Mac to Windows transfers
+
+Choose **Send File to Windows…** in the Mac menu and select one file. Keep the paired Windows session connected. On Windows, open **Files → Receive from Mac** and choose a new destination filename. Both apps need this feature build; alpha.38 does not include it. Send additional files one at a time; to send a folder from Mac, compress it to a ZIP first.
+
+The Mac menu shows preparation and sending progress. Windows shows received bytes and verification results. Existing destination files are never replaced, even if the Save dialog offers replacement: choose a new name. Linked destination folders and Windows device/stream filenames are refused. A verified file is published only after SHA-256 and exact length match. Originals stay on the Mac. No file is opened automatically.
+
+**Cancel Outgoing File** on Mac revokes the offer; Windows **Cancel transfer** stops the download and removes staging, leaving the offer available for retry. Disconnecting revokes the offer and cancels pending reads/writes. A file already committed may remain if disconnect happens during the acknowledgment; Windows reports that distinction. Choose a new file on Mac after reconnecting.
+
+Reverse transfers use the same TLS listener, certificate pin and session/peer-bound capability as uploads. There is no Windows listener or new network permission. Only the local Mac picker supplies a source path; HTTP accepts opaque offer IDs, never paths. One outgoing file (up to 100 GiB) is held open per pairing. Preparation hashes the file on a background worker; downloading rereads it in 256 KiB chunks. Editing the source during transfer can cause verification failure; retry after editing finishes. No payload-sized memory allocation is used. Unacknowledged offers remain until cancellation, disconnect or successful receipt.
+
+`GET /transfer/outgoing` returns `{id,name,bytes,sha256}` for the local selection. `GET /transfer/outgoing/{id}` streams bytes with Content-Length. After verified exclusive publication, Windows sends `POST` to that same ID with `X-MacDow-SHA256` to acknowledge and clear it. Missing offers return 404; invalid capabilities, peers or Origin headers return 403. Interrupted downloads can be retried within the same pairing. The legacy upload endpoint remains unchanged.
+
 # Windows to Mac transfers
 
 Pair the Windows app with the Mac, then choose **Files** in the Windows tab bar.

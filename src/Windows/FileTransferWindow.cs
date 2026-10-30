@@ -16,21 +16,22 @@ internal sealed class FileTransferWindow : Window
     readonly TextBlock message=new(){TextWrapping=TextWrapping.Wrap,Foreground=Glass.Muted,Margin=new Thickness(0,10,0,0)};
     readonly TextBlock detail=new(){Text="Drag files or folders here, or add them below.",Foreground=Glass.Muted,TextWrapping=TextWrapping.Wrap};
     readonly ProgressBar progress=new(){Height=5,Minimum=0,Maximum=100,Visibility=Visibility.Collapsed,Margin=new Thickness(0,0,0,10)};
-    readonly Button addFiles,addFolder,remove,send,cancel;
+    readonly Button addFiles,addFolder,remove,send,cancel,receive;
     CancellationTokenSource? operation;
     TaskCompletionSource? settled;
-    bool busy,closeRequested,closed;
+    bool busy,receiving,closeRequested,closed;
     public Session? BoundSession=>session;
     public bool IsBusy=>busy;
     public Task CancelAndWaitAsync(){operation?.Cancel();return settled?.Task??Task.CompletedTask;}
     public FileTransferWindow(Session? session)
     {
-        this.session=session;Title="mac-lan · Send to Mac";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;Glass.Apply(this);
+        this.session=session;Title="mac-lan · Files";Width=680;Height=560;MinWidth=540;MinHeight=450;WindowStartupLocation=WindowStartupLocation.CenterScreen;Glass.Apply(this);
         var layout=new Grid{Margin=new Thickness(28)};layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new());layout.RowDefinitions.Add(new(){Height=GridLength.Auto});layout.RowDefinitions.Add(new(){Height=GridLength.Auto});
-        var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Send to your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Files, ZIPs and folders go to Downloads/mac-lan on your Mac.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
+        var heading=new StackPanel();heading.Children.Add(new TextBlock{Text="Share files with your Mac",FontSize=26,FontWeight=FontWeights.SemiBold});heading.Children.Add(new TextBlock{Text="Send files and folders to Downloads/mac-lan on your Mac, or receive a file chosen in the Mac menu.",Foreground=message.Foreground,Margin=new Thickness(0,8,0,22),TextWrapping=TextWrapping.Wrap});layout.Children.Add(heading);
         var actions=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,0,0,12)};
         Button Action(string text,Action action){var button=new Button{Content=text,Margin=new Thickness(0,0,8,0),Padding=new Thickness(14,8,14,8)};button.Click+=(_,_)=>action();return button;}
         addFiles=Action("Add files",ChooseFiles);addFolder=Action("Add folder",ChooseFolder);remove=Action("Remove",()=>{if(items.SelectedItem!=null)items.Items.Remove(items.SelectedItem);Refresh();});
+        receive=Action("Receive from Mac",async()=>await Receive());actions.Children.Add(receive);
         actions.Children.Add(addFiles);actions.Children.Add(addFolder);actions.Children.Add(remove);Grid.SetRow(actions,1);layout.Children.Add(actions);
         var drop=new DockPanel{Margin=new Thickness(14)};DockPanel.SetDock(detail,Dock.Top);detail.Margin=new Thickness(0,0,0,10);drop.Children.Add(detail);drop.Children.Add(items);
         var card=new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Child=drop,AllowDrop=true};
@@ -49,8 +50,8 @@ internal sealed class FileTransferWindow : Window
     bool CanSend=>session?.CanTransfer==true;
     void Refresh()
     {
-        addFiles.IsEnabled=addFolder.IsEnabled=!busy&&CanSend;remove.IsEnabled=!busy&&items.SelectedItem!=null;
-        send.IsEnabled=!busy&&CanSend&&items.Items.Count>0;send.Content=busy?"Sending…":"Send to Mac";cancel.Content=busy?"Cancel transfer":"Close";
+        receive.IsEnabled=addFiles.IsEnabled=addFolder.IsEnabled=!busy&&CanSend;remove.IsEnabled=!busy&&items.SelectedItem!=null;
+        send.IsEnabled=!busy&&CanSend&&items.Items.Count>0;send.Content=busy&&!receiving?"Sending…":"Send to Mac";cancel.Content=busy?"Cancel transfer":"Close";
         detail.Text=items.Items.Count==0?"Drop files or folders here.":$"{items.Items.Count:N0} item{(items.Items.Count==1?"":"s")} ready to send";
     }
     void SessionEnded(string reason)=>Dispatcher.BeginInvoke(()=>{if(closed)return;operation?.Cancel();message.Text="Your Mac disconnected. Reconnect, then open Files again.";Refresh();});
@@ -69,8 +70,27 @@ internal sealed class FileTransferWindow : Window
             }
             message.Text="Ready to send. Your originals stay on this PC.";
         }
-        catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or ArgumentException){message.Text=ex is InvalidDataException?ex.Message:"One of these items cannot be read. Choose it again after checking access.";}
+        catch(Exception ex)when(ex is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException){message.Text=ex is InvalidDataException?ex.Message:"One of these items cannot be read. Choose it again after checking access.";}
         Refresh();
+    }
+    async Task Receive()
+    {
+        if(busy||session?.TransferTarget is not TransferTarget target)return;
+        using var cancellation=CancellationTokenSource.CreateLinkedTokenSource(target.SessionEnded);operation=cancellation;settled=new(TaskCreationOptions.RunContinuationsAsynchronously);busy=true;receiving=true;Refresh();
+        try
+        {
+            message.Text="Checking the file selected on your Mac…";
+            using var client=new FileReceiveClient(target);var offer=await client.GetOfferAsync(cancellation.Token);
+            var picker=new SaveFileDialog{Title="Save file from Mac (choose a new filename)",FileName=offer.Name,OverwritePrompt=true,AddExtension=false};
+            if(picker.ShowDialog(this)!=true){message.Text="Nothing received. The file remains available on the Mac.";return;}
+            progress.Visibility=Visibility.Visible;progress.Value=0;
+            bool acknowledged=await client.ReceiveAsync(offer,picker.FileName,new Progress<TransferProgress>(p=>{if(closed)return;progress.Value=p.Total==0?100:100d*p.Sent/p.Total;message.Text=$"Receiving {offer.Name}: {Size(p.Sent)} of {Size(p.Total)}";}),cancellation.Token);
+            message.Text=acknowledged?"File saved and verified. The original stays on your Mac.":"File saved and verified. The Mac did not receive confirmation; cancel its outgoing offer before sending another file.";
+        }
+        catch(OperationCanceledException){message.Text="Receive cancelled or Mac disconnected. No incomplete file was published.";}
+        catch(Exception ex)when(ex is InvalidDataException or IOException or UnauthorizedAccessException or HttpRequestException or System.Text.Json.JsonException or ArgumentException)
+        {message.Text=ex is InvalidDataException?ex.Message:"Could not receive the file. Check the connection, destination access and free space, then retry.";}
+        finally{receiving=false;busy=false;operation=null;Refresh();if(closeRequested)Close();settled.TrySetResult();}
     }
     async Task Send()
     {
@@ -95,7 +115,7 @@ internal sealed class FileTransferWindow : Window
             progress.Value=100;message.Text=$"{sent} item{(sent==1?"":"s")} saved to Downloads/mac-lan on your Mac.";
         }
         catch(OperationCanceledException){message.Text=session.IsPaired?"Transfer cancelled. Your originals stay on this PC.":"Your Mac disconnected. Reconnect, then open Files again.";}
-        catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or HttpRequestException or System.Text.Json.JsonException or ArgumentException)
+        catch(Exception ex)when(ex is InvalidDataException or IOException or UnauthorizedAccessException or HttpRequestException or System.Text.Json.JsonException or ArgumentException)
         {message.Text=ex is InvalidDataException?ex.Message:ex is HttpRequestException?"Could not reach the paired Mac. Reconnect, then retry the remaining items.":"Could not send this item. Check that it is readable and your Mac has free space, then retry.";}
         finally{busy=false;operation=null;progress.IsIndeterminate=false;Refresh();if(closeRequested)Close();settled.TrySetResult();}
     }

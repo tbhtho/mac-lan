@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -199,6 +200,10 @@ type server struct {
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/transfer/outgoing") && s.transfers != nil {
+		s.transfers.serveOutgoing(w, r, s.peerAllowed)
+		return
+	}
 	if r.URL.Path == "/transfer" && s.transfers != nil {
 		s.transfers.serveHTTP(w, r, s.peerAllowed)
 		return
