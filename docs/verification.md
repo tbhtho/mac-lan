@@ -1,5 +1,81 @@
 # Verification record
 
+## Alpha.39 - Mac-to-Windows selected files
+
+[Release v0.1.0-alpha.39](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.39)
+binds source `86d8913b284cb87500b570dcf14abb02b24e5042`; signed-feed commit
+`17ecf19c75f30bfbcf5d28baeb9a860c1aeaad33`. Select **Send File to Windows…**
+in the Mac menu, then **Files → Receive from Mac** on the paired Windows app and
+choose a new destination. Both apps need alpha.39. One file is offered at a
+time; compress Mac folders to ZIP first. The existing Windows-to-Mac flow and
+remote control remain available.
+
+Windows validation used .NET SDK 10.0.301. The final clean source passed
+`./scripts/test.ps1`: all .NET/Node suites, Go tests/vet, and the production WPF
+build with zero warnings/errors. The real receiver passed 38 reverse-transfer
+checks with loopback TLS and synthetic files, in addition to 46 upload checks.
+They cover empty and 16 MiB payloads, Unicode, unsafe names, exact length/hash,
+corruption, no overwrite, cancellation, disconnect and lost acknowledgments.
+Two existing linked-directory tests were skipped because link creation was
+unavailable on this account.
+
+The initial receiver TLS fixture failed on Windows Schannel because it used an
+ephemeral test key directly. Re-importing the same generated certificate through
+PKCS#12, as the existing fixtures do, fixed the test without changing production
+TLS or trust settings; the .NET 8 harness retains a compatible import branch.
+All final checks passed after this correction.
+
+The actual final Files window passed 23 WPF construction, control-state and
+layout checks with hidden native handles. Default/minimum widths, paired and
+unpaired controls, receive-busy cancellation and disconnect recovery passed;
+an offscreen rendering was inspected. No picker or visible window was opened.
+The final self-contained EXE also passed standalone diagnostics without UI,
+input hooks or capture. These checks do not establish interactive save-picker
+acceptance or a real transfer between two computers.
+
+The Mac candidate passed native AppKit/capture self-tests, Go race tests/vet and
+native archive checks. Its production Go, Swift and Windows sources were
+unchanged by the final Windows fixture/documentation commit. Published packages
+use the established Windows workflow: a cross-compiled arm64 Go launcher with
+the matching embedded Swift sources for native compilation on first use. The
+Mac app retains certificate identity
+`5aa75b4598c42bc585845f608b2baab649196cd5`; provenance does not claim native
+execution of the published launcher. No keys were copied, no security settings
+changed, and installed apps/active control sessions were left untouched.
+
+All eight public assets were downloaded anonymously and matched local/GitHub
+sizes and SHA-256 hashes. The canonical Mac app and legacy alias are identical.
+Downloaded packages passed certificate, identity, source-hash and credential
+verification again. The public signed feed matches the release/asset IDs,
+legacy asset names, source commit and hashes for both updater platform
+selections. Feed publication: `2026-10-30T02:37:04Z`; expiry: `2026-11-29T02:37:04Z`.
+
+The live production updater test passed an alpha.14 to alpha.39 upgrade in a
+temporary Windows install, preserving the original fixture and neighboring
+sentinel without executing downloads or relaunching. It also staged and
+verified the signed Mac app, arm64 Mach-O headers, layout and commit without
+Darwin execution. Real two-computer transfers and update/relaunch remain user
+hardware acceptance checks.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7,361,851 | `7002872576134426601404ce54d744e7955cd6c8eee47a3c4bfee767d88632c7` |
+| SHA256SUMS-0.1.0-alpha.39.txt | 660 | `73bb3f52e3864cafbac6f739c1a373d6e9021b8a411f2e1527319f92e9993b04` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3,683,095 | `f07b0ecb7aeb0f940692e458c1ee7f7292ac16b9c5934453606de4d6d66c27f8` |
+| mac-lan-macos-arm64.dmg | 18,169,856 | `d6941c4bc9796b16f67b366a9a15ef5918aae0a08990757abd6d58308eab3730` |
+| mac-lan-macos-arm64.tar.gz | 7,361,851 | `7002872576134426601404ce54d744e7955cd6c8eee47a3c4bfee767d88632c7` |
+| mac-lan-setup.exe | 46,009,771 | `620995285cc8ab4bc343ef072638bf501934be39a3b78680c3e45c9fbb08cec0` |
+| mac-lan-source-0.1.0-alpha.39.zip | 464,021 | `685a1836f34e8eed1a861a4fb06c5d187483f20ca033f6aba00fd0177c4af708` |
+| mac-lan.exe | 149,790,242 | `cbbb458ad320c8ac95decbba080d31f145611aafa8acc9f0baab5d63f6640fc4` |
+
+Evidence in the release checkout: `.cache/alpha39-final-suite.log`,
+`.cache/alpha39-final-ui.log`, `.cache/alpha39-standalone.log`,
+`.cache/alpha39-validate.log`, `.cache/alpha39-publish.log`,
+`.cache/alpha39-public/verification.json` and `.cache/alpha39-live-update.log`.
+The [public checksums](https://github.com/tbhtho/mac-lan/releases/download/v0.1.0-alpha.39/SHA256SUMS-0.1.0-alpha.39.txt)
+include all package/source hashes. No storage cleanup was performed as part of
+release validation.
+
 ## Alpha.38 - native remote clicks and congestion recovery
 
 [Release v0.1.0-alpha.38](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.38)
