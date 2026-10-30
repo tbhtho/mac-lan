@@ -84,7 +84,14 @@ internal static class ReceiveChecks
         {
             this.offer=offer;this.body=body;this.lostAck=lostAck;
             using var key=RSA.Create(2048);var request=new CertificateRequest("CN=localhost",key,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
-            certificate=request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow.AddHours(1));
+            using var generated=request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1),DateTimeOffset.UtcNow.AddHours(1));
+            // Schannel needs the same PKCS#12 key import as the existing TLS
+            // fixtures; a CreateSelfSigned ephemeral key alone fails on Windows.
+#if NET9_0_OR_GREATER
+            certificate=X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pkcs12),null,X509KeyStorageFlags.DefaultKeySet);
+#else
+            certificate=new X509Certificate2(generated.Export(X509ContentType.Pkcs12),(string?)null,X509KeyStorageFlags.DefaultKeySet);
+#endif
             listener.Start();Target=new(new Uri($"https://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/transfer"),Convert.ToHexString(SHA256.HashData(certificate.RawData)).ToLowerInvariant(),new string('b',64),default);server=Serve();
         }
         async Task Serve()
