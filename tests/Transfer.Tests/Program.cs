@@ -9,6 +9,8 @@ using System.Text;
 using System.Text.Json;
 using MacDow.Windows;
 
+await ReceiveChecks.Run();
+
 int checks=0;
 void Check(bool condition,string message){if(!condition)throw new Exception(message);checks++;Console.WriteLine("PASS "+message);}
 async Task<bool> Rejects(Func<Task> action){try{await action();return false;}catch(Exception ex)when(ex is not OutOfMemoryException){return true;}}

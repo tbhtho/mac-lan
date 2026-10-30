@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/Windows/FileTransferTarget.cs" />
+    <Compile Include="../src/Windows/FileTransferClient.cs" />
+    <Compile Include="../src/Windows/FileTransferPackage.cs" />
+    <Compile Include="../src/Windows/FileReceiveClient.cs" />
+    <Compile Include="../tests/Transfer.Tests/ReceiveChecks.cs" />
+    <Compile Include="FileReceiveMain.cs" />
+  </ItemGroup>
+</Project>

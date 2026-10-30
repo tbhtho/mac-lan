@@ -247,9 +247,18 @@ Hardware H.264 uses ScreenCaptureKit and VideoToolbox on the Mac. Windows WebCod
 
 App Priority captures one selected window, not all windows belonging to an app. Conservative scope checks can pause input; a closed, minimized, or resized target stops capture without falling back to the desktop. Input leases, EOF handling, and the supervisor recover from normal disconnects and failures; a simultaneous hard kill of the entire process tree or OS failure cannot guarantee synthetic-key release.
 
-Transfer staging uses bounded buffers and separate HTTPS, but shares LAN bandwidth with video. Windows needs temporary space for a folder ZIP, and the Mac needs staging and extraction space. See the full [transfer contract](file-transfer.md) for limits and destination rules. There is no Mac-to-Windows transfer, audio, shared clipboard, IME, multi-touch, stylus, or non-US physical-layout support.
+Transfer staging uses bounded buffers and separate HTTPS, but shares LAN bandwidth with video. Windows needs temporary space for a folder ZIP, and the Mac needs staging and extraction space. See the full [transfer contract](file-transfer.md) for limits and destination rules. Mac-to-Windows selected-file receiving is described in the transfer contract. IME, multi-touch, stylus, and non-US physical-layout support remain unavailable.
 
 [Protocol](protocol.md) · [Architecture](design.md) · [Hardware checklist](manual-validation.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
 
 
 The Mac host embeds the capture and menu Swift sources and Info.plist with `go:embed` under the `nativeembed` build tag. `package-macos-preview.ps1` writes them, gzip-compressed, to the ignored `host/nativeembed` folder before building; only their SHA-256 values are linker flags. Ordinary builds and tests use no tag and embed nothing.
+
+
+## Mac-to-Windows selected-file receiving (alpha.39 candidate)
+
+The Mac menu's local picker creates one offer bound to the existing approved pairing. Windows retrieves it using the same certificate-pinned HTTPS listener and explicitly chooses a new destination. Chunked disk streaming and SHA-256 verification protect completeness; exclusive publication preserves existing files. Disconnect and cancellation interrupt staging. An acknowledgment lost after publication is reported as a saved file with unconfirmed receipt. No new listener, firewall rule, trust grant, or automatic opening is involved.
+
+Fresh Mac validation: full Go race suite and native AppKit/capture self-tests passed. `assessment/FileReceive.net8.csproj` links unchanged production transfer classes and `tests/Transfer.Tests/ReceiveChecks.cs`; 38 checks passed using synthetic files and loopback TLS, covering empty/16 MiB payloads, Unicode, unsafe names, corruption, no overwrite, lost acknowledgment, cancellation, and disconnect. This is isolated .NET 8 validation, not acceptance of the production .NET 10 Windows/WPF build. The same checks run from `dotnet run --project tests/Transfer.Tests` on Windows. Native builds are headless; real two-computer interaction remains untested.
+
+Reproduce the isolated check with the installed .NET 8 SDK: set `DOTNET_GENERATE_ASPNET_CERTIFICATE=false`, `DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1`, and workspace-local `DOTNET_CLI_HOME`, `NUGET_PACKAGES` and normalized `TMPDIR`, then run `dotnet run --project assessment/FileReceive.net8.csproj`. Production target frameworks are unchanged. On macOS, temporary test TLS certificates and loopback listeners need execution outside the restrictive sandbox; they are not trusted or installed as development certificates.

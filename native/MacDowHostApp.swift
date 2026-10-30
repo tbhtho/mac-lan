@@ -152,6 +152,8 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menuStart.image = symbol("play.circle")
         menuStop = menu.addItem(withTitle:"Stop Sharing",action:#selector(stopSharing),keyEquivalent:"")
         menuStop.image = symbol("stop.circle")
+        menu.addItem(withTitle:"Send File to Windows…",action:#selector(sendFileToWindows),keyEquivalent:"").image = symbol("doc.badge.arrow.up")
+        menu.addItem(withTitle:"Cancel Outgoing File",action:#selector(cancelOutgoingFile),keyEquivalent:"")
         menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"").image = symbol("network")
         menu.addItem(.separator())
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
@@ -199,6 +201,16 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menuStart?.isHidden = sharing; menuStop?.isHidden = !sharing
         menuBar?.button?.appearsDisabled = !sharing
     }
+    @objc func sendFileToWindows() {
+        guard process != nil else { statusText = "Start sharing and connect Windows first."; return }
+        NSApp.activate(ignoringOtherApps:true)
+        let picker = NSOpenPanel(); picker.title = "Choose a file to send to Windows"
+        picker.canChooseFiles = true; picker.canChooseDirectories = false; picker.allowsMultipleSelection = false
+        picker.begin { response in
+            if response == .OK, let url = picker.url { self.send(["type":"send-file","path":url.path]) }
+        }
+    }
+    @objc func cancelOutgoingFile() { send(["type":"cancel-file"]) }
     @objc func reopen() {
         NSApp.activate(ignoringOtherApps:true)
         refreshPermissions()

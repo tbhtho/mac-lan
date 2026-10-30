@@ -44,6 +44,7 @@ type transferCredential struct {
 }
 
 type transferReceiver struct {
+	outgoing   *outgoingFile
 	root       string
 	mu         sync.Mutex
 	credential *transferCredential

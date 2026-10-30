@@ -86,8 +86,8 @@ func chooseListen(request string, interfaces []localInterface) (string, error) {
 }
 
 type uiResponse struct {
-	Type, ID string
-	Allow    bool
+	Type, ID, Path string
+	Allow          bool
 }
 type uiBroker struct {
 	ctx      context.Context
@@ -99,7 +99,7 @@ type uiBroker struct {
 	response chan bool
 }
 
-func newUIBroker(in io.Reader, out io.Writer) *uiBroker {
+func newUIBroker(in io.Reader, out io.Writer, command ...func(string, string, func(map[string]any))) *uiBroker {
 	ctx, cancel := context.WithCancel(context.Background())
 	b := &uiBroker{ctx: ctx, cancel: cancel, writer: out}
 	go func() {
@@ -116,6 +116,10 @@ func newUIBroker(in io.Reader, out io.Writer) *uiBroker {
 			}
 			if r.Type == "stop" {
 				return
+			}
+			if (r.Type == "send-file" || r.Type == "cancel-file") && len(command) > 0 {
+				command[0](r.Type, r.Path, b.emit)
+				continue
 			}
 			if r.Type != "consent" {
 				continue

@@ -188,7 +188,11 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	var broker *uiBroker
 	var scanner *bufio.Scanner
 	if gui {
-		broker = newUIBroker(os.Stdin, os.Stdout)
+		broker = newUIBroker(os.Stdin, os.Stdout, func(kind, path string, emit func(map[string]any)) {
+			s.transfers.outgoingCommand(kind, path, func(message string) {
+				emit(map[string]any{"type": "state", "message": message})
+			})
+		})
 	} else {
 		scanner = bufio.NewScanner(os.Stdin)
 	}
