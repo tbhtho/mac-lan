@@ -1,5 +1,62 @@
 # Verification record
 
+## Alpha.38 - native remote clicks and congestion recovery
+
+[Release v0.1.0-alpha.38](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.38)
+binds source `7e365c214f730f62181c0aff4493b5cdb6a6f66d`; signed-feed commit
+`28170f9fcbbe67e30fd0f78d0919c497c461c35a`. Native mouse events now carry
+single/double/triple click counts. Unchanged cursor images skip PNG encoding.
+Mac and Windows queue pressure releases held input, preserves one queued
+keyframe request, and delivers release before a later control lease.
+
+The final Windows source passed `./scripts/test.ps1` with .NET SDK 10.0.301,
+including 120 session assertions (66 new queue/socket checks and 54 existing
+checks), all remaining .NET/Node suites, Go tests/vet, and the production WPF
+build with zero warnings or errors. Two transfer symlink cases were skipped
+because link creation was unavailable on the account. The packaged single EXE
+passed standalone diagnostics without UI, hooks or capture. The Windows socket
+fixture disables buffering on its own connection so its cancellation test
+observes an actually pending send; production socket settings are unchanged.
+
+Native Mac source at the same commit passed Swift self-tests, Go tests and
+native archive checks. The published app uses the established Windows packaging
+workflow: a cross-compiled arm64 Go launcher with verified embedded Swift
+sources, compiled natively on first use. It retains the existing certificate
+identity `5aa75b4598c42bc585845f608b2baab649196cd5`. Package provenance does
+not claim native execution of the published launcher. Real two-computer
+double-click behavior, cursor performance and update/relaunch remain a user
+hardware retest; no installed app was replaced or restarted during validation.
+
+All eight assets were downloaded anonymously and matched local and GitHub byte
+counts and SHA-256 hashes. The canonical app archive and legacy alias are
+byte-identical. Downloaded packages passed signature, identity, embedded-source
+and credential checks again. The normal public feed has a valid signature,
+matching release/asset IDs, legacy asset names, source commit and hashes. It was
+published at `2026-10-29T03:24:16Z` and expires at `2026-11-28T03:24:16Z`.
+
+The production updater test passed alpha.14 to alpha.38 in a temporary Windows
+install, preserving the source EXE and neighboring sentinel without relaunching.
+It also staged and verified the public signed Mac app, including its arm64
+Mach-O headers, app layout and commit, without Darwin execution.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7,338,912 | `7d76760ad757753fea2982743c657f24d6d11550df370819a98b3c5014329c53` |
+| SHA256SUMS-0.1.0-alpha.38.txt | 660 | `69b46ccedf69ac29fbeea324b8e15c25483482cd2c8a005b275eeb32a1f298a5` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3,672,943 | `52f6df424830c5f27a81d10e996e5b4c0fb16b94f0cbf15c4d5fc1cc2bc04988` |
+| mac-lan-macos-arm64.dmg | 18,137,088 | `0aad42d35f49325a92a14805c60e7b9d357f0bf1b493c566c653332939992a5b` |
+| mac-lan-macos-arm64.tar.gz | 7,338,912 | `7d76760ad757753fea2982743c657f24d6d11550df370819a98b3c5014329c53` |
+| mac-lan-setup.exe | 46,001,130 | `350fbe0e550ec9f6634e1bf57451745bb8b7058a467593cad4993016124830f6` |
+| mac-lan-source-0.1.0-alpha.38.zip | 448,316 | `90787f382646d772c60764b7a53ecdb25bc98de2dfe1503c22e3786f2b6ee9b4` |
+| mac-lan.exe | 149,773,858 | `90d2cfb2b20e26b32f960db471e44ceee3048da01f563e16b87f98b05f217ec4` |
+
+Evidence in the release checkout: `.cache/alpha38-final-suite.log`,
+`.cache/alpha38-standalone.log`, `.cache/alpha38-validate.log`,
+`.cache/alpha38-publish.log`, `.cache/alpha38-public/verification.json`
+and `.cache/alpha38-live-update.log`. The
+[public checksum list](https://github.com/tbhtho/mac-lan/releases/download/v0.1.0-alpha.38/SHA256SUMS-0.1.0-alpha.38.txt)
+contains the package/source hashes.
+
 ## Alpha.37 - keep Spotlight on the Windows key
 
 [Release v0.1.0-alpha.37](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.37)
