@@ -1,5 +1,45 @@
 # Verification record
 
+## Alpha.40 - After Effects keyboard and mouse input
+
+[Release v0.1.0-alpha.40](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.40)
+binds source `9f84ff2451649f5fd7a7dd57e87a37cfaa3085d5`; signed-feed commit
+`5ee35dc`. This includes alpha.38 input/cursor fixes and alpha.39 Mac-to-Windows
+file transfers. Ctrl+Space sends Mac Control+Space; either Windows key tapped
+alone still opens Spotlight. Forwarded scrolling is marked as discrete mouse
+wheel input, without registering a hardware device or changing AE preferences.
+
+The refreshed full `./scripts/test.ps1` passed, including 137 core checks,
+remaining .NET/Node/Go checks, Go vet and the Windows Release build with zero
+warnings/errors. Two transfer link-creation checks skipped because link creation
+was unavailable. The packaged Windows EXE passed standalone diagnostics without
+UI, capture or hooks. The Mac launcher was cross-compiled and certificate-signed;
+native compilation, the new Core Graphics self-test and interactive AE/FX Console
+behavior remain unverified and require the user's two-computer test.
+
+All eight public assets were downloaded anonymously and matched their local and
+GitHub byte counts and hashes. The tag identifies the intended source commit.
+The canonical Mac app archive and alpha.14-compatible alias are byte-identical.
+The downloaded Windows/Mac packages passed provenance, signature, architecture,
+embedded-source and credential checks. The normal public feed listed alpha.40
+and passed signature/binding verification.
+
+Evidence: `.cache/alpha40-tests.log`, `.cache/alpha40-standalone.log`,
+`.cache/alpha40-validate.log`, `.cache/alpha40-publish.log`,
+`.cache/alpha40-anonymous-2952e755/verification.json`.
+No installed or running app was replaced or restarted during these checks.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7362789 | `3fe5b68f9c1088942da8d5f6103ba57698006a82c2b7129e6065a732b9aec08d` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3683425 | `895cdfb951a37fa2ad0f355a118bd168a3817f50867f37b93666bd4bcb8ba239` |
+| mac-lan-macos-arm64.dmg | 18169856 | `600dbc40ed4903d94ea3289069937398cb56af8f2515a82b4da95d6912b977de` |
+| mac-lan-macos-arm64.tar.gz | 7362789 | `3fe5b68f9c1088942da8d5f6103ba57698006a82c2b7129e6065a732b9aec08d` |
+| mac-lan-setup.exe | 46012237 | `19b96710b90e8fb4f1afad7ef1863e594de93cf7ce47cbf41c7ddcde12733ebf` |
+| mac-lan-source-0.1.0-alpha.40.zip | 468941 | `4b2d0a90fa8de8aeade691dbfc162bf3480501df1867a1ddc7d4afb25990c48c` |
+| mac-lan.exe | 149790242 | `f774ca67977f4d8c8fedf0cb047ab25a49a3129c28c5a126a2e842cbb36c25fc` |
+| SHA256SUMS-0.1.0-alpha.40.txt | 660 | `4dc14e07dbc06327c7b331061575fe5d1d1652817a96c1c6ff95d877edc7619c` |
+
 ## Alpha.40 preparation - After Effects input changes
 
 Plain Ctrl+Space sends a balanced Mac Control+Space tap while retaining normal
