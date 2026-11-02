@@ -27,6 +27,7 @@ internal sealed class TabBar : Window,IDisposable
     readonly ContextMenu barMenu=new();
     readonly MenuItem autoHideToggle;
     readonly FrameworkElement barContent;
+    readonly DisplaySelector displaySelector=new();
     Rect barBounds,screenBounds;
     int fullHeight;
     uint currentDpi=96;
@@ -39,7 +40,7 @@ internal sealed class TabBar : Window,IDisposable
     bool registered,positioning,queued,disposed;
     string? monitor;
     HwndSource? source;
-    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,ComboBox monitors,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
+    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,Action<MonitorArea> selectMonitor,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
     {
         autoHide=new(preferences.LoadAutoHide());
         Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=TabBarLayout.Dip;
@@ -65,6 +66,8 @@ internal sealed class TabBar : Window,IDisposable
         local=Segment("Windows",windows);mac=Segment("MacBook",macbook);
         var segments=new StackPanel{Orientation=Orientation.Horizontal};segments.Children.Add(local);segments.Children.Add(mac);
         left.Children.Add(new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(7),Padding=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Child=segments});
+        left.Children.Add(new TextBlock{Text="Display",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,6,0)});
+        displaySelector.MonitorSelected+=selectMonitor;left.Children.Add(displaySelector);
         grid.Children.Add(left);
         var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(16,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connection);
         grid.Children.Add(status);
@@ -84,6 +87,7 @@ internal sealed class TabBar : Window,IDisposable
         local.FontWeight=windows?FontWeights.SemiBold:FontWeights.Normal;
         mac.FontWeight=windows?FontWeights.Normal:FontWeights.SemiBold;
     }
+    public void SetMonitors(IReadOnlyList<MonitorArea> all,string? selected)=>displaySelector.Update(all,selected);
     public void SetConnection(bool connected,bool controlling,string? detail=null)
     {
         connection.Text=!string.IsNullOrWhiteSpace(detail)?detail:controlling?"Controlling Mac":connected?"Mac connected":"Mac disconnected";
@@ -105,7 +109,7 @@ internal sealed class TabBar : Window,IDisposable
         if(!registered||!AutoHide||!IsVisible||!GetCursorPos(out var point))return;
         bool atEdge=point.X>=screenBounds.Left&&point.X<screenBounds.Right&&point.Y>=screenBounds.Top&&point.Y<screenBounds.Top+2;
         bool inside=autoHide.Revealed&&point.X>=barBounds.Left&&point.X<barBounds.Right&&point.Y>=barBounds.Top&&point.Y<barBounds.Top+fullHeight;
-        bool interacting=barMenu.IsOpen||IsMouseCaptureWithin||keyboardNavigation&&IsKeyboardFocusWithin;
+        bool interacting=barMenu.IsOpen||displaySelector.IsDropDownOpen||IsMouseCaptureWithin||keyboardNavigation&&IsKeyboardFocusWithin;
         if(autoHide.Update(atEdge,inside,interacting,Environment.TickCount64))ApplyBarBounds();
     }
     void ApplyBarBounds()
@@ -152,7 +156,7 @@ internal sealed class TabBar : Window,IDisposable
         return 0;
     }
     void Undock(){if(!registered)return;var data=Data();SHAppBarMessage(1,ref data);registered=false;Telemetry.Report("bar-restored","ok");}
-    public void Suspend(){hideTimer.Stop();barMenu.IsOpen=false;Undock();Hide();}
+    public void Suspend(){hideTimer.Stop();barMenu.IsOpen=false;displaySelector.IsDropDownOpen=false;Undock();Hide();}
     public void KeepAbove(){if(IsVisible){Topmost=true;Native.KeepAbove(this);}}
     public void Dispose(){if(disposed)return;disposed=true;Close();}
 }

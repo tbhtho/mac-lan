@@ -5,59 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/tbhtho/MAC-DOW/host/internal/diagnostics"
 	"github.com/tbhtho/MAC-DOW/host/internal/updater"
 )
 
-const updateOfferScript = `on run argv
- set answer to display dialog (item 1 of argv) with title "mac-lan Update" buttons {"Later", "Restart to update"} default button "Later" cancel button "Later" giving up after 90
- if gave up of answer then return "Later"
- return button returned of answer
-end run`
-
-func updateOffer(ctx context.Context, version string) bool {
-	child, cancel := context.WithTimeout(ctx, 95*time.Second)
-	defer cancel()
-	message := "mac-lan " + version + " is downloaded and its publisher signature is verified.\n\nRestart to install it? Your settings stay in place. Reconnect from Windows afterwards; control stays off until you activate it."
-	output, err := exec.CommandContext(child, "/usr/bin/osascript", "-e", updateOfferScript, "--", message).Output()
-	return err == nil && len(output) < 64 && strings.TrimSpace(string(output)) == "Restart to update"
-}
-
-func offerWhenIdle(ctx context.Context, s *server, offer func() bool, schedule func() error) (bool, error) {
-	for {
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
-		s.connectionMu.Lock()
-		active, stopped := s.active != nil, s.stopped
-		s.connectionMu.Unlock()
-		if stopped {
-			return false, context.Canceled
-		}
-		if !active {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-time.After(time.Second):
-		}
+// Reserve new pairings during verification and worker creation. Existing sharing
+// stays alive until scheduling succeeds and the caller requests graceful shutdown.
+func scheduleAutomaticUpdate(ctx context.Context, s *server, schedule func() error) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
-	if !offer() || ctx.Err() != nil {
-		return false, ctx.Err()
-	}
-	// A connection can arrive while the Restart/Later dialog is visible.
-	// Reserve the idle host through preflight/worker creation so that no new
-	// pairing is interrupted by a delayed update decision.
 	s.connectionMu.Lock()
-	if s.active != nil || s.stopped || s.updating {
+	if s.stopped || s.updating {
 		s.connectionMu.Unlock()
-		return false, errors.New("a connection started while the update offer was open; the update remains downloaded")
+		return false, errors.New("host is stopping or already updating")
 	}
 	s.updating = true
 	s.connectionMu.Unlock()
@@ -76,9 +40,8 @@ func startHostUpdates(ctx context.Context, stop context.CancelFunc, s *server) {
 		return
 	}
 	install := filepath.Dir(executable)
-	updater.StartBackgroundUpdates(ctx, install, func(stage updater.Stage) {
-		fmt.Fprintln(os.Stdout, "A verified mac-lan update is downloaded. A Restart to update choice will appear when the connection is idle.")
-		accepted, err := offerWhenIdle(ctx, s, func() bool { return updateOffer(ctx, stage.Plan.Version) }, func() error {
+	updater.StartBackgroundUpdates(ctx, install, func(stage updater.Stage) error {
+		scheduled, err := scheduleAutomaticUpdate(ctx, s, func() error {
 			// Public updates omit the private endpoint; retain it locally first.
 			if err := diagnostics.InitMacDestination(); err != nil {
 				return err
@@ -92,14 +55,15 @@ func startHostUpdates(ctx context.Context, stop context.CancelFunc, s *server) {
 			_, err = e.ScheduleApply(applyCtx, stage.Directory, install, os.Getpid(), true)
 			return err
 		})
-		if err != nil && ctx.Err() == nil {
-			fmt.Fprintln(os.Stderr, "Update restart unavailable; sharing continues:", err)
+		if err != nil {
+			return err
 		}
-		if accepted {
+		if scheduled {
 			fmt.Fprintln(os.Stdout, "Restarting to install the verified update...")
 			stop()
 		}
+		return nil
 	}, func(err error) {
-		fmt.Fprintln(os.Stderr, "Automatic update check unavailable; sharing continues:", err)
+		fmt.Fprintln(os.Stderr, "Automatic update unavailable; sharing continues and the next poll will retry:", err)
 	})
 }

@@ -22,6 +22,7 @@ struct HostLifecycle {
     }
 }
 func lifecycleTests() {
+    updaterPolicyTests()
     var state = HostLifecycle()
     precondition(!state.hosting)
     state.receive(.ready); state.receive(.closeWindow)
@@ -158,7 +159,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menu.addItem(.separator())
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
         updateMenu.image = symbol("arrow.down.circle")
-        automaticUpdates = menu.addItem(withTitle:"Download Updates Automatically",action:#selector(toggleAutomaticUpdates),keyEquivalent:"")
+        automaticUpdates = menu.addItem(withTitle:"Install Updates Automatically",action:#selector(toggleAutomaticUpdates),keyEquivalent:"")
         automaticUpdates.state = updater.automatic ? .on : .off
         menu.addItem(.separator()); menu.addItem(withTitle:"Quit mac-lan",action:#selector(quit),keyEquivalent:"q").image = symbol("power")
         for item in menu.items { item.target = self }

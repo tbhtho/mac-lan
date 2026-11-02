@@ -4,54 +4,43 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-func TestAutomaticUpdateOfferAndWorkerAreExplicitAndIdle(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		s := &server{}
-		prompted, scheduled := 0, 0
-		accepted, err := offerWhenIdle(context.Background(), s, func() bool { prompted++; return allow }, func() error { scheduled++; return nil })
-		if err != nil || accepted != allow || prompted != 1 || scheduled != map[bool]int{false: 0, true: 1}[allow] {
-			t.Fatalf("restart choice mismatch: %v %v %d %d", accepted, err, prompted, scheduled)
-		}
-	}
+func TestAutomaticUpdateSchedulesWhileSharing(t *testing.T) {
 	s := &server{active: &websocket.Conn{}}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	accepted, err := offerWhenIdle(ctx, s, func() bool { t.Error("active pairing was interrupted by an update offer"); return true }, func() error { t.Error("active pairing was interrupted by an updater"); return nil })
-	if accepted || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("active connection not protected: %v %v", accepted, err)
-	}
-}
-
-func TestAutomaticUpdateWorkerFailureDoesNotRequestShutdown(t *testing.T) {
-	s := &server{}
-	accepted, err := offerWhenIdle(context.Background(), s, func() bool { return true }, func() error {
-		if !s.updating {
-			t.Error("idle host was not reserved during verification")
+	accepted, err := scheduleAutomaticUpdate(context.Background(), s, func() error {
+		if !s.updating || s.active == nil {
+			t.Error("not reserved with sharing intact")
 		}
-		return errors.New("synthetic verification failure")
+		return nil
 	})
-	if accepted || err == nil {
-		t.Fatal("unverified update requested host shutdown")
-	}
-	if s.updating {
-		t.Fatal("failed update left the host unavailable for pairing")
+	if err != nil || !accepted || !s.updating {
+		t.Fatal(accepted, err)
 	}
 }
-
-func TestAutomaticUpdateNewPairingDuringPromptStaysConnected(t *testing.T) {
+func TestAutomaticUpdateWorkerFailureCanRetry(t *testing.T) {
 	s := &server{}
-	accepted, err := offerWhenIdle(context.Background(), s, func() bool {
-		s.connectionMu.Lock()
-		s.active = &websocket.Conn{}
-		s.connectionMu.Unlock()
-		return true
-	}, func() error { t.Error("update interrupted a pairing that arrived during the dialog"); return nil })
+	accepted, err := scheduleAutomaticUpdate(context.Background(), s, func() error { return errors.New("temporary verification failure") })
 	if accepted || err == nil || s.updating {
-		t.Fatal("idle reservation missed a new pairing")
+		t.Fatal("failure requested shutdown or blocked pairing")
+	}
+	accepted, err = scheduleAutomaticUpdate(context.Background(), s, func() error { return nil })
+	if !accepted || err != nil {
+		t.Fatal("cannot retry", err)
+	}
+}
+func TestAutomaticUpdateDoesNotScheduleAfterStopOrCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		ctx context.Context
+		s   *server
+	}{{ctx, &server{}}, {context.Background(), &server{stopped: true}}, {context.Background(), &server{updating: true}}} {
+		accepted, err := scheduleAutomaticUpdate(tc.ctx, tc.s, func() error { t.Error("worker after stop"); return nil })
+		if accepted || err == nil {
+			t.Fatal("unavailable host accepted update")
+		}
 	}
 }

@@ -139,6 +139,35 @@ Build Windows and both Mac layouts from clean committed source, then publish fro
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
+## Alpha.41 automatic installation and top-bar display selection
+
+Windows and the Mac menu check at launch, every 5 seconds for the first 30
+seconds, then every 30 seconds. Slow checks serialize instead of accumulating;
+failed worker launches can retry. Metadata requests use a five-second cache
+bucket and revalidation headers; the signed-feed key, repository identity,
+asset hashes and package/source checks are unchanged. Network and CDN behavior
+still determine when a published release becomes visible.
+
+When automatic updates are enabled, a ready download receives a fresh preflight
+before the existing detached worker installs and relaunches. Windows releases
+control and cancels/waits for file work before spawning the worker; the Mac
+menu terminates through its existing graceful sharing shutdown. The legacy
+Mac command-line host also schedules without an idle/restart dialog. Worker
+creation failure leaves the app running. Disabled automatic preferences remain
+disabled, and manual update/rollback actions remain available. Alpha.14–40 need
+one last manual restart or installer replacement to receive this behavior.
+
+The top bar owns a separate compact display selector; it never reparents the
+settings ComboBox. Core geometry orders and labels physical left/right or
+top/bottom choices. Selection synchronizes both controls without feedback,
+releases input, restores desktop handoff, then moves the bar and full-desktop
+view. Display changes refresh choices and retain the existing fallback.
+An open selector prevents auto-hide until selection finishes.
+
+Mac polling/readiness self-tests are included in the native menu lifecycle
+self-test, but native Swift compilation and actual auto-relaunch/monitor moves
+require the user's hardware check. Headless tests do not establish those.
+
 ## Unreleased After Effects input changes
 
 Plain Ctrl+Space now sends one balanced Mac Control+Space tap. The router

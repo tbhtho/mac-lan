@@ -1,7 +1,7 @@
 using System.Text.Json;
 using MacDow.Windows;
 
-internal static class Program
+internal static partial class Program
 {
     static int checks;
     static readonly JsonElement available=Json(new{ok=true,status="available",plan=new{tag="v0.2.0"}});
@@ -41,6 +41,7 @@ internal static class Program
         var changed=await Run(null,available,Staged(),blocked);
         Check(!UpdateDownload.Ready(changed.Result),"A download that fails fresh verification stays blocked");
         Check(!UpdateDownload.Ready(Ready(),"v0.3.0"),"Apply can require the exact version presented to the user");
+        await AutomationChecks();
         Console.WriteLine($"{checks} updater workflow checks passed; no network, process replacement or UI.");
     }
 }

@@ -190,6 +190,15 @@ Check(DisplayLayout.Select(new[]{primary}).Id=="main","single monitor fallback")
 Check(DisplayLayout.Select(new[]{primary,secondary},"main").Id=="main","explicit monitor choice");
 Check(DisplayLayout.Select(new[]{primary},"second").Id=="main","disconnect fallback");
 Check(DisplayLayout.Select(new[]{primary,secondary},"second").Id=="second","reconnect identity");
+var horizontal=DisplayLayout.Choices(new[]{primary,secondary});
+Check(horizontal.Select(c=>c.Label).SequenceEqual(new[]{"Left","Right"})&&horizontal[0].Monitor.Id=="second","display choices use physical left/right order with negative origins and mixed DPI");
+var above=primary with{Id="above",Top=-1440,Width=2560,Height=1440,Primary=false};
+var vertical=DisplayLayout.Choices(new[]{primary,above});
+Check(vertical[0].Monitor.Id=="above"&&vertical.Select(c=>c.Label).SequenceEqual(new[]{"Top","Bottom"}),"stacked displays use physical top/bottom labels");
+Check(DisplayLayout.Choices(new[]{primary}).Single().Label=="Display 1 (main)","one display has a useful name without a directional promise");
+var multiple=DisplayLayout.Choices(new[]{primary,secondary,above});
+Check(multiple.Count==3&&multiple.Select(c=>c.Label).Distinct().Count()==3&&multiple.Select(c=>c.Monitor.Id).Order().SequenceEqual(new[]{"main","second","above"}.Order()),"three displays all remain selectable with unique labels");
+Check(DisplayLayout.Choices(new[]{above,secondary,primary}).SequenceEqual(multiple),"display choice order is independent of enumeration order");
 Check(Math.Abs(secondary.DipWidth-1706.6667)<.01,"DPI width");
 Check(secondary.Left == -2560,"negative origin preserved");
 Check(Pairing.Validate("192.168.1.2", "4433", new string('a',64),new string('b',64)),"valid pairing");
