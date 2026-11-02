@@ -32,7 +32,7 @@ There is no image or file clipboard, microphone, IME, multi-touch, stylus, or no
 
 Alpha.36 also adds video recovery requests after decoder stalls, bounded pending audio work during Windows UI delays, and filtering for unsupported extra mouse buttons. See [validation status](docs/verification.md) for headless checks and remaining hardware tests.
 
-Current source, not yet released: plain Ctrl+Space sends Mac Control+Space for shortcuts such as FX Console, while Ctrl+C/V retain their Command mapping. Forwarded scrolling is marked as mouse-wheel input instead of a continuous trackpad gesture. This does not register a hardware mouse with macOS; After Effects zoom behavior still depends on its preferences. Native Mac compilation and After Effects behavior remain unverified.
+Alpha.40: plain Ctrl+Space sends Mac Control+Space for shortcuts such as FX Console, while Ctrl+C/V retain their Command mapping. Forwarded scrolling is marked as mouse-wheel input instead of a continuous trackpad gesture. This does not register a hardware mouse with macOS; After Effects zoom behavior still depends on its preferences. Native Mac compilation and After Effects behavior remain unverified.
 
 ## Updates
 

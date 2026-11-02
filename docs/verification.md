@@ -1,6 +1,6 @@
 # Verification record
 
-## Unreleased After Effects input changes
+## Alpha.40 preparation - After Effects input changes
 
 Plain Ctrl+Space sends a balanced Mac Control+Space tap while retaining normal
 Ctrl+C/V and Windows-key-tap Spotlight routing. Native scrolling clears the
@@ -17,7 +17,7 @@ and passed afterward. Local links in the changed README and documents resolve;
 
 No native Swift compiler is available in this Windows workspace. The new Mac
 wheel-event construction self-test, native compilation and actual AE/FX Console
-behavior are unverified. No app was launched, installed, packaged or released.
+behavior are unverified. No installed app was launched or replaced during checks.
 See the [hardware checks](manual-validation.md).
 
 ## Alpha.39 - Mac-to-Windows selected files
