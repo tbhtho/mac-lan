@@ -98,7 +98,22 @@ Check(KeyMap.MacCode(0x5B) == 59 && KeyMap.MacCode(0x5C) == 62, "Windows keys ma
 Check(KeyMap.MacCode(0xA2) == 55 && KeyMap.MacCode(0xA3) == 54 && KeyMap.MacCode(0x56) == 9, "Ctrl+V is Command+V");
 var router = new KeyRouter();
 bool Keys(KeyDecision d,params (int,bool)[] expected)=>d.Route==KeyRoute.Sequence&&d.Keys!.SequenceEqual(expected);
-foreach(int commandKey in new[]{0xA2,0xA3,0x11,0xA4,0x12})
+foreach(int ctrl in new[]{0xA2,0xA3,0x11})
+{
+    var shortcut=new KeyRouter();shortcut.Route(ctrl,true,true);
+    int command=ctrl==0xA3?54:55;
+    Check(Keys(shortcut.Route(0x20,true,true),(command,false),(59,true),(49,true),(49,false),(59,false),(command,true)),"Ctrl+Space sends balanced Mac Control+Space without Command: "+ctrl);
+    Check(shortcut.Route(0x20,true,true).Route==KeyRoute.Swallow,"held Ctrl+Space does not repeatedly reopen effects search");
+    Check(shortcut.Route(ctrl,false,true)==new KeyDecision(KeyRoute.Remote,command),"Ctrl released first releases restored Command");
+    Check(shortcut.Route(0x20,false,true).Route==KeyRoute.Swallow&&!shortcut.OwnsKeys,"effects-search Space release drains physical ownership");
+}
+{
+    var shortcut=new KeyRouter();shortcut.Route(0xA2,true,true);shortcut.Route(0xA3,true,true);
+    Check(Keys(shortcut.Route(0x20,true,true),(54,false),(55,false),(59,true),(49,true),(49,false),(59,false),(54,true),(55,true)),"both Ctrl keys are removed before Mac Control+Space");
+    shortcut.ReleaseControl();
+    Check(shortcut.Route(0x20,false,true).Route==KeyRoute.Swallow&&shortcut.Route(0xA2,false,true).Route==KeyRoute.Swallow&&shortcut.Route(0xA3,false,true).Route==KeyRoute.Swallow&&!shortcut.OwnsKeys,"focus loss drains the effects-search chord");
+}
+foreach(int commandKey in new[]{0xA4,0x12})
 {
     var shortcut=new KeyRouter();
     Check(shortcut.Route(commandKey,true,true).Route==KeyRoute.Remote,"Command-mapped modifier still reaches the Mac: "+commandKey);

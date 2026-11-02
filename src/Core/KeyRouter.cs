@@ -48,9 +48,24 @@ public sealed class KeyRouter
         if(vk==0x08&&Ctrl&&Alt&&Shift)return new(KeyRoute.Release);
         // Ctrl+Alt+Delete belongs to Windows and cannot be intercepted; give control back with it.
         if(vk==0x2E&&Ctrl&&Alt)return new(KeyRoute.ReleaseLocal);
-        // Ctrl and left Alt normally map to Command. Do not let their plain
-        // Space chord accidentally invoke Spotlight; only a Windows-key tap
-        // synthesizes that shortcut. Preserve modified app shortcuts such as
+        // Ctrl normally means Command, but plain Ctrl+Space is the Mac's
+        // Control+Space (for example, FX Console). Send one balanced tap and
+        // restore the Command keys so Ctrl+C/V still work while Ctrl stays held.
+        // Only modifiers we own may be temporarily released and restored.
+        if(vk==0x20&&Ctrl&&!Shift&&!Alt&&windowsKey==null&&!remote.Contains(vk)&&
+            remote.Any(k=>k is 0xA2 or 0xA3 or 0x11))
+        {
+            var commands=remote.Where(k=>k is 0xA2 or 0xA3 or 0x11)
+                .Select(k=>KeyMap.MacCode(k)!.Value).Distinct().OrderBy(k=>k).ToArray();
+            var keys=commands.Select(k=>(k,false)).ToList();
+            keys.AddRange(new[]{(59,true),(49,true),(49,false),(59,false)});
+            keys.AddRange(commands.Select(k=>(k,true)));
+            suppressed.Add(vk);
+            return new(KeyRoute.Sequence,Keys:keys.ToArray());
+        }
+        // Block remaining plain Command+Space chords (left Alt, or Ctrl whose
+        // press we did not own) so only a Windows-key tap opens Spotlight.
+        // Preserve modified app shortcuts such as
         // Ctrl+Shift+Space and any Space press the Mac already received.
         if(vk==0x20&&CommandHeld&&!RemoteShift&&!remote.Contains(0xA5)&&windowsKey==null)
         {if(!remote.Contains(vk))suppressed.Add(vk);return new(KeyRoute.Swallow);}

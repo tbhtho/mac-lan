@@ -1,5 +1,25 @@
 # Verification record
 
+## Unreleased After Effects input changes
+
+Plain Ctrl+Space sends a balanced Mac Control+Space tap while retaining normal
+Ctrl+C/V and Windows-key-tap Spotlight routing. Native scrolling clears the
+continuous-scroll flag to identify forwarded input as a mouse wheel, retaining
+distance, modifiers and the validated pointer position. This registers no HID
+device and changes no Mac or After Effects settings.
+
+`./scripts/test.ps1` passed: 137 core/keyboard checks and the remaining .NET,
+Node and Go checks, Go vet, and the Windows Release build (zero warnings/errors).
+Two transfer link-creation checks skipped because this account could not create
+the directory links. The new keyboard regression failed before implementation
+and passed afterward. Local links in the changed README and documents resolve;
+`git diff --check` passed.
+
+No native Swift compiler is available in this Windows workspace. The new Mac
+wheel-event construction self-test, native compilation and actual AE/FX Console
+behavior are unverified. No app was launched, installed, packaged or released.
+See the [hardware checks](manual-validation.md).
+
 ## Alpha.39 - Mac-to-Windows selected files
 
 [Release v0.1.0-alpha.39](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.39)
