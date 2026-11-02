@@ -1,5 +1,53 @@
 # Verification record
 
+## Alpha.41 - automatic installation and top-bar display selector
+
+[Release v0.1.0-alpha.41](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.41)
+binds source `cae1f1e81620914ff481f92673084b17f829aabc`; signed-feed commit
+`dea0094`. Automatic updates check at launch, every 5 seconds for the first
+30 seconds, then every 30 seconds; verified downloads install and reopen the
+app without a restart confirmation when enabled. Display selection is available
+beside the top tabs, with physical Left/Right or Top/Bottom choices for two
+screens. Alpha.40 input shortcuts and mouse-wheel classification are retained.
+
+The final headless suite passed 142 core checks, 29 updater workflow checks,
+9 presentation checks, remaining .NET/Node/Go checks, Go vet and the Windows
+Release build with zero warnings/errors. Two existing transfer link-creation
+checks skipped because link creation was unavailable. The exact packaged
+Windows EXE passed standalone diagnostics without UI, capture or input hooks.
+Review and re-review found no remaining actionable findings.
+
+All eight assets were downloaded anonymously and matched local and GitHub
+sizes/hashes; the tag identifies the intended source commit. The canonical Mac
+app archive and legacy feed alias are identical. Downloaded Windows and Mac
+packages passed identity, provenance, credential, architecture, embedded-source
+and certificate checks. The ordinary public signed feed listed alpha.41 and
+passed signature/binding verification.
+
+The opt-in production-feed test passed alpha.14 to alpha.41 replacement in a
+temporary Windows install, preserving the original EXE and a neighboring
+sentinel, without relaunch. It also staged and verified the signed Mac archive
+without Darwin execution. No installed/running app was replaced or restarted.
+Native Mac compilation/relaunch, native WPF event interleaving and physical
+monitor movement remain the user's two-computer checks. Existing alpha.14–40
+still need one manual restart/installer upgrade to receive the automatic policy.
+
+Evidence: `.cache/alpha41-final-tests.log`, `.cache/alpha41-standalone.log`,
+`.cache/alpha41-validate.log`, `.cache/alpha41-publish.log`,
+`.cache/alpha41-anonymous-c8415381/verification.json`,
+`.cache/alpha41-live-update.log`.
+
+| Asset | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MAC-DOW-macos-arm64-unsigned.tar.gz | 7362918 | `bd33d18625101c227a2a03460e6a011897a0ef1629efda14a414610800884311` |
+| mac-lan-macos-arm64-commandline-preview.tar.gz | 3683758 | `052e122c5abf11f8f9a0905db23d99d51c6808b8d682f0115bab550e29a159da` |
+| mac-lan-macos-arm64.dmg | 18169856 | `2b0525647c1ec03a9b8d70def3e6fd4d8f71da3eeba45a0616cd3eb4434f7d01` |
+| mac-lan-macos-arm64.tar.gz | 7362918 | `bd33d18625101c227a2a03460e6a011897a0ef1629efda14a414610800884311` |
+| mac-lan-setup.exe | 46002751 | `01697e3fc99c466e23b2cc0a07a7d26e27b0620ac174bbdf4983a31835a4800f` |
+| mac-lan-source-0.1.0-alpha.41.zip | 479757 | `0ac7210cd71b8ec73c7777bd615991f54934cfef1f91cf853f2420d412a38f36` |
+| mac-lan.exe | 149802530 | `8b4d3626431f46332bc70cc4c6548abf19f979e0e4b6881c14d1f6ab9e30be1c` |
+| SHA256SUMS-0.1.0-alpha.41.txt | 660 | `e0650a19be1729838cc89887c4b1f79020d57c8471bc661245278f32d2d33225` |
+
 ## Alpha.41 preparation - automatic installation and display selector
 
 Automatic updates now check at launch, every 5 seconds for the first 30 seconds,
