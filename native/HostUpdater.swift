@@ -2,6 +2,27 @@ import AppKit
 import Foundation
 import Darwin
 
+func updateCheckInterval(uptime:TimeInterval)->TimeInterval { uptime < 30 ? 5 : 30 }
+func verifiedUpdateStage(_ result:[String:Any]?,expectedTag:String?=nil)->[String:Any]? {
+    guard result?["ok"] as? Bool == true,let stage=result?["stage"] as? [String:Any],stage["canApply"] as? Bool == true,
+          let plan=stage["plan"] as? [String:Any],let tag=plan["tag"] as? String,!tag.isEmpty,
+          expectedTag == nil || tag == expectedTag else {return nil}
+    return stage
+}
+func updaterPolicyTests() {
+    precondition(updateCheckInterval(uptime:0)==5 && updateCheckInterval(uptime:29)==5)
+    precondition(updateCheckInterval(uptime:30)==30 && updateCheckInterval(uptime:3600)==30)
+    let plan:[String:Any] = ["tag":"v0.2.0"]
+    var stage:[String:Any] = ["canApply":true,"plan":plan]
+    let ready:[String:Any] = ["ok":true,"stage":stage]
+    precondition(verifiedUpdateStage(ready,expectedTag:"v0.2.0") != nil)
+    precondition(verifiedUpdateStage(ready,expectedTag:"v0.3.0") == nil)
+    precondition(verifiedUpdateStage(["ok":false,"stage":stage]) == nil)
+    stage["canApply"]=false
+    precondition(verifiedUpdateStage(["ok":true,"stage":stage]) == nil)
+    precondition(verifiedUpdateStage(nil) == nil)
+}
+
 // Updater failures must never stop LAN sharing or appear as permission errors.
 final class HostUpdater {
     weak var app: HostApp?
@@ -10,6 +31,7 @@ final class HostUpdater {
     let defaults = UserDefaults(suiteName:"com.tbhtho.macdow.host")!
     var timer: Timer?
     var busy = false
+    let started = ProcessInfo.processInfo.systemUptime
     var stage: [String:Any]?
     var lastMessage = "Updates have not been checked."
     var automatic: Bool { defaults.object(forKey:"automaticUpdates") as? Bool ?? true }
@@ -19,8 +41,19 @@ final class HostUpdater {
            let result=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] {
             lastMessage="Last update: "+(result["message"] as? String ?? "finished")
         }
-        timer = Timer.scheduledTimer(withTimeInterval:6*60*60,repeats:true) { [weak self] _ in self?.check(manual:false) }
+        scheduleNextCheck()
         if automatic { check(manual:false) }
+    }
+    func scheduleNextCheck() {
+        timer?.invalidate()
+        let delay = updateCheckInterval(uptime:ProcessInfo.processInfo.systemUptime-started)
+        let next = Timer(timeInterval:delay,repeats:false) { [weak self] _ in
+            guard let self=self else {return}
+            self.scheduleNextCheck();self.check(manual:false)
+        }
+        timer=next
+        RunLoop.main.add(next,forMode:.common)
+        RunLoop.main.add(next,forMode:.modalPanel)
     }
     func toggle() {
         defaults.set(!automatic,forKey:"automaticUpdates")
@@ -42,7 +75,7 @@ final class HostUpdater {
         }
     }
     func check(manual:Bool) {
-        guard manual || automatic, !busy else { return }; busy = true
+        guard manual || automatic, !busy, app?.state.quitting != true else { return }; busy = true
         stage = nil
         app?.updateMenu.title = "Check for Updates…"
         run(["check","--channel","preview"]) { [weak self] result,error in
@@ -75,16 +108,17 @@ final class HostUpdater {
         // downloads against the signed feed and this exact installation first.
         run(["preflight","--stage",path,"--install",appBundleURL.path]) { [weak self] result,error in
             guard let self=self else {return};self.busy=false
-            if result?["ok"] as? Bool == true, let fresh=result?["stage"] as? [String:Any] {
+            if let fresh=verifiedUpdateStage(result) {
                 self.stage=fresh
                 self.app?.updateMenu.title="Restart to Update…"
-                self.lastMessage="An update is downloaded. Restart when you are ready; sharing continues until then."
+                self.lastMessage="A verified update is ready. Automatic updates install and reopen mac-lan, briefly disconnecting sharing."
             } else {
                 self.stage=nil
                 self.lastMessage=result?["message"] as? String ?? error ?? "Downloaded update could not be revalidated."
             }
             self.app?.updateMenu.toolTip=self.lastMessage
-            if manual {self.present()}
+            if self.stage?["canApply"] as? Bool == true && self.automatic {self.apply(manual:false)}
+            else if manual {self.present()}
         }
     }
     func present() {
@@ -94,14 +128,18 @@ final class HostUpdater {
         if stage?["canApply"] as? Bool == true {alert.addButton(withTitle:"Restart to update");alert.addButton(withTitle:"Later");if alert.runModal() == .alertFirstButtonReturn {apply()}}
         else {alert.addButton(withTitle:"Done");alert.runModal()}
     }
-    func apply() {
-        guard !busy,let app=app,let stage=stage,let path=stage["directory"] as? String,
+    func apply(manual:Bool=true) {
+        guard !busy,manual || automatic,let app=app,!app.state.quitting,let stage=stage,stage["canApply"] as? Bool == true,let path=stage["directory"] as? String,
               let plan=stage["plan"] as? [String:Any],let tag=plan["tag"] as? String else {return}
         busy=true
         let bundle=appBundleURL.path
         run(["preflight","--stage",path,"--install",bundle]) { [weak self] result,error in
-            guard let self=self else {return};self.busy=false
-            guard result?["ok"] as? Bool == true else {self.lastMessage=result?["message"] as? String ?? error ?? "Update could not be verified.";self.stage=nil;self.present();return}
+            guard let self=self else {return}
+            guard !app.state.quitting,manual || self.automatic else {self.busy=false;return}
+            guard verifiedUpdateStage(result,expectedTag:tag) != nil else {
+                self.busy=false;self.lastMessage=result?["message"] as? String ?? error ?? "Update could not be verified.";self.stage=nil
+                self.app?.updateMenu.toolTip=self.lastMessage;if manual {self.present()};return
+            }
             do {
                 let cache=try FileManager.default.url(for:.cachesDirectory,in:.userDomainMask,appropriateFor:nil,create:true)
                 let runner=cache.appendingPathComponent("MAC-DOW/updates/runner-"+UUID().uuidString)
@@ -119,7 +157,10 @@ final class HostUpdater {
                 child.standardInput=FileHandle.nullDevice;child.standardOutput=FileHandle.nullDevice;child.standardError=FileHandle.nullDevice
                 try child.run();self.defaults.set(URL(fileURLWithPath:path).appendingPathComponent("worker-result.json").path,forKey:"updateResult")
                 NSApp.terminate(nil) // HostApp waits for sharing shutdown before allowing app exit.
-            } catch {self.lastMessage="Could not start updater: "+error.localizedDescription;self.present()}
+            } catch {
+                self.busy=false;self.lastMessage="Could not start updater: "+error.localizedDescription
+                self.app?.updateMenu.toolTip=self.lastMessage;if manual {self.present()}
+            }
         }
     }
 }

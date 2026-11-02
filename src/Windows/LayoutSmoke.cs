@@ -17,7 +17,8 @@ internal static class LayoutSmoke
             var before=DisplayLayout.Select(Native.Monitors());
             try
             {
-                bar=new TabBar(()=>{},()=>{},()=>{},()=>{},()=>{},new ComboBox(),new Button{Content="Updates"});
+                bar=new TabBar(()=>{},()=>{},()=>{},()=>{},()=>{},_=>{},new Button{Content="Updates"});
+                bar.SetMonitors(Native.Monitors(),before.Id);
                 bar.DockTo(before);await Task.Delay(350);
                 var during=DisplayLayout.Select(Native.Monitors(),before.Id);
                 probe=new Window{Title="mac-lan title-bar layout check",Width=700,Height=400,Left=(during.Left+100)*96.0/during.Dpi,Top=(during.Top+100)*96.0/during.Dpi,Content=new TextBlock{Text="Checking that a maximized app starts below the mac-lan tabs.",Margin=new Thickness(24)}};

@@ -1,5 +1,23 @@
 # Hardware acceptance checklist
 
+## Alpha.41 updates and display selector
+
+- Install alpha.41 once on both computers using the existing Restart action or
+  installer. Verify the current Windows-key Spotlight and Ctrl+Space behavior.
+- With automatic updates enabled, a newer signed release should be discovered
+  at launch or the next 5-second warmup / 30-second steady check, downloaded,
+  installed and reopened without a confirmation. Network/CDN/download delays
+  are additional. Check disconnected and sharing states; held keys must release,
+  active file work must cancel cleanly, and settings/neighboring files survive.
+- Disable automatic updates and verify no automatic restart happens. Manual
+  checking, restart and rollback must still work. Network failures must leave
+  the app running and retry; a failed verification must never install.
+- Use the top **Display** selector to move Left/Right while viewing Windows and
+  the MacBook. Confirm bar reservation, video, input and desktop handoff move
+  together. Check settings synchronization, stacked displays, more than two
+  displays, and hotplug with a selected monitor removed. On one screen the
+  selector is disabled. Its dropdown must stay usable with auto-hide enabled.
+
 ## Unreleased After Effects input checks
 
 - Build the native helper on the Mac and pass its `--self-test`; no input is

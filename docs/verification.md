@@ -1,5 +1,34 @@
 # Verification record
 
+## Alpha.41 preparation - automatic installation and display selector
+
+Automatic updates now check at launch, every 5 seconds for the first 30 seconds,
+then every 30 seconds. Both apps schedule verified installation and relaunch
+without a restart confirmation when automatic updates are enabled. Existing
+disabled preferences stay disabled. Updates use the same signed-feed/package
+preflights and detached workers; metadata requests use short cache buckets and
+revalidation headers. Failed scheduling retries without shutting down sharing.
+
+The top-bar Display selector offers Left/Right, Top/Bottom, or numbered choices
+depending on geometry. Settings and hotplug stay synchronized; monitor moves
+release input and restore desktop handoff. Its dropdown prevents auto-hide.
+
+The final `./scripts/test.ps1` passed: 142 core checks, 29 updater workflow
+checks, 9 headless presentation checks, the remaining .NET/Node/Go suites,
+Go vet and the Windows Release build with zero warnings/errors. Two existing
+transfer link-creation checks skipped because link creation was unavailable.
+Regression tests cover verified automatic installation, disabled preferences,
+worker failure/retry, overlapping checks, relaunch selection and deterministic
+polling/fresh metadata. Review found a Quit-during-transfer-cleanup edge case;
+cleanup now resumes the pending close. Re-review found no actionable issues.
+
+Native Mac compilation, the new menu-policy self-tests, actual Mac relaunch,
+native WPF close-event interleaving and physical monitor moves remain unverified.
+No installed app was launched or replaced for validation. Alpha.14–40 need one
+last manual restart or installer replacement to receive the new updater policy.
+Evidence: `.cache/alpha41-final-tests.log`, `.cache/alpha41-updater-red.log`,
+`.cache/alpha41-monitor-presentation.log`, `.cache/alpha41-go-tests.log`.
+
 ## Alpha.40 - After Effects keyboard and mouse input
 
 [Release v0.1.0-alpha.40](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.40)

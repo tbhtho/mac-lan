@@ -118,7 +118,7 @@ func TestSignedFeedDownloadAndReverification(t *testing.T) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Fatal("authenticated public request")
 		}
-		if r.URL.String() == publicFeedBase+"feed.json" {
+		if r.URL.Scheme+"://"+r.URL.Host+r.URL.Path == publicFeedBase+"feed.json" {
 			feeds++
 			return response(feed), nil
 		}
@@ -266,7 +266,7 @@ func TestSignedFeedDownloadsRenamedPlatformAssets(t *testing.T) {
 			s, p, key, data := testFeed(t)
 			p.Releases[0].Assets[0].Name = platform.name
 			s.client.Transport = feedTransport(func(r *http.Request) (*http.Response, error) {
-				if r.URL.String() == publicFeedBase+"feed.json" {
+				if r.URL.Scheme+"://"+r.URL.Host+r.URL.Path == publicFeedBase+"feed.json" {
 					return response(signFeed(t, p, key)), nil
 				}
 				if r.URL.String() != "https://github.com/tbhtho/mac-lan/releases/download/v0.2.0/"+platform.name {
@@ -346,5 +346,31 @@ func TestSignedFeedPlatformSelectionUsesActualMacPackage(t *testing.T) {
 	e.OS, e.Arch = "windows", "amd64"
 	if _, err = e.Check(context.Background(), "stable"); !errors.Is(err, ErrNoUpdate) {
 		t.Fatal("Mac-only release selected for Windows", err)
+	}
+}
+
+func TestSignedFeedRefreshRequestsRetainSignatureChecks(t *testing.T) {
+	s, p, key, _ := testFeed(t)
+	now := s.now()
+	s.now = func() time.Time { return now }
+	var requests []*http.Request
+	feed := signFeed(t, p, key)
+	s.client.Transport = feedTransport(func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r)
+		return response(feed), nil
+	})
+	if _, err := s.Releases(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Second)
+	if _, err := s.Releases(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if requests[0].URL.String() == requests[1].URL.String() || requests[0].URL.Path != "/tbhtho/mac-lan/main/updates/feed.json" || requests[0].Header.Get("Cache-Control") != "no-cache" {
+		t.Fatal("stale feed cache not bypassed")
+	}
+	feed = []byte(`{"payload":"e30=","signature":""}`)
+	if _, err := s.Releases(context.Background()); !errors.Is(err, ErrSignedFeed) {
+		t.Fatal("fresh request bypassed signature", err)
 	}
 }

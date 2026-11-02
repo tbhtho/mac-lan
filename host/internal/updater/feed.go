@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -191,6 +192,10 @@ func (s *SignedFeed) get(ctx context.Context, raw string, download bool) (*http.
 	}
 	req.Header.Set("User-Agent", "MAC-DOW-Updater")
 	req.Header.Set("Accept", "application/octet-stream")
+	if !download {
+		req.Header.Set("Cache-Control", "no-cache")
+		req.Header.Set("Pragma", "no-cache")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errors.New("automatic update download is unavailable")
@@ -203,7 +208,9 @@ func (s *SignedFeed) get(ctx context.Context, raw string, download bool) (*http.
 }
 
 func (s *SignedFeed) Releases(ctx context.Context) ([]Release, error) {
-	resp, err := s.get(ctx, s.base+"feed.json", false)
+	// Raw GitHub responses may otherwise remain cached across many polls.
+	// Only metadata gets a short cache bucket; downloads retain their exact URL.
+	resp, err := s.get(ctx, s.base+"feed.json?poll="+strconv.FormatInt(s.now().Unix()/5, 10), false)
 	if err != nil {
 		return nil, err
 	}

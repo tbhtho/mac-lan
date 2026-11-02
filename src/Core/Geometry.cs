@@ -6,8 +6,18 @@ public record MonitorArea(string Id, int Left, int Top, int Width, int Height, u
     public double DipHeight => Height * 96.0 / Dpi;
     public string DisplayName => Id.Replace("\\\\.\\DISPLAY","Display ")+(Primary?" (main)":"")+$" - {Width} x {Height}";
 }
+public record DisplayChoice(MonitorArea Monitor,string Label);
 public static class DisplayLayout
 {
+    public static IReadOnlyList<DisplayChoice> Choices(IReadOnlyList<MonitorArea> monitors)
+    {
+        // Centers accommodate different resolutions and negative desktop coordinates.
+        double X(MonitorArea m)=>m.Left+m.Width/2.0;
+        double Y(MonitorArea m)=>m.Top+m.Height/2.0;
+        bool horizontal=monitors.Count==2&&Math.Abs(X(monitors[0])-X(monitors[1]))>=Math.Abs(Y(monitors[0])-Y(monitors[1]));
+        var ordered=horizontal?monitors.OrderBy(X).ThenBy(Y).ThenBy(m=>m.Id,StringComparer.Ordinal):monitors.OrderBy(Y).ThenBy(X).ThenBy(m=>m.Id,StringComparer.Ordinal);
+        return ordered.Select((m,i)=>new DisplayChoice(m,monitors.Count==2?(horizontal?(i==0?"Left":"Right"):(i==0?"Top":"Bottom")):$"Display {i+1}"+(m.Primary?" (main)":""))).ToArray();
+    }
     public static MonitorArea Select(IReadOnlyList<MonitorArea> monitors, string? preferred = null) =>
         monitors.FirstOrDefault(m => m.Id == preferred) ?? monitors.FirstOrDefault(m => !m.Primary) ?? monitors.First();
 }

@@ -24,8 +24,11 @@ internal sealed partial class MainWindow : Window
     readonly ComboBox codec=new(){Width=160},resolution=new(){Width=110},fps=new(){Width=80},bitrate=new(){Width=100};
     readonly TextBlock status=new(){Text="Ready to connect",VerticalAlignment=VerticalAlignment.Center,Foreground=Glass.Muted,Margin=new Thickness(20,8,20,10),FontSize=12};
     readonly Button updatesButton=new(){Content="Updates",Padding=new Thickness(12,5,12,5)};
-    readonly DispatcherTimer updateTimer=new(){Interval=TimeSpan.FromHours(6)};
+    readonly DispatcherTimer updateTimer=new(){Interval=TimeSpan.FromSeconds(5)};
+    readonly Stopwatch updateUptime=Stopwatch.StartNew();
+    readonly AutomaticUpdate automaticUpdater;
     bool checkingUpdates,showingUpdates;
+    UpdateDialog? updatesDialog;
     readonly Button control=new(){Content="Control Mac",Padding=new Thickness(14,5,14,5)};
     readonly ControlGate gate=new();
     readonly KeyboardHook keyboard;
@@ -40,6 +43,7 @@ internal sealed partial class MainWindow : Window
     ClipboardSync? clipboard;
     bool remote,closing,connecting,openingFiles,awaitingFileTransfer,quitting;
     string? preferred;
+    bool synchronizingMonitors;
     long lastLease;
     ulong controlGeneration;
     bool? controlPermission;
@@ -58,11 +62,12 @@ internal sealed partial class MainWindow : Window
     {
         Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Glass.Apply(this);Content=root;
+        automaticUpdater=new(UpdateProcess.Call,PrepareUpdateRestart,UpdateProcess.RememberApply,UpdateProcess.StartDetached,()=>{Disconnect();Quit();});
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,monitors,updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
         tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
-        monitors.SelectionChanged+=(_,_)=>{if(monitors.SelectedItem is MonitorArea m){preferred=m.Id;gate.Disarm("monitor-change");tabBar.DockTo(m);if(remote)Position(false);}};
+        monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;desktop.Presented+=TryAutomaticControl;BuildSetup();
         keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
@@ -82,7 +87,7 @@ internal sealed partial class MainWindow : Window
         // Clicking the Mac view brings it forward; put the mac-lan bar back above it right away.
         Activated+=(_,_)=>{Topmost=remote;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();TryAutomaticControl();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
-        Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>await CheckUpdates();updateTimer.Start();
+        Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>{updateTimer.Interval=AutomaticUpdate.CheckInterval(updateUptime.Elapsed);await CheckUpdates();};updateTimer.Start();
         Closing+=async(_,e)=>
         {
             if(closing)return;
@@ -374,7 +379,23 @@ internal sealed partial class MainWindow : Window
         catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){LogDiagnostic("logs-folder-failed","open",error:ex);status.Text="Logs folder: "+Telemetry.DirectoryPath;}
     }
     void Disconnect(){desktopWorkspace.Restore();clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
-    void RefreshMonitors(){var all=Native.Monitors();if(all.Count==0)return;monitors.ItemsSource=all;monitors.SelectedItem=DisplayLayout.Select(all,preferred);}
+    void RefreshMonitors()
+    {
+        var all=Native.Monitors();if(all.Count==0)return;
+        SelectMonitor(DisplayLayout.Select(all,preferred),all,true);
+    }
+    void SelectMonitor(MonitorArea selected,IReadOnlyList<MonitorArea>? available=null,bool refresh=false)
+    {
+        var all=available??Native.Monitors();if(all.Count==0)return;
+        selected=DisplayLayout.Select(all,selected.Id);
+        bool move=refresh||preferred!=selected.Id;
+        if(move){gate.Disarm("monitor-change");desktopWorkspace.Restore();}
+        preferred=selected.Id;
+        synchronizingMonitors=true;
+        try{monitors.ItemsSource=all;monitors.SelectedItem=selected;tabBar.SetMonitors(all,selected.Id);}
+        finally{synchronizingMonitors=false;}
+        if(move&&appWindow==null){tabBar.DockTo(selected);if(remote)Position(false);}
+    }
     void RefreshDesktopWorkspace()
     {
         if(!remote||appWindow!=null||session?.IsPaired!=true||closing){desktopWorkspace.Restore();return;}
@@ -392,19 +413,37 @@ internal sealed partial class MainWindow : Window
     {
         if(showingUpdates||closing||awaitingFileTransfer)return;
         showingUpdates=true;gate.Disarm("updates-open");
-        try{var dialog=new UpdateDialog(appWindow??this,PrepareUpdateRestart,()=>{Disconnect();Quit();});dialog.ShowDialog();}
-        finally{showingUpdates=false;}
+        try{updatesDialog=new UpdateDialog(appWindow??this,PrepareUpdateRestart,()=>{Disconnect();Quit();},automaticUpdater);updatesDialog.ShowDialog();}
+        finally{updatesDialog=null;showingUpdates=false;}
     }
     async Task PrepareUpdateRestart()
     {
         gate.Disarm("shutdown");awaitingFileTransfer=true;
         try{if(filesWindow?.IsBusy==true)await filesWindow.CancelAndWaitAsync();}
-        finally{awaitingFileTransfer=false;}
+        finally
+        {
+            awaitingFileTransfer=false;
+            // Quit can arrive while Closing must wait for transfer cleanup.
+            // Finish that pending close rather than leaving a hidden process.
+            if(quitting&&!closing)Close();
+        }
     }
     async Task CheckUpdates()
     {
-        if(checkingUpdates||closing)return;var preferences=UpdatePreferences.Load();if(!preferences.Automatic)return;checkingUpdates=true;
-        try {var result=await UpdateProcess.DownloadAvailable(preferences,text=>updatesButton.ToolTip=text);updatesButton.Content=UpdateDownload.Ready(result)?"Restart to update":"Updates";updatesButton.ToolTip=UpdateDownload.Ready(result)?"An update is downloaded and verified. Restart when you are ready.":result.GetProperty("message").GetString();}
+        if(checkingUpdates||closing||quitting||awaitingFileTransfer||automaticUpdater.Scheduled)return;
+        if(showingUpdates){if(updatesDialog!=null)await updatesDialog.CheckAutomatically();return;}
+        var preferences=UpdatePreferences.Load();if(!preferences.Automatic)return;checkingUpdates=true;
+        try
+        {
+            var result=await UpdateProcess.DownloadAvailable(preferences,text=>updatesButton.ToolTip=text);
+            updatesButton.Content=UpdateDownload.Ready(result)?"Updating…":"Updates";
+            updatesButton.ToolTip=UpdateDownload.Ready(result)?"Installing the verified update and reopening mac-lan…":result.GetProperty("message").GetString();
+            await automaticUpdater.Apply(result,Payloads.Install,Environment.ProcessId,()=>
+            {
+                var latest=UpdatePreferences.Load();
+                return !closing&&!quitting&&!showingUpdates&&!awaitingFileTransfer&&latest.Automatic&&latest.Channel==preferences.Channel;
+            });
+        }
         catch(Exception e){updatesButton.ToolTip="Update check unavailable: "+e.Message;}
         finally{checkingUpdates=false;}
     }

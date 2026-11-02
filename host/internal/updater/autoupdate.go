@@ -27,8 +27,8 @@ func (e *Engine) pendingPath(install string) (string, error) {
 	return filepath.Join(e.Root, "pending-"+hex.EncodeToString(hash[:16])+".json"), nil
 }
 
-// PrepareAutomaticUpdate downloads in the background but never interrupts a
-// connected session. Installation remains a separate, fresh-verified operation.
+// PrepareAutomaticUpdate downloads in the background. Installation remains a
+// separate, fresh-verified operation.
 func (e *Engine) PrepareAutomaticUpdate(ctx context.Context, install string) (Stage, error) {
 	if err := e.installIdentity(install); err != nil {
 		return Stage{}, err
@@ -75,39 +75,62 @@ func (e *Engine) PrepareAutomaticUpdate(ctx context.Context, install string) (St
 	return ready, nil
 }
 
-// StartBackgroundUpdates checks immediately and every six hours while the host
-// is open. The callback is called once per ready version, never during apply.
-// It may offer Restart/Later; all actual input/capture cleanup belongs to caller.
-func StartBackgroundUpdates(ctx context.Context, install string, onReady func(Stage), onError func(error)) {
-	go func() {
-		timer := time.NewTimer(0)
-		defer timer.Stop()
-		var announced string
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			}
-			e, err := NewEngine()
-			if err == nil {
-				checkCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-				var s Stage
-				s, err = e.PrepareAutomaticUpdate(checkCtx, install)
-				cancel()
-				if err == nil && s.Plan.Tag != announced && ctx.Err() == nil {
-					announced = s.Plan.Tag
-					if onReady != nil {
-						onReady(s)
-					}
-				}
-			}
-			if err != nil && !errors.Is(err, ErrNoUpdate) && ctx.Err() == nil && onError != nil {
-				onError(err)
-			}
-			timer.Reset(6 * time.Hour)
+// StartBackgroundUpdates checks immediately, every five seconds for the first
+// thirty seconds, then every thirty seconds. Checks and scheduling are serialized.
+// A successful callback has scheduled installation and ends polling; failures
+// retry on the next poll. Capture/input cleanup belongs to the caller.
+func StartBackgroundUpdates(ctx context.Context, install string, onReady func(Stage) error, onError func(error)) {
+	go runBackgroundUpdates(ctx, func(checkCtx context.Context) (Stage, error) {
+		e, err := NewEngine()
+		if err != nil {
+			return Stage{}, err
 		}
-	}()
+		return e.PrepareAutomaticUpdate(checkCtx, install)
+	}, onReady, onError, time.Now, waitForUpdatePoll)
+}
+
+func waitForUpdatePoll(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func runBackgroundUpdates(ctx context.Context, prepare func(context.Context) (Stage, error), onReady func(Stage) error, onError func(error), now func() time.Time, wait func(context.Context, time.Duration) bool) {
+	started := now()
+	for ctx.Err() == nil {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		stage, err := prepare(checkCtx)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil && onReady != nil {
+			err = onReady(stage)
+			if err == nil {
+				return
+			}
+		}
+		if err != nil && !errors.Is(err, ErrNoUpdate) && ctx.Err() == nil && onError != nil {
+			onError(err)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		delay := 30 * time.Second
+		if now().Sub(started) < 30*time.Second {
+			delay = 5 * time.Second
+		}
+		// Wait after completion, so slow checks cannot create overlap or a
+		// catch-up burst of downloads and failed apply attempts.
+		if !wait(ctx, delay) {
+			return
+		}
+	}
 }
 
 // ScheduleApply creates a private copy of the currently executing Mac host so
