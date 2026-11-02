@@ -88,6 +88,16 @@ func jsonStatus(_ value: [String: Any]) {
 }
 func die(_ message: String) -> Never { status(message, paused: true); exit(1) }
 func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+func mouseWheelEvent(delta:Int,point:CGPoint,flags:CGEventFlags) -> CGEvent? {
+    guard delta >= -2400 && delta <= 2400 else { return nil }
+    let event=CGEvent(scrollWheelEvent2Source:nil,units:.pixel,wheelCount:1,wheel1:Int32(delta),wheel2:0,wheel3:0)
+    // Retain the existing distance while identifying the event as a discrete
+    // mouse wheel. Pixel events otherwise advertise continuous trackpad input.
+    event?.setIntegerValueField(.scrollWheelEventIsContinuous,value:0)
+    event?.location=point
+    event?.flags=flags
+    return event
+}
 func validCaptureFPS(_ value: Int) -> Bool { value == 60 }
 func desktopCaptureDimensions(width: Int, sourceWidth: Double, sourceHeight: Double, pointPixelScale: Double) -> (width: Int, height: Int) {
     let sourcePixelsWide = max(1, sourceWidth * pointPixelScale)
@@ -619,7 +629,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         case "scroll":
             guard let d=m["delta"] as? Int,abs(d)<=2400 else { return }
             guard pointerAllowsInput(point) else{revoke("Control paused: excluded scroll target");return}
-            let e=CGEvent(scrollWheelEvent2Source:nil,units:.pixel,wheelCount:1,wheel1:Int32(d),wheel2:0,wheel3:0);e?.flags=modifiers();e?.post(tap:.cghidEventTap)
+            mouseWheelEvent(delta:d,point:point,flags:modifiers())?.post(tap:.cghidEventTap)
         default:break
         }
     }
@@ -731,6 +741,14 @@ if args.contains("--self-test") {
     precondition(clicks.down(0,at:p,time:3.2,interval:0.1,flags:0)==1);_ = clicks.up(0)
     precondition(clicks.down(0,at:CGPoint(x:110,y:100),time:3.3,interval:0.5,flags:0)==1)
     print("PASS synthetic single/double/triple click counts, paired up, timing, movement/drag, buttons, modifiers and release reset; no events posted")
+    // Construct events without posting them. Remote wheel input must be a
+    // mouse wheel, not a continuous trackpad gesture (AE handles them differently).
+    for delta in [-120, 120] {
+        let wheel = mouseWheelEvent(delta:delta,point:CGPoint(x:40,y:50),flags:.maskAlternate)!
+        precondition(wheel.getIntegerValueField(.scrollWheelEventIsContinuous) == 0)
+        precondition(wheel.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == Int64(delta))
+        precondition(wheel.location == CGPoint(x:40,y:50) && wheel.flags.contains(.maskAlternate))
+    }
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 2560, sourceHeight: 1600, pointPixelScale: 1) == (1920, 1200))
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 2) == (1920, 1200))
     precondition(desktopCaptureDimensions(width: 1920, sourceWidth: 1280, sourceHeight: 800, pointPixelScale: 1) == (1280, 800))

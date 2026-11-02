@@ -139,6 +139,27 @@ Build Windows and both Mac layouts from clean committed source, then publish fro
 
 See [update implementation](update-plan.md), [standalone packaging](standalone-plan.md), and [standalone verification](standalone-verification.md). Headless tests and package checks establish only their tested behavior; they do not establish measured capture rate, latency, physical monitor behavior, or end-to-end Mac updates.
 
+## Unreleased After Effects input changes
+
+Plain Ctrl+Space now sends one balanced Mac Control+Space tap. The router
+temporarily releases the Command modifiers produced by the held Windows Ctrl
+keys, sends the shortcut, then restores those Command modifiers. Space repeats
+and its physical release are swallowed; Ctrl+C/V, modified Space chords and
+Windows-key Spotlight keep their existing behavior. Ctrl held before control
+begins cannot synthesize a shortcut using a modifier the router does not own.
+
+The native scroll factory retains the pixel distance and clears
+`scrollWheelEventIsContinuous`, identifying forwarded wheel events as discrete
+mouse input instead of continuous trackpad scrolling. It also sets the event
+location to the validated remote pointer and preserves modifiers. No virtual
+HID device is installed and macOS's connected-device list is unchanged. Adobe
+After Effects can treat wheel and trackpad scrolling differently; its Settings
+> Previews > Magnification preferences still control zoom behavior.
+
+The Mac self-test constructs wheel events and checks classification, distance,
+location and Option flags without posting input. It requires native macOS
+compilation; Windows headless checks cannot verify Core Graphics or AE behavior.
+
 ## Alpha.37 Spotlight shortcut handling
 
 Ctrl and left Alt normally map to Mac Command. Their plain Space chord is now

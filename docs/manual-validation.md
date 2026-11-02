@@ -1,5 +1,23 @@
 # Hardware acceptance checklist
 
+## Unreleased After Effects input checks
+
+- Build the native helper on the Mac and pass its `--self-test`; no input is
+  posted by that check. Then check the following with both computers.
+- In After Effects with FX Console installed and configured for Mac
+  Control+Space, press either Windows Ctrl+Space: search should open once,
+  without Spotlight. Check Space repeats, Ctrl released first, both Ctrl keys,
+  focus loss and Ctrl+C/V immediately afterward. Windows-key tap must still
+  open Spotlight, and Windows+Space must retain Mac Control+Space.
+- Hover over the composition, timeline, Effects & Presets and Effect Controls
+  panels and scroll in both directions. Confirm each panel responds, and check
+  right Alt (Mac Option) plus wheel. Compare with a physical mouse on the Mac
+  using the same AE preferences. Check another Mac app for scrolling speed.
+- If the composition still pans, inspect After Effects > Settings > Previews
+  > Magnification > Trackpad Scrolling and test Zooms. Record AE version and
+  preferences; source event classification alone does not prove AE behavior.
+- No hardware mouse should appear in macOS device settings from this change.
+
 ## Alpha.37 keyboard check
 
 While controlling the Mac, plain left/right Ctrl+Space and left Alt+Space must
