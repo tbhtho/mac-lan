@@ -159,7 +159,9 @@ func safeHTTPS(u *url.URL) bool {
 	return u != nil && u.Scheme == "https" && u.User == nil && u.Fragment == "" && (u.Port() == "" || u.Port() == "443") && len(u.RawQuery) <= 16384
 }
 
-func (s *SignedFeed) get(ctx context.Context, raw string, download bool) (*http.Response, error) {
+// get fetches raw. A positive offset asks for the rest of a download with an
+// HTTP Range request; the server may answer 206 or ignore it with 200.
+func (s *SignedFeed) get(ctx context.Context, raw string, download bool, offset int64) (*http.Response, error) {
 	u, err := url.Parse(raw)
 	if err != nil || !safeHTTPS(u) {
 		return nil, ErrSignedFeed
@@ -196,11 +198,14 @@ func (s *SignedFeed) get(ctx context.Context, raw string, download bool) (*http.
 		req.Header.Set("Cache-Control", "no-cache")
 		req.Header.Set("Pragma", "no-cache")
 	}
+	if download && offset > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errors.New("automatic update download is unavailable")
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && !(download && offset > 0 && resp.StatusCode == http.StatusPartialContent) {
 		resp.Body.Close()
 		return nil, errors.New("automatic update download is unavailable")
 	}
@@ -210,7 +215,7 @@ func (s *SignedFeed) get(ctx context.Context, raw string, download bool) (*http.
 func (s *SignedFeed) Releases(ctx context.Context) ([]Release, error) {
 	// Raw GitHub responses may otherwise remain cached across many polls.
 	// Only metadata gets a short cache bucket; downloads retain their exact URL.
-	resp, err := s.get(ctx, s.base+"feed.json?poll="+strconv.FormatInt(s.now().Unix()/5, 10), false)
+	resp, err := s.get(ctx, s.base+"feed.json?poll="+strconv.FormatInt(s.now().Unix()/5, 10), false, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +264,18 @@ func (s *SignedFeed) Commit(_ context.Context, tag string) (string, error) {
 }
 
 func (s *SignedFeed) Download(ctx context.Context, p Plan, path string) error {
+	return s.download(ctx, p, path, false)
+}
+
+// DownloadResume continues an existing partial file at path with an HTTP Range
+// request, or starts it. Unlike Download, a failed attempt keeps the bytes
+// received so far for the next attempt. The result is only a candidate: the
+// caller must check the complete file against the signed size and SHA-256.
+func (s *SignedFeed) DownloadResume(ctx context.Context, p Plan, path string) error {
+	return s.download(ctx, p, path, true)
+}
+
+func (s *SignedFeed) download(ctx context.Context, p Plan, path string, resume bool) error {
 	r, ok := s.release(p.Tag)
 	if !ok || p.RepositoryID != 1430459188 || p.ReleaseID != r.ID || p.Commit != r.Commit {
 		return ErrSignedFeed
@@ -287,31 +304,82 @@ func (s *SignedFeed) Download(ctx context.Context, p Plan, path string) error {
 	if !matched {
 		return ErrSignedFeed
 	}
-	resp, err := s.get(ctx, publicDownloadBase+r.Tag+"/"+p.Asset.Name, true)
+	var offset int64
+	if resume {
+		info, statErr := os.Lstat(path)
+		switch {
+		case statErr == nil && !info.Mode().IsRegular():
+			return errors.New("update download path is not a regular file")
+		case statErr == nil && info.Size() > p.Asset.Size:
+			if err = os.Remove(path); err != nil {
+				return err
+			}
+		case statErr == nil:
+			offset = info.Size()
+		case !os.IsNotExist(statErr):
+			return statErr
+		}
+		if offset == p.Asset.Size {
+			return nil // complete; the caller verifies size and SHA-256
+		}
+	}
+	resp, err := s.get(ctx, publicDownloadBase+r.Tag+"/"+p.Asset.Name, true, offset)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.ContentLength >= 0 && resp.ContentLength != p.Asset.Size {
-		return errors.New("update download length mismatch")
+	if resp.StatusCode == http.StatusPartialContent {
+		// Accept only the exact remainder of this exact asset.
+		want := fmt.Sprintf("bytes %d-%d/%d", offset, p.Asset.Size-1, p.Asset.Size)
+		if resp.Header.Get("Content-Range") != want || (resp.ContentLength >= 0 && resp.ContentLength != p.Asset.Size-offset) {
+			_ = os.Remove(path)
+			return errors.New("update download range mismatch")
+		}
+	} else {
+		offset = 0 // the server sent the whole file
+		if resp.ContentLength >= 0 && resp.ContentLength != p.Asset.Size {
+			return errors.New("update download length mismatch")
+		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	flags := os.O_CREATE | os.O_EXCL | os.O_WRONLY
+	if resume && offset == 0 {
+		flags = os.O_CREATE | os.O_TRUNC | os.O_WRONLY
+	} else if resume {
+		flags = os.O_WRONLY | os.O_APPEND
+	}
+	f, err := os.OpenFile(path, flags, 0600)
 	if err != nil {
 		return err
+	}
+	if resume {
+		// Recheck after opening: the file must be the regular file of the expected length.
+		info, statErr := f.Stat()
+		if statErr != nil || !info.Mode().IsRegular() || info.Size() != offset {
+			f.Close()
+			_ = os.Remove(path)
+			return errors.New("update download changed while resuming")
+		}
 	}
 	okDownload := false
 	defer func() {
 		f.Close()
-		if !okDownload {
+		if !okDownload && !resume {
 			_ = os.Remove(path)
 		}
 	}()
-	n, err := io.Copy(f, io.LimitReader(resp.Body, p.Asset.Size+1))
-	if err != nil {
-		return err
+	remaining := p.Asset.Size - offset
+	n, err := io.Copy(f, io.LimitReader(resp.Body, remaining+1))
+	if err == nil && n != remaining {
+		err = errors.New("update download length mismatch")
 	}
-	if n != p.Asset.Size {
-		return errors.New("update download length mismatch")
+	if err != nil {
+		if resume && n > remaining {
+			_ = f.Close()
+			_ = os.Remove(path)
+		} else if resume {
+			_ = f.Sync()
+		}
+		return err
 	}
 	if err = f.Sync(); err != nil {
 		return err

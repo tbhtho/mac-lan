@@ -18,6 +18,19 @@
   displays, and hotplug with a selected monitor removed. On one screen the
   selector is disabled. Its dropdown must stay usable with auto-hide enabled.
 
+## Unreleased update deferral and cleanup
+
+- With automatic updates on, make a newer release available while Windows is
+  viewing, controlling and sending a large folder. Nothing restarts; Windows
+  shows **Update ready** and the Mac menu shows the deferred update. Disconnect
+  and confirm installation about a minute later. **Restart to update** must
+  still install immediately during a session.
+- Interrupt a Windows download (disconnect the network) and confirm the next
+  check continues it rather than starting over.
+- After two updates, confirm only one `.MAC-DOW-backup-*` remains next to
+  mac-lan.exe, **Restore previous version** still works, and
+  `%LOCALAPPDATA%\MAC-DOW\updates` holds no old stage folders.
+
 ## Unreleased After Effects input checks
 
 - Build the native helper on the Mac and pass its `--self-test`; no input is

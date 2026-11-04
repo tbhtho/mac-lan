@@ -202,6 +202,45 @@ Mac polling/readiness self-tests are included in the native menu lifecycle
 self-test, but native Swift compilation and actual auto-relaunch/monitor moves
 require the user's hardware check. Headless tests do not establish those.
 
+## Unreleased update deferral, resumable downloads and cleanup
+
+Automatic installation no longer interrupts use. Windows defers while a
+connection is starting or paired, control is routed, or the Files window is
+busy; the Mac menu defers while the host reports a connected session or
+transfer (a new `activity` line on the private host pipe, ignored by older
+menus) or a consent prompt is open; the headless Mac host checks the same
+state under its connection lock before reserving the update. Installation
+waits until that has been idle for 60 seconds. The Updates button, dialog and
+Mac menu say the update installs when Windows disconnects. Manual **Restart
+to update** is not deferred.
+
+The signed feed source resumes downloads. A partial file lives at
+`updates/downloads/<release>-<asset>-<size>-<sha256>.partial`, so it can only
+continue the identical signed asset. A retry sends `Range: bytes=N-` and
+accepts only a 206 with the exact `Content-Range`, or a full 200 that replaces
+the file. The complete file must match the signed size and SHA-256 before it
+becomes a stage; a mismatch deletes it. A stage folder is created only after
+that check, and a completed, never-applied stage of the same asset is reused
+and fully re-verified instead of downloading again. Feed schema, asset names
+and signature/provenance checks are unchanged.
+
+`--updater cleanup --install <path>` runs once at app startup (Windows first
+update check, Mac menu `start()`, headless host start). It keeps the newest
+applied journal per install at the current version and the backup it names,
+journals of an interrupted swap with their backups, the newest downloaded
+newer release, any stage a pending automatic update names, and anything under
+an hour old that a running worker could use. It deletes other `stage-*` and
+`runner-*` folders, week-old partial downloads, the package copies inside the
+kept journal folder (rollback re-downloads the signed older release), and
+`.MAC-DOW-backup-*`, `.MAC-DOW-reverted-*` and stale `.MAC-DOW-candidate-*` /
+`.MAC-DOW-rollback-*` siblings, but only next to an install that passes the
+current-version identity check. Links are never followed and the install
+itself is never removed.
+
+Go and .NET tests cover deferral, Range resume, hash-mismatch rejection and
+cleanup with temporary folders. The Swift edits were not compiled on this
+machine; Mac behavior needs the hardware check.
+
 ## Unreleased After Effects input changes
 
 Plain Ctrl+Space now sends one balanced Mac Control+Space tap. The router
