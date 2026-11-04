@@ -37,6 +37,8 @@ Alpha.40: plain Ctrl+Space sends Mac Control+Space for shortcuts such as FX Cons
 
 Alpha.42: a failed automatic update reopens mac-lan; **Restore previous version** on Windows holds that update until **Check now**; the Mac frees a session from a sleeping PC within about a minute, and Windows ends a stream after 8 seconds of Mac silence; short Wi-Fi stalls no longer end streams; Macs on two networks stay discoverable; a second Windows launch opens the running copy. See [release notes](docs/release-notes-alpha42.md). These changes need two-computer testing.
 
+Alpha.43: Windows reconnects to the same Mac by itself after a drop, without a new approval on the Mac, and the MacBook tab shows a Reconnecting or Disconnected card with **Reconnect** instead of a black screen. Opening or closing App Priority no longer needs re-pairing. Automatic updates wait until the connection is idle. Keyboard fixes cover the lock screen, non-US layouts by key position, AltGr and word-wise editing. See [release notes](docs/release-notes-alpha43.md). These changes need two-computer testing.
+
 ## Updates
 
 Alpha.38 supplies native click counts for remote double/triple clicks, described in
@@ -50,7 +52,7 @@ Install **alpha.14 or later on both computers once** from this repository's [pub
 
 From **alpha.41**, automatic updates check at launch, every 5 seconds during the first 30 seconds, then every 30 seconds. Signed updates download, install, and reopen mac-lan automatically. Installation releases control, cancels active transfers cleanly, and briefly disconnects sharing; reconnect and approve viewing afterward. Turn off **Install updates automatically** in Windows Updates or the Mac menu to keep installation manual. Network availability, feed propagation, and download time affect when an update arrives. No GitHub sign-in is needed. Alpha.14–40 still require **Restart to update** once to install alpha.41, or use the installers above. An alpha.14 command-line host updates through a compatibility package: its next normal launch installs and opens **~/Applications/mac-lan.app**, preserving the old extracted folder. Manual installation of the app archive is also available. After restarting, pair and approve viewing again before activating control. Earlier private diagnostic bootstrap packages are not public downloads.
 
-Unreleased source after alpha.42 changes this: a ready automatic update waits while Windows is connected, controlling, or transferring files, and installs once nothing has used the connection for a minute. **Restart to update** still installs immediately. Interrupted downloads resume instead of starting over, and old update copies and `.MAC-DOW-backup-*` files are removed, keeping only the latest backup and rollback record. This is not in a published release yet and needs two-computer testing.
+From **alpha.43**, a ready automatic update waits while Windows is connected, controlling, or transferring files, and installs once nothing has used the connection for a minute. **Restart to update** still installs immediately. Interrupted downloads resume instead of starting over, and old update copies and `.MAC-DOW-backup-*` files are removed, keeping only the latest backup and rollback record. This needs two-computer testing.
 
 The public Mac package has no embedded diagnostic destination. Existing Mac-only diagnostic configuration is preserved locally. Mac diagnostics contain fixed event codes and counters, never screen pixels, input contents, pairing secrets, or transfer names and contents. Windows diagnostics stay local.
 

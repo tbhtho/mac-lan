@@ -192,10 +192,15 @@ func (e *Engine) cleanup(install string, now time.Time) []string {
 		return nil
 	}
 	keepBackups := map[string]bool{}
-	if info, err := os.Lstat(e.Root); err == nil && info.IsDir() && rejectLinks(e.Root, false) == nil {
+	info, err := os.Lstat(e.Root)
+	scanned := err == nil && info.IsDir() && rejectLinks(e.Root, false) == nil
+	if scanned {
 		removed = append(removed, e.cleanupCache(current, keepBackups, now)...)
 	}
-	if install == "" {
+	// Backups are kept by the journals found in the cache. Without a readable cache
+	// (a link, a permission problem) nothing proves which backup rollback needs, so
+	// leave every file beside the install alone.
+	if install == "" || (!scanned && !os.IsNotExist(err)) {
 		return removed
 	}
 	abs, err := filepath.Abs(install)
@@ -309,8 +314,10 @@ func (e *Engine) cleanupCache(current Version, keepBackups map[string]bool, now 
 						mod = j.ModTime()
 					}
 					newer = append(newer, journalStage{dir: path, mod: mod})
-				} else {
-					discard = append(discard, path) // this or an older version: never applied again
+				} else if now.Sub(info.ModTime()) > staleUpdaterAge {
+					// This or an older version is never applied again; a fresh one may be a
+					// rollback that is still being prepared.
+					discard = append(discard, path)
 				}
 				continue
 			}
