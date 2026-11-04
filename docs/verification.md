@@ -1,5 +1,41 @@
 # Verification record
 
+## Alpha.42 - update recovery, dead-connection detection and discovery fixes
+
+[Release v0.1.0-alpha.42](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.42)
+binds source `4a57e843f4e5a30a8ede3881cf2044fa14597fc5`; signed-feed commit
+`389f1bb`. Changes are listed in the [release notes](release-notes-alpha42.md).
+
+The headless suite passed: 13 diagnostic, 142 core, 24 desktop workspace,
+40 video queue, 54 session, 31 updater workflow (two new hold checks),
+38 reverse transfer and 46 transfer checks, presentation and viewer checks,
+Go tests including new keepalive and multi-network discovery tests, Go vet,
+and the Windows Release build with zero warnings/errors. The same two
+link-creation checks skipped. The packaged Windows EXE passed standalone
+diagnostics without UI, capture or input hooks. The Swift change (SIGPIPE
+ignored in the menu-bar app) was not compiled locally.
+
+The first Mac packaging run left a stale alpha.41 command-line bridge archive
+because an extensionless `python` on PATH shadowed Python in PowerShell; the
+Mac packages and installers were rebuilt with `python.exe` before publishing,
+and the bridge then identified alpha.42 at the release commit.
+
+During publication GitHub returned HTTP 502 to the final draft-to-published
+edit, but the edit had applied. The publisher had already checked every
+uploaded asset's size and digest and prepared the feed with the final release
+and asset IDs; the feed was verified again, then committed and pushed manually
+(one push retry after a GitHub 500).
+
+All eight assets were downloaded anonymously and matched local sizes/hashes and
+the published checksum list. The canonical Mac app archive and legacy feed alias
+are identical. Downloaded Windows and Mac packages passed identity, provenance
+and credential checks. The anonymous public feed matched the committed feed and
+passed signature/binding verification.
+
+No installed or running app was replaced. The new connection timeouts, single
+instance behavior, update recovery and native Mac compilation still need the
+user's two-computer checks.
+
 ## Alpha.41 - automatic installation and top-bar display selector
 
 [Release v0.1.0-alpha.41](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.41)
