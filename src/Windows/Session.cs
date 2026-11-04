@@ -92,6 +92,18 @@ internal sealed class Session : IAsyncDisposable
         if(!Pairing.Validate(host,port,fingerprint,token))throw new ArgumentException("Enter the advanced connection details from your Mac.");
         return ConnectCore(host,port,fingerprint,new{type="auth",token});
     }
+    // Reconnects to the same Mac launch (pinned fingerprint) with the single-use token
+    // the Mac issued in its last catalog; the Mac skips the pairing prompt for it.
+    public Task ConnectResume(DiscoveredHost host,string resumeToken)
+    {
+        if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _)||!IsHexToken(resumeToken))throw new ArgumentException("Invalid reconnect request.");
+        return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="resume",token=resumeToken});
+    }
+    static bool IsHexToken(string? value)=>value is {Length:64}&&value.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f');
+    /// <summary>Reconnect token from the Mac's catalog; kept in memory only.</summary>
+    public string? ResumeToken {get;private set;}
+    /// <summary>Diagnostic code of the reason this session ended.</summary>
+    public string? EndCode {get;private set;}
     public Task ConnectGuided(DiscoveredHost host,string pairNumber)
     {
         if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _) ||
@@ -232,6 +244,7 @@ internal sealed class Session : IAsyncDisposable
                                 }
                                 if(value.TryGetProperty("transferToken",out var transfer)&&transfer.ValueKind==JsonValueKind.String&&transfer.GetString() is string capability&&capability.Length==64&&capability.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f'))
                                     transferTarget=new TransferTarget(transferEndpoint!,fingerprint!,capability,stop.Token);
+                                if(value.TryGetProperty("resumeToken",out var resume)&&resume.ValueKind==JsonValueKind.String&&IsHexToken(resume.GetString()))ResumeToken=resume.GetString();
                                 phase=Paired;
                             }
                             if(t.GetString()=="ready"){if(phase!=Starting)throw new InvalidDataException("Unexpected stream response.");phase=Ready;}
@@ -258,7 +271,7 @@ internal sealed class Session : IAsyncDisposable
         catch(Exception ex)when(ex is WebSocketException or OperationCanceledException or JsonException or InvalidDataException){if(!stop.IsCancellationRequested)Abort("Connection stopped: "+ex.Message,ex is WebSocketException?"receive-failed":"receive-invalid",ex);}
     }
     public void Abort(string reason,string code="local-abort",Exception? error=null)
-    {lock(lifecycle){if(phase==Stopped)return;Log("session-ended",code,error:error);phase=Stopped;diagnosticTimer?.Dispose();if(remoteError!=null)reason="Mac stopped: "+remoteError;stop.Cancel();outgoing.Writer.TryComplete();socket.Abort();}Ended?.Invoke(reason);}
+    {lock(lifecycle){if(phase==Stopped)return;Log("session-ended",code,error:error);phase=Stopped;EndCode=remoteError!=null?"host-error":code;diagnosticTimer?.Dispose();if(remoteError!=null)reason="Mac stopped: "+remoteError;stop.Cancel();outgoing.Writer.TryComplete();socket.Abort();}Ended?.Invoke(reason);}
     public async ValueTask DisposeAsync()
     {Abort("Disconnected; keys released by Mac watchdog.","disposed");try{await Task.WhenAll(reader??Task.CompletedTask,writer??Task.CompletedTask).ConfigureAwait(false);}catch(OperationCanceledException){}socket.Dispose();stop.Dispose();}
 }
