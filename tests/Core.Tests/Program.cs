@@ -180,6 +180,125 @@ Check(router.Route(0x08,true,true).Route == KeyRoute.Release, "Ctrl+Alt+Shift+Ba
 Check(router.Route(0xA2,false,false).Route == KeyRoute.Swallow && router.Route(0xA4,false,false).Route == KeyRoute.Swallow, "modifier releases after the escape do not reach Windows");
 router.Reset();router.Route(0xA2,true,true);router.Route(0xA4,true,true);
 Check(router.Route(0x2E,true,true).Route == KeyRoute.ReleaseLocal, "Ctrl+Alt+Delete stays with Windows and releases control");
+{
+    // Physical positions: set-1 scan codes to Mac ANSI-position key codes.
+    var letters=new (int Scan,int Mac,string Name)[]{(0x1E,0,"A"),(0x1F,1,"S"),(0x20,2,"D"),(0x21,3,"F"),(0x23,4,"H"),(0x22,5,"G"),(0x2C,6,"Z"),(0x2D,7,"X"),(0x2E,8,"C"),(0x2F,9,"V"),(0x30,11,"B"),
+        (0x10,12,"Q"),(0x11,13,"W"),(0x12,14,"E"),(0x13,15,"R"),(0x15,16,"Y"),(0x14,17,"T"),(0x18,31,"O"),(0x16,32,"U"),(0x17,34,"I"),(0x19,35,"P"),(0x26,37,"L"),(0x24,38,"J"),(0x25,40,"K"),(0x31,45,"N"),(0x32,46,"M")};
+    foreach(var (scan,mac,name) in letters)Check(KeyMap.MacCodeForScan(scan,false)==mac&&KeyMap.IsLayoutKey(scan,false),"letter position maps by scan code: "+name);
+    var digits=new[]{18,19,20,21,23,22,26,28,25,29};
+    for(int i=0;i<10;i++)Check(KeyMap.MacCodeForScan(0x02+i,false)==digits[i]&&KeyMap.IsLayoutKey(0x02+i,false),"digit row position maps by scan code: "+(i+1)%10);
+    var punctuation=new (int Scan,int Mac,string Name)[]{(0x0C,27,"minus"),(0x0D,24,"equals"),(0x1A,33,"left bracket"),(0x1B,30,"right bracket"),(0x27,41,"semicolon"),(0x28,39,"quote"),
+        (0x29,50,"grave"),(0x2B,42,"backslash"),(0x33,43,"comma"),(0x34,47,"period"),(0x35,44,"slash"),(0x56,10,"ISO key beside left Shift"),(0x7D,93,"JIS Yen"),(0x73,94,"JIS Ro")};
+    foreach(var (scan,mac,name) in punctuation)Check(KeyMap.MacCodeForScan(scan,false)==mac&&KeyMap.IsLayoutKey(scan,false),"punctuation position maps by scan code: "+name);
+    var keypad=new (int Scan,bool Extended,int Mac,string Name)[]{(0x52,false,82,"0"),(0x4F,false,83,"1"),(0x50,false,84,"2"),(0x51,false,85,"3"),(0x4B,false,86,"4"),(0x4C,false,87,"5"),(0x4D,false,88,"6"),
+        (0x47,false,89,"7"),(0x48,false,91,"8"),(0x49,false,92,"9"),(0x53,false,65,"decimal"),(0x37,false,67,"multiply"),(0x4E,false,69,"plus"),(0x4A,false,78,"minus"),(0x35,true,75,"divide"),(0x1C,true,76,"Enter"),(0x45,true,71,"Num Lock as Clear")};
+    foreach(var (scan,ext,mac,name) in keypad)Check(KeyMap.MacCodeForScan(scan,ext)==mac,"keypad scan code maps: "+name);
+    var navigation=new (int Scan,int Mac,string Name)[]{(0x48,126,"Up"),(0x50,125,"Down"),(0x4B,123,"Left"),(0x4D,124,"Right"),(0x47,115,"Home"),(0x4F,119,"End"),(0x49,116,"Page Up"),(0x51,121,"Page Down"),(0x52,114,"Insert"),(0x53,117,"Delete")};
+    foreach(var (scan,mac,name) in navigation)Check(KeyMap.MacCodeForScan(scan,true)==mac&&!KeyMap.IsLayoutKey(scan,true),"extended navigation scan code maps and keeps its virtual key: "+name);
+    Check(KeyMap.MacCodeForScan(0x1C,false)==36&&KeyMap.MacCodeForScan(0x01,false)==53&&KeyMap.MacCodeForScan(0x0E,false)==51&&KeyMap.MacCodeForScan(0x0F,false)==48&&KeyMap.MacCodeForScan(0x39,false)==49,"Return, Escape, Backspace, Tab and Space scan codes map");
+    Check(KeyMap.MacCodeForScan(0x3B,false)==122&&KeyMap.MacCodeForScan(0x58,false)==111&&KeyMap.MacCodeForScan(0x67,false)==106&&KeyMap.MacCodeForScan(0x6A,false)==80,"function key scan codes map through F19");
+    Check(KeyMap.MacCode(0x7F)==106&&KeyMap.MacCode(0x80)==64&&KeyMap.MacCode(0x81)==79&&KeyMap.MacCode(0x82)==80,"F16 to F19 virtual keys map");
+    Check(KeyMap.MacCodeForScan(0x37,true)==null&&KeyMap.MacCodeForScan(0x00,false)==null&&KeyMap.MacCodeForScan(0x21D,false)==null,"Print Screen, missing and synthetic scan codes have no position");
+    foreach(int scan in new[]{0x1D,0x2A,0x36,0x38,0x39,0x3A,0x1C,0x0E,0x0F,0x01,0x47,0x4B,0x52,0x53})
+        Check(!KeyMap.IsLayoutKey(scan,false),"modifiers, Space, editing keys and the keypad keep virtual-key routing: 0x"+scan.ToString("X"));
+    Check(!KeyMap.IsLayoutKey(0x1D,true)&&!KeyMap.IsLayoutKey(0x38,true)&&!KeyMap.IsLayoutKey(0x5B,true),"right Ctrl, right Alt and Windows keys keep virtual-key routing");
+    Check(KeyMap.MacCode(0x41,0x1E,false)==0&&KeyMap.MacCode(0x24,0x47,false)==115&&KeyMap.MacCode(0x67,0x47,false)==89&&KeyMap.MacCode(0x0D,0x1C,true)==76&&KeyMap.MacCode(0x0D,0x1C,false)==36,
+        "positions for characters, virtual keys for the keypad (Num Lock off Home, on 7) and keypad Enter apart from Return");
+    Check(KeyMap.MacCode(0xE7,0x1E,false)==null,"a Unicode packet is not mistaken for a key position");
+
+    // Layouts: the Windows virtual key follows the PC layout, the Mac code follows the key's position.
+    var azerty=new KeyRouter();
+    Check(azerty.Route(0x51,0x1E,false,true,true)==new KeyDecision(KeyRoute.Remote,0)&&azerty.Route(0x51,0x1E,false,false,true)==new KeyDecision(KeyRoute.Remote,0),"AZERTY A key (VK_Q) sends the Mac A position so the Mac layout types its own letter");
+    azerty.Route(0xA2,0x1D,false,true,true);
+    Check(azerty.Route(0x5A,0x11,false,true,true)==new KeyDecision(KeyRoute.Remote,13),"AZERTY Ctrl+Z sends Command plus the W position, which a French Mac reads as Z, not Command+W");
+    Check(azerty.Route(0x5A,0x11,false,false,true)==new KeyDecision(KeyRoute.Remote,13),"the AZERTY Z release matches its press");
+    var qwertz=new KeyRouter();
+    Check(qwertz.Route(0x5A,0x15,false,true,true)==new KeyDecision(KeyRoute.Remote,16)&&qwertz.Route(0x59,0x2C,false,true,true)==new KeyDecision(KeyRoute.Remote,6),"QWERTZ Z and Y keep their positions instead of swapping twice");
+    Check(qwertz.Route(0xE2,0x56,false,true,true)==new KeyDecision(KeyRoute.Remote,10)&&qwertz.Route(0xE2,0x56,false,false,true)==new KeyDecision(KeyRoute.Remote,10),"the ISO key beside left Shift reaches the Mac instead of being swallowed");
+    var keypadEnter=new KeyRouter();
+    Check(keypadEnter.Route(0x0D,0x1C,true,true,true)==new KeyDecision(KeyRoute.Remote,76)&&keypadEnter.Route(0x0D,0x1C,false,true,true)==new KeyDecision(KeyRoute.Remote,36),"keypad Enter and Return are separate Mac keys");
+    Check(keypadEnter.Route(0x0D,0x1C,true,false,true)==new KeyDecision(KeyRoute.Remote,76)&&keypadEnter.Route(0x0D,0x1C,false,false,true)==new KeyDecision(KeyRoute.Remote,36)&&!keypadEnter.OwnsKeys,"keypad Enter and Return releases stay balanced");
+    var layoutChange=new KeyRouter();layoutChange.Route(0x51,0x1E,false,true,true);
+    Check(layoutChange.Route(0x41,0x1E,false,false,true)==new KeyDecision(KeyRoute.Remote,0)&&!layoutChange.OwnsKeys,"a layout change while a key is held still releases the same Mac key");
+    var shortcuts=new KeyRouter();shortcuts.Route(0xA2,0x1D,false,true,true);
+    Check(Keys(shortcuts.Route(0x20,0x39,false,true,true),(55,false),(59,true),(49,true),(49,false),(59,false),(55,true)),"Ctrl+Space keeps its Mac Control+Space tap with scan codes");
+    shortcuts.Reset();shortcuts.Route(0x5B,0x5B,true,true,true);
+    Check(Keys(shortcuts.Route(0x52,0x13,false,true,true),(59,true),(15,true)),"Windows key with a positional letter still becomes Control");
+    shortcuts.Reset();shortcuts.Route(0xA2,0x1D,false,true,true);shortcuts.Route(0xA4,0x38,false,true,true);shortcuts.Route(0xA0,0x2A,false,true,true);
+    Check(shortcuts.Route(0x08,0x0E,false,true,true).Route==KeyRoute.Release,"Ctrl+Alt+Shift+Backspace still releases control with scan codes");
+    shortcuts.Reset();shortcuts.Route(0xA2,0x1D,false,true,true);shortcuts.Route(0xA4,0x38,false,true,true);
+    Check(shortcuts.Route(0x2E,0x53,true,true,true).Route==KeyRoute.ReleaseLocal,"Ctrl+Alt+Delete still releases control with scan codes");
+}
+{
+    // AltGr arrives as a synthetic left Ctrl (scan 0x21D) plus right Alt; it is Option alone on the Mac.
+    var altGr=new KeyRouter();
+    Check(altGr.Route(0xA2,0x21D,false,true,true).Route==KeyRoute.Swallow,"AltGr's synthetic Ctrl does not reach the Mac as Command");
+    Check(altGr.Route(0xA5,0x38,true,true,true)==new KeyDecision(KeyRoute.Remote,61),"AltGr's right Alt is Option");
+    Check(altGr.Route(0xA2,0x21D,false,true,true).Route==KeyRoute.Swallow&&altGr.Route(0xA5,0x38,true,true,true)==new KeyDecision(KeyRoute.Remote,61),"AltGr auto-repeat stays Option only");
+    Check(altGr.Route(0x45,0x12,false,true,true)==new KeyDecision(KeyRoute.Remote,14),"AltGr+E sends Option+E, not Command+Option+E");
+    Check(altGr.Route(0x20,0x39,false,true,true)==new KeyDecision(KeyRoute.Remote,49),"AltGr+Space is Option+Space, not the Ctrl+Space tap");
+    altGr.Route(0x20,0x39,false,false,true);altGr.Route(0x45,0x12,false,false,true);
+    Check(altGr.Route(0xA2,0x21D,false,false,true).Route==KeyRoute.Swallow&&altGr.Route(0xA5,0x38,true,false,true)==new KeyDecision(KeyRoute.Remote,61)&&!altGr.OwnsKeys,"AltGr releases are balanced");
+    var localAltGr=new KeyRouter();
+    Check(localAltGr.Route(0xA2,0x21D,false,true,false).Route==KeyRoute.Local&&localAltGr.Route(0xA2,0x21D,false,false,true).Route==KeyRoute.Local,"AltGr pressed for Windows keeps its synthetic Ctrl with Windows");
+    var lostAltGr=new KeyRouter();lostAltGr.Route(0xA2,0x21D,false,true,true);lostAltGr.Route(0xA5,0x38,true,true,true);lostAltGr.ReleaseControl();
+    Check(lostAltGr.Route(0xA2,0x21D,false,true,false).Route==KeyRoute.Swallow&&lostAltGr.Route(0xA2,0x21D,false,false,false).Route==KeyRoute.Swallow&&lostAltGr.Route(0xA5,0x38,true,false,false).Route==KeyRoute.Swallow&&!lostAltGr.OwnsKeys,
+        "AltGr held across a control release never gives Windows a lone Ctrl or Alt");
+    var realCtrl=new KeyRouter();realCtrl.Route(0xA2,0x1D,false,true,true);
+    Check(realCtrl.Route(0x43,0x2E,false,true,true)==new KeyDecision(KeyRoute.Remote,8),"a physical left Ctrl is still Command");
+}
+{
+    // Lock screen, Ctrl+Alt+Delete and UAC hide key releases from the hook.
+    var locked=new KeyRouter();locked.Route(0xA2,0x1D,false,true,true);locked.Route(0xA4,0x38,false,true,true);
+    Check(locked.Route(0x2E,0x53,true,true,true).Route==KeyRoute.ReleaseLocal,"Ctrl+Alt+Delete releases control");
+    locked.ReleaseControl();
+    Check(locked.OwnsKeys,"the released modifiers wait for releases the secure desktop will hide");
+    locked.ForgetPhysicalState();
+    Check(!locked.OwnsKeys&&locked.Route(0xA2,0x1D,false,true,false).Route==KeyRoute.Local&&locked.Route(0x43,0x2E,false,true,false).Route==KeyRoute.Local,"after a desktop switch, Ctrl+C goes to Windows intact");
+
+    var missed=new KeyRouter();missed.Route(0xA2,0x1D,false,true,true,1000);missed.Route(0xA4,0x38,false,true,true,1010);missed.Route(0x2E,0x53,true,true,true,1020);missed.ReleaseControl();
+    Check(missed.Route(0xA2,0x1D,false,true,false,1100).Route==KeyRoute.Local,"a new Ctrl press after a missed release is not swallowed even without a desktop-switch notice");
+    Check(missed.Route(0xA2,0x1D,false,false,false,1150).Route==KeyRoute.Local,"its release also goes to Windows, balancing the press");
+    Check(missed.Route(0xA4,0x38,false,true,false,1200).Route==KeyRoute.Local&&missed.Route(0xA4,0x38,false,false,false,1250).Route==KeyRoute.Local&&!missed.OwnsKeys,"each stale key heals on its next press");
+
+    var lastKey=new KeyRouter();lastKey.Route(0x5B,0x5B,true,true,true,1000);lastKey.Route(0x4C,0x26,false,true,true,1010);lastKey.ReleaseControl();
+    Check(lastKey.Route(0x4C,0x26,false,true,false,1040).Route==KeyRoute.Swallow,"auto-repeat of the last key held across a release stays swallowed");
+    Check(lastKey.Route(0x4C,0x26,false,true,false,9000).Route==KeyRoute.Local,"the same key pressed again long after an unseen release (Win+L, unlock) reaches Windows");
+    Check(lastKey.Route(0x5B,0x5B,true,true,false,9100).Route==KeyRoute.Local,"the Windows key pressed after unlock reaches Windows");
+
+    var stillHeld=new KeyRouter();stillHeld.Route(0xA2,0x1D,false,true,true,1000);stillHeld.Route(0x43,0x2E,false,true,true,1010);stillHeld.ReleaseControl();
+    Check(stillHeld.Route(0x43,0x2E,false,false,false,1100).Route==KeyRoute.Swallow&&stillHeld.Route(0xA2,0x1D,false,false,false,1200).Route==KeyRoute.Swallow&&!stillHeld.OwnsKeys,"keys still physically held across a release keep their swallowed releases");
+
+    bool physicallyDown=true;var outside=new KeyRouter(k=>physicallyDown&&k==0xA2);
+    outside.Route(0xA2,0x1D,false,true,false);physicallyDown=false;outside.Route(0xA4,0x38,false,true,true);
+    Check(outside.Route(0x2E,0x53,true,true,true)==new KeyDecision(KeyRoute.Remote,117),"a Windows-side Ctrl whose release this desktop missed cannot fake Ctrl+Alt+Delete");
+}
+{
+    // Windows word-editing chords become their Mac Option equivalents.
+    foreach(var (vk,scan,mac,name) in new[]{(0x25,0x4B,123,"Ctrl+Left"),(0x27,0x4D,124,"Ctrl+Right"),(0x08,0x0E,51,"Ctrl+Backspace"),(0x2E,0x53,117,"Ctrl+Delete")})
+    {
+        var edit=new KeyRouter();edit.Route(0xA2,0x1D,false,true,true);
+        bool ext=vk is 0x25 or 0x27 or 0x2E;
+        Check(Keys(edit.Route(vk,scan,ext,true,true),(55,false),(58,true),(mac,true),(mac,false),(58,false),(55,true)),name+" sends Option instead of Command");
+        Check(Keys(edit.Route(vk,scan,ext,true,true),(55,false),(58,true),(mac,true),(mac,false),(58,false),(55,true)),name+" auto-repeat keeps editing word by word");
+        Check(edit.Route(vk,scan,ext,false,true).Route==KeyRoute.Swallow,name+" release stays balanced");
+        Check(edit.Route(0xA2,0x1D,false,false,true)==new KeyDecision(KeyRoute.Remote,55)&&!edit.OwnsKeys,name+" leaves no key held");
+    }
+    var select=new KeyRouter();select.Route(0xA2,0x1D,false,true,true);select.Route(0xA0,0x2A,false,true,true);
+    Check(Keys(select.Route(0x27,0x4D,true,true,true),(55,false),(58,true),(124,true),(124,false),(58,false),(55,true)),"Ctrl+Shift+Right selects by word with Shift still held on the Mac");
+    var lineEnd=new KeyRouter();lineEnd.Route(0xA4,0x38,false,true,true);
+    Check(lineEnd.Route(0x27,0x4D,true,true,true)==new KeyDecision(KeyRoute.Remote,124),"left Alt+Right still sends Command+Right for the line end");
+    var spaces=new KeyRouter();spaces.Route(0x5B,0x5B,true,true,true);
+    Check(Keys(spaces.Route(0x27,0x4D,true,true,true),(59,true),(124,true)),"Windows key+Right remains Control+Right");
+    var plain=new KeyRouter();
+    Check(plain.Route(0x24,0x47,true,true,true)==new KeyDecision(KeyRoute.Remote,115)&&plain.Route(0x25,0x4B,true,true,true)==new KeyDecision(KeyRoute.Remote,123),"plain Home and arrows are unchanged");
+    var off=new KeyRouter{WindowsEditingKeys=false};off.Route(0xA2,0x1D,false,true,true);
+    Check(off.Route(0x08,0x0E,false,true,true)==new KeyDecision(KeyRoute.Remote,51),"editing translation can be turned off");
+    var paused=new KeyRouter();paused.Route(0xA2,0x1D,false,true,true);paused.Route(0x08,0x0E,false,true,true);paused.ReleaseControl();
+    Check(paused.Route(0x08,0x0E,false,true,false).Route==KeyRoute.Swallow&&paused.Route(0x08,0x0E,false,false,false).Route==KeyRoute.Swallow,"a translated key held across a release stays away from Windows");
+    var letGo=new KeyRouter();letGo.Route(0xA2,0x1D,false,true,true);letGo.Route(0x25,0x4B,true,true,true);letGo.Route(0xA2,0x1D,false,false,true);
+    Check(letGo.Route(0x25,0x4B,true,true,true).Route==KeyRoute.Swallow&&letGo.Route(0x25,0x4B,true,false,true).Route==KeyRoute.Swallow&&!letGo.OwnsKeys,"releasing Ctrl first stops the word moves without sending a stray arrow");
+}
 Check(Viewport.Map(100,0,400,300,1920,1080) == null, "letterbox rejected");
 var p = Viewport.Map(200,150,400,300,1920,1080);
 Check(p != null && Math.Abs(p.Value.X-.5) < .001 && Math.Abs(p.Value.Y-.5)<.001,"aspect fit coordinates");
