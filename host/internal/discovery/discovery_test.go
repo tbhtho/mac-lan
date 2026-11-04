@@ -60,3 +60,15 @@ func TestUntrustedRecordsFailClosed(t *testing.T) {
 		t.Fatal("ambiguous endpoint accepted")
 	}
 }
+
+func TestAdvertisedAddressSurvivesSecondNetwork(t *testing.T) {
+	entry := &zeroconf.ServiceEntry{ServiceRecord: zeroconf.ServiceRecord{Instance: "My Mac"}, Port: 4433, Text: []string{"v=2", "ip=192.168.1.7", "fp=" + strings.Repeat("a", 64)}, AddrIPv4: []net.IP{net.ParseIP("10.147.17.4")}, Expiry: time.Now().Add(time.Minute)}
+	got := normalize([]*zeroconf.ServiceEntry{entry}, time.Now())
+	if len(got) != 1 || got[0].Address != "192.168.1.7" {
+		t.Fatal("a Mac whose first A record is another network must still be listed at its advertised address", got)
+	}
+	entry.Text = []string{"v=2", "ip=8.8.8.8", "fp=" + strings.Repeat("a", 64)}
+	if got = normalize([]*zeroconf.ServiceEntry{entry}, time.Now()); len(got) != 0 {
+		t.Fatal("a public advertised address must stay rejected", got)
+	}
+}

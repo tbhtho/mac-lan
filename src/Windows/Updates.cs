@@ -13,6 +13,9 @@ internal sealed class UpdatePreferences
     public string? Stage { get; set; }
     public string? Journal { get; set; }
     public string? ResultFile { get; set; }
+    // The release the user rolled back from. Automatic installation skips exactly this
+    // version so a restore is not undone seconds later; a newer release still installs.
+    public string? HeldVersion { get; set; }
     static string PathName => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"MAC-DOW","update-preferences.json");
     public static UpdatePreferences Load()
     {
@@ -32,6 +35,9 @@ internal static class UpdateProcess
     }
     internal static async Task<JsonElement> Call(params string[] arguments)
     {
+        // Discovery only browses the LAN and touches no update state, so it must not wait
+        // behind a large update download that holds the update lock for minutes.
+        if(arguments.Length>0&&arguments[0]=="discover")return await CallCore(arguments);
         await operations.WaitAsync();try{return await CallCore(arguments);}finally{operations.Release();}
     }
     static async Task<JsonElement> CallCore(string[] arguments)
@@ -61,7 +67,7 @@ internal static class UpdateProcess
             var latest=UpdatePreferences.Load();
             string? existing=latest.Channel==preferences.Channel?latest.Stage:preferences.Stage;
             return await UpdateDownload.Run(preferences.Channel,existing,Payloads.Install,arguments=>Call(arguments),directory=>
-            {var current=UpdatePreferences.Load();current.Stage=directory;current.Save();},progress);
+            {var current=UpdatePreferences.Load();current.Stage=directory;current.Save();},progress,latest.HeldVersion);
         }
         finally{downloads.Release();}
     }
@@ -103,7 +109,7 @@ internal sealed class UpdateDialog : Window
         content.Children.Add(description);content.Children.Add(actions);
         apply.Style=(Style)FindResource("PrimaryButton");
         apply.Click+=async(_,_)=>await Run(Apply);actions.Children.Add(apply);
-        Add("Check now",Check);
+        Add("Check now",CheckNow);
         automatic.IsChecked=preferences.Automatic;content.Children.Add(automatic);
         content.Children.Add(relaunch);
         var advanced=new StackPanel();advanced.Children.Add(new TextBlock{Text="Update channel",Margin=new Thickness(0,0,0,6)});channel.SelectedItem=preferences.Channel;advanced.Children.Add(channel);
@@ -131,6 +137,8 @@ internal sealed class UpdateDialog : Window
         if(result.TryGetProperty("version",out var v))description.Text="Current "+v.GetString()+"\n"+description.Text;
         if(result.TryGetProperty("plan",out var plan))description.Text+="\nAvailable "+plan.GetProperty("tag").GetString();
     }
+    // An explicit check resumes updates that were held after restoring a previous version.
+    async Task CheckNow(){var latest=UpdatePreferences.Load();if(latest.HeldVersion!=null){latest.HeldVersion=null;latest.Save();}await Check();}
     async Task Check()
     {
         Save();apply.IsEnabled=false;var result=await UpdateProcess.DownloadAvailable(UpdatePreferences.Load(),text=>description.Text=text);Describe(result);
@@ -162,6 +170,7 @@ internal sealed class UpdateDialog : Window
         string version=result.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString()!;
         if(MessageBox.Show(this,"Close mac-lan and reinstall verified "+version+"? This downloads the signed older release again; external settings are preserved. "+(relaunch.IsChecked==true?"mac-lan will reopen.":"Reopen it yourself afterwards."),"Confirm rollback",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
         await prepareRestart();if(dismissed)return;var latest=UpdatePreferences.Load();latest.ResultFile=Path.Combine(Path.GetDirectoryName(journal)!,"worker-result.json");latest.Save();
+        try{using var tx=JsonDocument.Parse(File.ReadAllText(journal));if(tx.RootElement.TryGetProperty("version",out var from)&&from.ValueKind==JsonValueKind.String){latest.HeldVersion=from.GetString();latest.Save();}}catch(IOException){}catch(JsonException){}
         var args=new List<string>{"rollback","--journal",journal,"--install",install,"--wait-pid",Environment.ProcessId.ToString(),"--confirm","ROLLBACK","--result-file",latest.ResultFile};
         if(relaunch.IsChecked==true)args.Add("--relaunch");
         UpdateProcess.StartDetached(args.ToArray());Close();shutdown();

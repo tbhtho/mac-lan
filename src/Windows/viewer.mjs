@@ -21,7 +21,7 @@ let cursorUrl=null;
 function setCursor(m){
   if(typeof m.png!=='string'||m.png.length>65536||!Number.isFinite(m.x)||!Number.isFinite(m.y))return;
   try{
-    const url=URL.createObjectURL(new Blob([Uint8Array.from(atob(m.png),c=>c.charCodeAt(0))],{type:'image/png'}));
+    const url=URL.createObjectURL(new Blob([base64Bytes(m.png)],{type:'image/png'}));
     canvas.style.cursor=`-webkit-image-set(url("${url}") 2x) ${Math.max(0,Math.round(m.x))} ${Math.max(0,Math.round(m.y))}, default`;
     if(cursorUrl)URL.revokeObjectURL(cursorUrl);cursorUrl=url;
   }catch{}
@@ -33,7 +33,7 @@ function playAudio(pcm){
   if(typeof pcm!=='string'||pcm.length===0||pcm.length>262144)return;
   try{
     audioContext??=new AudioContext({sampleRate:48000,latencyHint:'interactive'});
-    const bytes=Uint8Array.from(atob(pcm),c=>c.charCodeAt(0));
+    const bytes=base64Bytes(pcm);
     const samples=new Int16Array(bytes.buffer,0,bytes.byteLength>>1);const frames=samples.length>>1;if(frames===0)return;
     const buffer=audioContext.createBuffer(2,frames,48000);const left=buffer.getChannelData(0),right=buffer.getChannelData(1);
     for(let i=0;i<frames;i++){left[i]=samples[2*i]/32768;right[i]=samples[2*i+1]/32768;}
@@ -86,6 +86,12 @@ function pump(){
   }catch(err){recover('Decoder reset; waiting for keyframe: '+err.message);}
   finally{pumping=false;watchQueue();}
 }
+// atob plus a plain loop avoids a per-byte callback on every video frame.
+function base64Bytes(text){const raw=atob(text),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out;}
+// Prefer GPU decode, but fall back to any available decoder after repeated
+// failures with no decoded picture so PCs without usable hardware H.264 still show video.
+let decoderAcceleration='prefer-hardware',decoderFailures=0;
+function noteDecoderFailure(){if(++decoderFailures>=2&&decoderAcceleration!=='no-preference'){decoderAcceleration='no-preference';if(config)config={...config,hardwareAcceleration:decoderAcceleration};}}
 function newDecoder(){
   const generation=renderGeneration;
   const created=new VideoDecoder({output:frame=>{
@@ -93,8 +99,8 @@ function newDecoder(){
     const submitted=pending.get(frame.timestamp);if(!submitted){frame.close();return;}
     if(performance.now()-submitted.queuedAt>=MAX_BUFFERED_MS){frame.close();recover('Decoder delayed; waiting for a fresh keyframe');return;}
     pending.delete(frame.timestamp);bufferedBytes-=submitted.data.byteLength;lastDecode=performance.now()-submitted.queuedAt;
-    present(frame,submitted.queuedAt);pump();watchQueue();
-  },error:e=>{if(generation===renderGeneration&&created===decoder)recover('Decoder reset; waiting for keyframe: '+e.message);}});
+    decoderFailures=0;present(frame,submitted.queuedAt);pump();watchQueue();
+  },error:e=>{if(generation===renderGeneration&&created===decoder){noteDecoderFailure();recover('Decoder reset; waiting for keyframe: '+e.message);}}});
   decoder=created;decoder.configure(config);configuredCodec=config.codec;
   decoder.addEventListener('dequeue',()=>{if(generation===renderGeneration&&created===decoder)pump();});
 }
@@ -107,7 +113,7 @@ async function receivePacket(p,queuedAt=performance.now()){
     catch(err){if(generation===renderGeneration&&epoch===streamEpoch)recover('Video error: '+err.message);}
     finally{jpegBusy=false;const next=queuedJpeg;queuedJpeg=null;if(next&&next.generation===renderGeneration&&next.epoch===streamEpoch)void receivePacket(next.packet,next.queuedAt);}return;
   }
-  if(p.key){const s=p.data;if(s.length>=8&&s[0]===0&&s[1]===0&&s[2]===0&&s[3]===1&&(s[4]&31)===7){const hex=n=>n.toString(16).padStart(2,'0');config={codec:'avc1.'+hex(s[5])+hex(s[6])+hex(s[7]),hardwareAcceleration:'prefer-hardware',optimizeForLatency:true};}}
+  if(p.key){const s=p.data;if(s.length>=8&&s[0]===0&&s[1]===0&&s[2]===0&&s[3]===1&&(s[4]&31)===7){const hex=n=>n.toString(16).padStart(2,'0');config={codec:'avc1.'+hex(s[5])+hex(s[6])+hex(s[7]),hardwareAcceleration:decoderAcceleration,optimizeForLatency:true};}}
   if(!config)return;
   // A decoder may fall behind briefly, but every delta still depends on the
   // earlier encoded pictures. Keep those references in order until dequeue.
@@ -132,7 +138,7 @@ chrome.webview.addEventListener('message',async e=>{
     if(m.codec==='jpeg'){if(config){reset();config=null;}return;}
     // Key packets carry SPS/PPS and configure themselves too; pipe delivery order is irrelevant.
     if(config?.codec===m.codec)return;
-    if(jpegBusy||queuedJpeg)reset(false);config={codec:m.codec,hardwareAcceleration:'prefer-hardware',optimizeForLatency:true};
+    if(jpegBusy||queuedJpeg)reset(false);config={codec:m.codec,hardwareAcceleration:decoderAcceleration,optimizeForLatency:true};
     return;
   }
   if(m.type!=='frame'&&m.type!=='frames')return;
@@ -142,7 +148,7 @@ chrome.webview.addEventListener('message',async e=>{
   const epoch=streamEpoch;let generation=renderGeneration;
   try{
     const values=batch?m.frames:[m.data];if(!Array.isArray(values)||values.length<1||values.length>MAX_BATCH_FRAMES)throw Error('Invalid frame batch');
-    let bytes=0;const packets=values.map(value=>{if(typeof value!=='string'||value.length>Math.ceil(MAX_BATCH_BYTES/3)*4)throw Error('Invalid frame size');const b=Uint8Array.from(atob(value),c=>c.charCodeAt(0));bytes+=b.byteLength;if(bytes>MAX_BATCH_BYTES)throw Error('Frame batch exceeds its byte limit');return parseFrame(b);});
+    let bytes=0;const packets=values.map(value=>{if(typeof value!=='string'||value.length>Math.ceil(MAX_BATCH_BYTES/3)*4)throw Error('Invalid frame size');const b=base64Bytes(value);bytes+=b.byteLength;if(bytes>MAX_BATCH_BYTES)throw Error('Frame batch exceeds its byte limit');return parseFrame(b);});
     for(const p of packets){const operation=receivePacket(p);generation=renderGeneration;await operation;if(generation!==renderGeneration||epoch!==streamEpoch)break;}
   }catch(err){if(generation===renderGeneration&&epoch===streamEpoch)recover('Video error: '+err.message);}
   finally{post(batch?{type:'frameAck',epoch:m.epoch,batch:m.batch}:{type:'frameAck'});}

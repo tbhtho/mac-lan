@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -148,6 +149,9 @@ func (e input) valid() bool {
 func isCursorStatus(line string) bool {
 	var probe struct{ Type string }
 	return json.Unmarshal([]byte(line), &probe) == nil && probe.Type == "cursor"
+}
+func isCaptureAlive(line string) bool {
+	return len(line) < 64 && strings.Contains(line, `"captureAlive"`)
 }
 func privateIP(s string) bool {
 	ip := net.ParseIP(s)
@@ -304,6 +308,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err = c.WriteJSON(catalog); err != nil {
 		return
 	}
+	// Pongs are only processed while this connection is being read; the local
+	// viewing-consent prompt can pause reads for up to 45 seconds, so the
+	// timeout must outlast it.
+	stopPings := keepAlive(c, 10*time.Second, 75*time.Second)
+	defer stopPings()
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	var request start
 	for {
@@ -484,10 +493,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 		}
+		// captureAlive is a liveness beat repeated every half second; Windows
+		// uses only its recency, so a full queue during a downlink stall drops it
+		// instead of counting toward the dead-viewer timeout below.
+		if isCaptureAlive(line) {
+			return
+		}
 		// Native startup can emit a short burst of encoder capabilities before
 		// the first frame. Backpressure this bounded queue instead of treating
-		// routine status output as a dead viewer and killing capture.
-		deadline := time.NewTimer(2 * time.Second)
+		// routine status output as a dead viewer and killing capture. The wait
+		// outlasts the writer's 10-second deadline so a Wi-Fi stall the writer
+		// tolerates does not end the session here first.
+		deadline := time.NewTimer(12 * time.Second)
 		defer deadline.Stop()
 		select {
 		case status <- statusMessage{line: line}:
@@ -534,4 +551,37 @@ func (s *server) stopActive() {
 	if s.transfers != nil {
 		s.transfers.stopAndWait()
 	}
+}
+
+// keepAlive pings an authenticated peer so a sleeping or vanished Windows PC
+// is noticed within about a minute instead of holding the single session
+// slot until the five-minute idle read deadline. WebSocket clients, including
+// every released Windows build, answer pings automatically; pongs are seen by
+// whichever goroutine is currently reading the connection.
+func keepAlive(c *websocket.Conn, every, timeout time.Duration) func() {
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	c.SetPongHandler(func(string) error {
+		last.Store(time.Now().UnixNano())
+		return nil
+	})
+	quit := make(chan struct{})
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-quit:
+				return
+			case <-t.C:
+				if time.Since(time.Unix(0, last.Load())) > timeout {
+					_ = c.Close()
+					return
+				}
+				_ = c.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(quit) }) }
 }

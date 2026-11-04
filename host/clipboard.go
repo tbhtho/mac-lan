@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +16,8 @@ import (
 // The paired Windows PC shares plain text with this Mac in both directions. It uses
 // the same pinned listener and per-pairing bearer token as file transfer.
 const maxClipboard = 256 << 10
+
+var errClipboardTooLarge = errors.New("clipboard text exceeds the sharing limit")
 
 type clipboard struct {
 	read  func(context.Context) (string, error)
@@ -28,7 +31,24 @@ func macClipboard() *clipboard {
 		read: func(ctx context.Context) (string, error) {
 			cmd := exec.CommandContext(ctx, "/usr/bin/pbpaste", "-Prefer", "txt")
 			cmd.Env = env
-			out, err := cmd.Output()
+			// Read at most one byte past the limit: a large copied document must not be
+			// pulled into memory on every one-second clipboard poll just to be rejected.
+			pipe, err := cmd.StdoutPipe()
+			if err != nil {
+				return "", err
+			}
+			if err = cmd.Start(); err != nil {
+				return "", err
+			}
+			out, err := io.ReadAll(io.LimitReader(pipe, maxClipboard+1))
+			if len(out) > maxClipboard {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+				return "", errClipboardTooLarge
+			}
+			if werr := cmd.Wait(); err == nil {
+				err = werr
+			}
 			return string(out), err
 		},
 		write: func(ctx context.Context, text string) error {

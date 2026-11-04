@@ -6,12 +6,14 @@ namespace MacDow.Windows;
 // can make a candidate eligible for the Restart action.
 internal static class UpdateDownload
 {
-    internal static async Task<JsonElement> Run(string channel,string? existingStage,string install,Func<string[],Task<JsonElement>> call,Action<string> rememberStage,Action<string>? progress=null)
+    internal static async Task<JsonElement> Run(string channel,string? existingStage,string install,Func<string[],Task<JsonElement>> call,Action<string> rememberStage,Action<string>? progress=null,string? heldVersion=null)
     {
         progress?.Invoke("Checking for updates…");
         var check=await call(new[]{"check","--channel",channel});
         if(!IsOK(check)||!check.TryGetProperty("status",out var status)||status.GetString()!="available")return check;
         string? tag=check.GetProperty("plan").GetProperty("tag").GetString();
+        if(heldVersion!=null&&check.GetProperty("plan").TryGetProperty("version",out var version)&&version.GetString()==heldVersion)
+            return Held(tag);
         if(!string.IsNullOrWhiteSpace(existingStage))
         {
             progress?.Invoke("Verifying your downloaded update…");
@@ -27,6 +29,7 @@ internal static class UpdateDownload
         progress?.Invoke("Verifying the update before restart…");
         return await call(new[]{"preflight","--stage",directory,"--install",install});
     }
+    static JsonElement Held(string? tag)=>JsonSerializer.SerializeToElement(new{ok=true,status="held",message=tag+" is paused because you restored a previous version. Choose Check now in Updates to resume."});
     internal static bool IsOK(JsonElement result)=>result.TryGetProperty("ok",out var ok)&&ok.ValueKind==JsonValueKind.True;
     internal static bool Ready(JsonElement result,string? expectedTag=null)=>IsOK(result)&&result.TryGetProperty("stage",out var stage)&&stage.TryGetProperty("canApply",out var allowed)&&allowed.ValueKind==JsonValueKind.True&&stage.TryGetProperty("plan",out var plan)&&plan.TryGetProperty("tag",out var tag)&&tag.ValueKind==JsonValueKind.String&&(expectedTag==null||tag.GetString()==expectedTag);
 }

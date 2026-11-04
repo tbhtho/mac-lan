@@ -16,7 +16,7 @@ internal sealed class Session : IAsyncDisposable
     readonly DiagnosticLog diagnostics;
     internal string DiagnosticId {get;}=Guid.NewGuid().ToString("N");
     System.Threading.Timer? diagnosticTimer;
-    long videoPackets,audioPackets,receivedBytes,sentMessages,lastPong,lastLeaseQueued,lastLeaseSent,maxLeaseSendGap,lastSendDuration,lastRtt,droppedInput,lastInputDrop;
+    long lastReceive,videoPackets,audioPackets,receivedBytes,sentMessages,lastPong,lastLeaseQueued,lastLeaseSent,maxLeaseSendGap,lastSendDuration,lastRtt,droppedInput,lastInputDrop;
     bool? loggedLeaseActive,loggedLeaseView;
     ulong loggedGeneration;
     long lastUiTick=Stopwatch.GetTimestamp(),lastHealth;
@@ -33,6 +33,11 @@ internal sealed class Session : IAsyncDisposable
     void SampleHealth()
     {
         if(Volatile.Read(ref phase)==Stopped)return;
+        // While streaming the Mac answers every lease and beats twice a second, so
+        // 8 seconds of total silence means it slept or left the network. End the
+        // session instead of showing a frozen picture until TCP gives up.
+        if(Volatile.Read(ref phase)==Ready&&Age(Interlocked.Read(ref lastReceive)) is double silent&&silent>=8000)
+        {Abort("Your Mac stopped responding. It may be asleep or off this network.","receive-timeout");return;}
         bool stalled=Age(Interlocked.Read(ref lastUiTick)) is double age&&age>=1000;
         int was=Interlocked.Exchange(ref uiStalled,stalled?1:0);
         if(stalled&&was==0)Log("ui-heartbeat-stalled","delayed");
@@ -204,7 +209,7 @@ internal sealed class Session : IAsyncDisposable
             while(!stop.IsCancellationRequested)
             {
                 using var message=new MemoryStream();WebSocketReceiveResult result;
-                do{result=await socket.ReceiveAsync(buffer,stop.Token).ConfigureAwait(false);if(result.MessageType==WebSocketMessageType.Close){Abort("Mac disconnected.","remote-close");return;}message.Write(buffer,0,result.Count);if(message.Length>4*1024*1024)throw new InvalidDataException("Oversized frame.");}while(!result.EndOfMessage);
+                do{result=await socket.ReceiveAsync(buffer,stop.Token).ConfigureAwait(false);Interlocked.Exchange(ref lastReceive,Stopwatch.GetTimestamp());if(result.MessageType==WebSocketMessageType.Close){Abort("Mac disconnected.","remote-close");return;}message.Write(buffer,0,result.Count);if(message.Length>4*1024*1024)throw new InvalidDataException("Oversized frame.");}while(!result.EndOfMessage);
                 Interlocked.Add(ref receivedBytes,message.Length);
                 if(result.MessageType==WebSocketMessageType.Binary){if(IsReady){var data=message.ToArray();if(data.Length>0&&data[0]!=4){LastFrame=Stopwatch.GetTimestamp();if(Interlocked.Increment(ref videoPackets)==1)Log("first-video-packet");}else Interlocked.Increment(ref audioPackets);Frame?.Invoke(data);}}
                 else

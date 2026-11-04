@@ -85,7 +85,15 @@ func normalize(entries []*zeroconf.ServiceEntry, now time.Time) []Host {
 		if bad || txt["v"] != "2" || len(fp) != 64 || strings.Trim(fp, "0123456789abcdef") != "" {
 			continue
 		}
-		for _, ip := range e.AddrIPv4 {
+		addresses := e.AddrIPv4
+		// A Mac on two networks (wired plus Wi-Fi, or a VPN adapter) answers with
+		// several A records, and the resolver may keep only the first one seen. The
+		// pinned TLS fingerprint still authenticates the host, so trust the
+		// address the host itself advertised when no resolved address matches it.
+		if selected := net.ParseIP(txt["ip"]).To4(); selected != nil && !containsIP(addresses, selected) {
+			addresses = []net.IP{selected}
+		}
+		for _, ip := range addresses {
 			if !private(ip) {
 				continue
 			}
@@ -175,4 +183,13 @@ func Browse(ctx context.Context) ([]Host, error) {
 			return normalize(records, time.Now()), nil
 		}
 	}
+}
+
+func containsIP(list []net.IP, ip net.IP) bool {
+	for _, candidate := range list {
+		if candidate.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
