@@ -230,16 +230,45 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "browser origins are not allowed", 403)
 		return
 	}
-	if !s.acquireSlot(peer) {
+	held := s.tryTakeSlot()
+	if !held && !s.activeFrom(peer) {
 		http.Error(w, "one controller at a time", 409)
 		return
 	}
-	defer func() { <-s.slot }()
 	up := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" }}
 	c, err := up.Upgrade(w, r, nil)
 	if err != nil {
+		if held {
+			<-s.slot
+		}
 		return
 	}
+	c.SetReadLimit(4096)
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var auth struct{ Type, Token, Code string }
+	if c.ReadJSON(&auth) != nil {
+		c.Close()
+		if held {
+			<-s.slot
+		}
+		return
+	}
+	authenticated := false
+	if !held {
+		// The same PC is replacing a connection the Mac still holds (a drop or sleep
+		// not yet detected). Only an instantly verifiable credential may close it;
+		// an unauthenticated request from that address cannot end a live session.
+		if auth.Type == "resume" && len(auth.Token) == 64 && s.redeemResume(peer, auth.Token, time.Now()) {
+			authenticated = s.takeOverSlot(peer)
+		} else if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 && subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1 {
+			authenticated = s.takeOverSlot(peer)
+		}
+		if !authenticated {
+			c.Close()
+			return
+		}
+	}
+	defer func() { <-s.slot }()
 	s.connectionMu.Lock()
 	if s.stopped || s.updating {
 		s.connectionMu.Unlock()
@@ -260,14 +289,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		close(doneConnection)
 		s.connectionMu.Unlock()
 	}()
-	c.SetReadLimit(4096)
-	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var auth struct{ Type, Token, Code string }
-	if c.ReadJSON(&auth) != nil {
-		return
-	}
-	authenticated := false
-	if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 {
+	if authenticated {
+		// Already verified while taking over the slot.
+	} else if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 {
 		authenticated = subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1
 	} else if auth.Type == "resume" && len(auth.Token) == 64 {
 		authenticated = s.redeemResume(peer, auth.Token, time.Now())
@@ -637,16 +661,24 @@ func (s *server) redeemResume(peer, token string, now time.Time) bool {
 	return true
 }
 
-// acquireSlot takes the single session slot. When the same PC reconnects while
-// its previous connection still holds the slot (a Wi-Fi drop or sleep the Mac
-// has not detected yet), that stale connection is closed instead of refusing
-// the reconnect for up to a minute. A different peer is still refused.
-func (s *server) acquireSlot(peer string) bool {
+func (s *server) tryTakeSlot() bool {
 	select {
 	case s.slot <- struct{}{}:
 		return true
 	default:
+		return false
 	}
+}
+
+func (s *server) activeFrom(peer string) bool {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	return s.active != nil && s.activePeer == peer
+}
+
+// takeOverSlot closes the same peer's previous connection and takes the single
+// session slot once it is released. A different peer's session is never closed.
+func (s *server) takeOverSlot(peer string) bool {
 	s.connectionMu.Lock()
 	c, done, same := s.active, s.activeDone, s.activePeer == peer
 	s.connectionMu.Unlock()

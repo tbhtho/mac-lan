@@ -65,7 +65,7 @@ internal sealed partial class MainWindow : Window
     bool resuming,resumeWantsView;
     uint? pendingAppWindow;
     int reconnectAttempt;
-    long lastHostErrorResume;
+    long lastHostErrorResume,pairedAt;
     string? lastEndReason;
     readonly DispatcherTimer reconnectTimer=new();
     static readonly TimeSpan[] ReconnectDelays=[TimeSpan.FromSeconds(0.5),TimeSpan.FromSeconds(1),TimeSpan.FromSeconds(2),TimeSpan.FromSeconds(4),TimeSpan.FromSeconds(8),TimeSpan.FromSeconds(15)];
@@ -98,7 +98,7 @@ internal sealed partial class MainWindow : Window
             if(!closing&&remote&&appWindow==null)Dispatcher.BeginInvoke(()=>{if(!closing&&remote&&!IsActive&&Native.OtherAppInFrontOn(this))ShowDesktop();},DispatcherPriority.Background);
         };
         // Clicking the Mac view brings it forward; put the mac-lan bar back above it right away.
-        Activated+=(_,_)=>{Topmost=remote;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();TryAutomaticControl();};
+        Activated+=(_,_)=>{Topmost=remote&&session?.IsPaired==true;if(remote)Dispatcher.BeginInvoke(tabBar.KeepAbove,DispatcherPriority.Background);RefreshContext();TryAutomaticControl();};
         timer.Tick+=(_,_)=>Tick();timer.Start();
         reconnectTimer.Tick+=async(_,_)=>{reconnectTimer.Stop();await TryResume();};
         Loaded+=async(_,_)=>await CheckUpdates();updateTimer.Tick+=async(_,_)=>{updateTimer.Interval=AutomaticUpdate.CheckInterval(updateUptime.Elapsed);await CheckUpdates();};updateTimer.Start();
@@ -281,7 +281,7 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;reconnectAttempt=0;resumeToken=s.ResumeToken;if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
+            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;pairedAt=Environment.TickCount64;resumeToken=s.ResumeToken;if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
                 // A fresh pairing already approved viewing, so close the connection page and show the Mac.
                 if(fresh&&wasResume)Dispatcher.BeginInvoke(()=>{if(session==s&&paired)ResumeView();},DispatcherPriority.Background);
                 else if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired){connectionWindow?.Close();ShowRemote();}},DispatcherPriority.Background);
@@ -314,7 +314,7 @@ internal sealed partial class MainWindow : Window
             remote=false;desktopWorkspace.Restore();body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
             appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
-            appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");session?.Abort("App window closed","app-window-closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
+            appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");if(session?.IsReady==true||session?.IsStarting==true)session.Abort("App window closed","app-window-closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
             Hide();tabBar.Suspend();appWindow.Show();
         }
         else{remote=true;gate.RequestAutomaticControl();ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();}
@@ -328,7 +328,12 @@ internal sealed partial class MainWindow : Window
     {
         string? code=s.EndCode;
         bool first=!resuming&&!reconnectTimer.IsEnabled;
-        if(first)reconnectAttempt=0;
+        // Only a connection that stayed up for a while earns a fresh set of attempts, so a
+        // session that keeps failing right after it resumes cannot reconnect forever.
+        if(first&&Environment.TickCount64-pairedAt>=30000)reconnectAttempt=0;
+        // A resume attempt that reached the Mac but ended before a new catalog has spent
+        // or lost its token; only an unreachable Mac keeps it for another try.
+        if(resuming&&code!="connect-failed")resumeToken=null;
         resuming=false;
         bool resumable=resumeToken!=null&&lastHost!=null&&!closing&&!quitting&&code is not ("app-closed" or "disposed" or "user-disconnect");
         // A Mac capture error keeps the pairing (files, clipboard) but does not restart video by
@@ -339,13 +344,13 @@ internal sealed partial class MainWindow : Window
         if(resumable&&reconnectAttempt<ReconnectDelays.Length)
         {
             bool immediate=first&&code is "view-switch" or "app-window-closed";
-            reconnectTimer.Interval=immediate?TimeSpan.Zero:ReconnectDelays[reconnectAttempt];reconnectAttempt++;reconnectTimer.Start();
+            reconnectTimer.Interval=immediate?TimeSpan.Zero:ReconnectDelays[reconnectAttempt];if(!immediate)reconnectAttempt++;reconnectTimer.Start();
             status.Text=pairingProgress.Text=immediate?"Updating the connection to "+MacName+"…":"Reconnecting to "+MacName+"… ("+why+")";
             if(remote&&appWindow==null&&!immediate)ShowReconnecting();
             if(appWindow!=null){viewProgress.Text="Reconnecting to "+MacName+"…";viewProgress.Visibility=Visibility.Visible;}
             return;
         }
-        pendingAppWindow=null;
+        pendingAppWindow=null;resumeToken=null;
         status.Text=pairingProgress.Text=why;
         viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;
         if(remote&&appWindow==null)ShowEnded(why);
@@ -365,7 +370,8 @@ internal sealed partial class MainWindow : Window
     void ManualReconnect()
     {
         if(resumeToken!=null&&lastHost!=null){CancelReconnect();resumeWantsView=true;ShowReconnecting();_=TryResume();return;}
-        if(lastHost!=null)nearby.SelectedItem=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??nearby.SelectedItem;
+        // After a Mac restart its ID changes; select it by name so pairing can start, with the identity check.
+        if(lastHost!=null)nearby.SelectedItem=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Name==lastHost.Name)??nearby.SelectedItem;
         ShowSetup();
         if(nearby.SelectedItem is DiscoveredHost)_=ConnectNearby();
     }
@@ -397,7 +403,7 @@ internal sealed partial class MainWindow : Window
         notice.Children.Add(row);
         if(viewProgress.Parent is Panel previousNotice)previousNotice.Children.Remove(viewProgress);
         status.Visibility=Visibility.Collapsed;body.Background=Brushes.Transparent;body.Child=notice;
-        Show();Position(false);tabBar.SetMode(false);Activate();SendLease();
+        Show();Position(false);tabBar.SetMode(false);Activate();Topmost=false;SendLease();
     }
     void Arm(bool focusViewer=true)
     {
@@ -534,7 +540,7 @@ internal sealed partial class MainWindow : Window
         }
     }
     // Automatic updates wait while Windows is connecting, connected, controlling or transferring files.
-    bool UpdateSessionActive()=>connecting||openingFiles||session?.IsPaired==true||gate.CanRoute||filesWindow?.IsBusy==true;
+    bool UpdateSessionActive()=>connecting||Reconnecting||openingFiles||session?.IsPaired==true||gate.CanRoute||filesWindow?.IsBusy==true;
     async Task CheckUpdates()
     {
         automaticUpdater.Observe();

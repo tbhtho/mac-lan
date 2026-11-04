@@ -51,10 +51,10 @@ func TestSamePeerTakesOverStaleSlot(t *testing.T) {
 			}
 		}
 	}()
-	if s.acquireSlot("192.168.1.30") {
+	if s.tryTakeSlot() || s.activeFrom("192.168.1.30") || s.takeOverSlot("192.168.1.30") {
 		t.Fatal("another PC must not take over an active session")
 	}
-	if !s.acquireSlot("192.168.1.20") {
+	if !s.activeFrom("192.168.1.20") || !s.takeOverSlot("192.168.1.20") {
 		t.Fatal("the same PC must replace its own stale connection")
 	}
 }

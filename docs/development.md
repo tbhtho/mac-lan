@@ -202,7 +202,7 @@ Mac polling/readiness self-tests are included in the native menu lifecycle
 self-test, but native Swift compilation and actual auto-relaunch/monitor moves
 require the user's hardware check. Headless tests do not establish those.
 
-## Unreleased update deferral, resumable downloads and cleanup
+## Alpha.43 update deferral, resumable downloads and cleanup
 
 Automatic installation no longer interrupts use. Windows defers while a
 connection is starting or paired, control is routed, or the Files window is

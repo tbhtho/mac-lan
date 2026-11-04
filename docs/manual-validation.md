@@ -18,7 +18,7 @@
   displays, and hotplug with a selected monitor removed. On one screen the
   selector is disabled. Its dropdown must stay usable with auto-hide enabled.
 
-## Unreleased update deferral and cleanup
+## Alpha.43 update deferral and cleanup
 
 - With automatic updates on, make a newer release available while Windows is
   viewing, controlling and sending a large folder. Nothing restarts; Windows
