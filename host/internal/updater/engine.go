@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type Engine struct {
@@ -540,7 +541,7 @@ func (e *Engine) Apply(ctx context.Context, dir, install, confirmation string, r
 	if err = writeJSON(journal, tx); err != nil {
 		return "", err
 	}
-	if err = Swap(install, next, backup, os.Rename); err != nil {
+	if err = Swap(install, next, backup, retryRename); err != nil {
 		tx.State = "failed-recovery-needed"
 		if e.installIdentity(install) == nil {
 			tx.State = "failed-restored"
@@ -669,7 +670,7 @@ func (e *Engine) Rollback(ctx context.Context, journal, install, confirmation st
 		err = os.Rename(next, install)
 	} else if err == nil {
 		rejected := filepath.Join(filepath.Dir(install), ".MAC-DOW-reverted-"+filepath.Base(candidate))
-		err = Swap(install, next, rejected, os.Rename)
+		err = Swap(install, next, rejected, retryRename)
 	}
 	if err != nil {
 		return err
@@ -686,4 +687,17 @@ func (e *Engine) Rollback(ctx context.Context, journal, install, confirmation st
 		return launch(install, e.OS)
 	}
 	return nil
+}
+
+// retryRename tolerates brief locks on a freshly written file, such as an
+// antivirus scan of a new executable, before a swap is declared failed.
+func retryRename(from, to string) error {
+	var err error
+	for i := 0; i < 10; i++ {
+		if err = os.Rename(from, to); err == nil || os.IsNotExist(err) {
+			return err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return err
 }

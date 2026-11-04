@@ -128,6 +128,8 @@ internal sealed partial class MainWindow : Window
     }
     // On the MacBook tab, Connection opens over the Mac view instead of leaving it.
     Window? connectionWindow;
+    // Another launch of mac-lan was started while this copy runs (possibly hidden).
+    internal void ActivateFromSecondLaunch(){if(!closing&&!quitting)ShowConnection();}
     void ShowConnection()
     {
         if(!remote||appWindow!=null){ShowSetup();return;}

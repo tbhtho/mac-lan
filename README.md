@@ -35,6 +35,8 @@ Alpha.36 also adds video recovery requests after decoder stalls, bounded pending
 
 Alpha.40: plain Ctrl+Space sends Mac Control+Space for shortcuts such as FX Console, while Ctrl+C/V retain their Command mapping. Forwarded scrolling is marked as mouse-wheel input instead of a continuous trackpad gesture. This does not register a hardware mouse with macOS; After Effects zoom behavior still depends on its preferences. Native Mac compilation and After Effects behavior remain unverified.
 
+Alpha.42: a failed automatic update reopens mac-lan; **Restore previous version** on Windows holds that update until **Check now**; the Mac frees a session from a sleeping PC within about a minute, and Windows ends a stream after 8 seconds of Mac silence; short Wi-Fi stalls no longer end streams; Macs on two networks stay discoverable; a second Windows launch opens the running copy. See [release notes](docs/release-notes-alpha42.md). These changes need two-computer testing.
+
 ## Updates
 
 Alpha.38 supplies native click counts for remote double/triple clicks, described in

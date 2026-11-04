@@ -517,6 +517,9 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     }
     @objc func toggleAutomaticUpdates() {updater.toggle()}
 }
+// Writing to the host after it exits (Stop Sharing racing a crash) must surface as a
+// caught write error in send(), not a SIGPIPE that kills the menu-bar app.
+signal(SIGPIPE, SIG_IGN)
 let application = NSApplication.shared
 let delegate = HostApp()
 application.delegate = delegate

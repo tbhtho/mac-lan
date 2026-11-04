@@ -125,6 +125,10 @@ func Run(args []string, out io.Writer) int {
 			var j string
 			j, err = e.Apply(ctx, *stage, *install, *confirm, *relaunch)
 			result = Result{OK: err == nil, Status: "applied", Journal: j, Message: "Update applied; settings preserved and backup retained."}
+			if err != nil && *relaunch && reopenAfterFailure(e, *install) {
+				result = Result{Status: "failed-relaunched", Journal: j, Message: "Update did not finish (" + err.Error() + "); reopened the installed version."}
+				return 1
+			}
 		}
 	case "rollback-preflight":
 		var s Stage
@@ -140,6 +144,10 @@ func Run(args []string, out io.Writer) int {
 		if err = WaitParent(*pid); err == nil {
 			err = e.Rollback(ctx, *journal, *install, *confirm, *relaunch)
 			result = Result{OK: err == nil, Status: "rolled-back", Journal: *journal, Message: "Previous signed release reinstalled; external settings preserved."}
+			if err != nil && *relaunch && reopenAfterFailure(e, *install) {
+				result = Result{Status: "failed-relaunched", Journal: *journal, Message: "Restore did not finish (" + err.Error() + "); reopened the installed version."}
+				return 1
+			}
 		}
 	default:
 		err = errors.New("unknown updater command")
@@ -267,4 +275,15 @@ func Console(in io.Reader, out io.Writer) int {
 		}
 		cancel()
 	}
+}
+
+// reopenAfterFailure restarts the still-installed (or restored) release after a
+// failed apply or rollback. The parent app has already exited, so without this
+// a transient feed, scan or rename failure would leave no mac-lan running. Only
+// an install that passes the same identity check used before swapping is reopened.
+func reopenAfterFailure(e *Engine, install string) bool {
+	if _, err := os.Lstat(install); err != nil || e.installIdentity(install) != nil {
+		return false
+	}
+	return launch(install, e.OS) == nil
 }
