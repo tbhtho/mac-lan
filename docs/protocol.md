@@ -52,3 +52,25 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   Web Audio about 50 ms ahead.
 - Windows clipboard access runs on a short-lived STA thread with a 3-second
   limit, so a slow clipboard owner cannot stall the UI thread and its lease.
+
+## Alpha.43 additions
+
+- After authentication the host sends WebSocket pings every 10 seconds and
+  closes a connection that has answered none for 75 seconds (longer than the
+  45-second viewing prompt, during which the connection is not read).
+- A catalog sent to a peer approved in this sharing session may carry
+  `"resumeToken"`: 64 lowercase hex characters from `crypto/rand`, bound to the
+  peer's IP address, valid for 30 minutes and only for this host process (its
+  certificate changes on the next launch). Windows keeps it in memory only.
+- `{"type":"resume","token":...}` is accepted as the first message in place of
+  `pair`. The host compares it in constant time, requires the same peer address
+  and an existing approval, and consumes it; the resumed catalog carries a new
+  token. No pairing prompt is shown, and viewing stays approved as before.
+  Older hosts never send a token, so Windows falls back to guided pairing.
+- When the session slot is held by a connection from the same peer address,
+  a new connection closes it (waiting up to 3 seconds) instead of receiving
+  409. Other peers still receive 409.
+- Windows resumes after network drops, a silent Mac, closing App Priority, or
+  switching between the desktop and App Priority, with backoff of 0.5, 1, 2,
+  4, 8 and 15 seconds. A user disconnect, quitting, or a second Mac capture
+  error within a minute does not resume.

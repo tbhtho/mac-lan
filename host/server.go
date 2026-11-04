@@ -193,12 +193,17 @@ type server struct {
 	connectionMu sync.Mutex
 	active       *websocket.Conn
 	activeDone   chan struct{}
-	stopped      bool
-	updating     bool
-	stream       func(func([]byte), func(string), <-chan input) error
-	transfers    *transferReceiver
-	clipboard    *clipboard
-	videoError   string
+	activePeer   string
+	// In-memory reconnect credentials per approved peer, valid only while this
+	// sharing process runs. They let the same Windows PC return after a drop
+	// without a new physical approval, within the scope the user already granted.
+	resumes    map[string]resumeCredential
+	stopped    bool
+	updating   bool
+	stream     func(func([]byte), func(string), <-chan input) error
+	transfers  *transferReceiver
+	clipboard  *clipboard
+	videoError string
 	// selected is only accessed while slot is held.
 	selected start
 }
@@ -225,13 +230,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "browser origins are not allowed", 403)
 		return
 	}
-	select {
-	case s.slot <- struct{}{}:
-		defer func() { <-s.slot }()
-	default:
+	if !s.acquireSlot(peer) {
 		http.Error(w, "one controller at a time", 409)
 		return
 	}
+	defer func() { <-s.slot }()
 	up := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" }}
 	c, err := up.Upgrade(w, r, nil)
 	if err != nil {
@@ -246,12 +249,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	doneConnection := make(chan struct{})
 	s.active = c
 	s.activeDone = doneConnection
+	s.activePeer = peer
 	s.connectionMu.Unlock()
 	defer func() {
 		c.Close()
 		s.connectionMu.Lock()
 		s.active = nil
 		s.activeDone = nil
+		s.activePeer = ""
 		close(doneConnection)
 		s.connectionMu.Unlock()
 	}()
@@ -264,6 +269,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authenticated := false
 	if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 {
 		authenticated = subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1
+	} else if auth.Type == "resume" && len(auth.Token) == 64 {
+		authenticated = s.redeemResume(peer, auth.Token, time.Now())
 	} else if auth.Type == "pair" && s.pair != nil && validPairNumber(auth.Code) && s.prompts.allow(time.Now()) {
 		authenticated = s.pair(peer, auth.Code)
 		if authenticated {
@@ -298,6 +305,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		windows = []window{}
 	}
 	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows, "keyframes": true}
+	if s.viewApproved(peer) {
+		if resume, er := s.issueResume(peer, time.Now()); er == nil {
+			catalog["resumeToken"] = resume
+		}
+	}
 	if transferToken != "" {
 		catalog["transferToken"] = transferToken
 	}
@@ -584,4 +596,73 @@ func keepAlive(c *websocket.Conn, every, timeout time.Duration) func() {
 	}()
 	var once sync.Once
 	return func() { once.Do(func() { close(quit) }) }
+}
+
+const resumeLifetime = 30 * time.Minute
+
+type resumeCredential struct {
+	token   string
+	expires time.Time
+}
+
+// issueResume mints a fresh single-use reconnect token for an approved peer.
+func (s *server) issueResume(peer string, now time.Time) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(b)
+	s.approvedMu.Lock()
+	defer s.approvedMu.Unlock()
+	if s.resumes == nil {
+		s.resumes = map[string]resumeCredential{}
+	}
+	s.resumes[peer] = resumeCredential{token, now.Add(resumeLifetime)}
+	return token, nil
+}
+
+// redeemResume accepts a token only from the peer it was issued to, before it
+// expires, and only once; the catalog of the resumed session carries a new one.
+func (s *server) redeemResume(peer, token string, now time.Time) bool {
+	s.approvedMu.Lock()
+	defer s.approvedMu.Unlock()
+	c, ok := s.resumes[peer]
+	if !ok || !s.approved[peer] || now.After(c.expires) {
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(c.token), []byte(token)) != 1 {
+		return false
+	}
+	delete(s.resumes, peer)
+	return true
+}
+
+// acquireSlot takes the single session slot. When the same PC reconnects while
+// its previous connection still holds the slot (a Wi-Fi drop or sleep the Mac
+// has not detected yet), that stale connection is closed instead of refusing
+// the reconnect for up to a minute. A different peer is still refused.
+func (s *server) acquireSlot(peer string) bool {
+	select {
+	case s.slot <- struct{}{}:
+		return true
+	default:
+	}
+	s.connectionMu.Lock()
+	c, done, same := s.active, s.activeDone, s.activePeer == peer
+	s.connectionMu.Unlock()
+	if c == nil || !same || done == nil {
+		return false
+	}
+	_ = c.Close()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		return false
+	}
+	select {
+	case s.slot <- struct{}{}:
+		return true
+	case <-time.After(time.Second):
+		return false
+	}
 }

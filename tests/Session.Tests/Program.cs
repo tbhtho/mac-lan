@@ -20,6 +20,25 @@ void Check(bool condition,string message){if(!condition)throw new Exception(mess
 string diagnosticRoot=Path.Combine(Path.GetTempPath(),"mac-lan-session-test-"+Guid.NewGuid().ToString("N"));
 await using var testDiagnostics=new DiagnosticLog(diagnosticRoot,"synthetic-test" );
 
+foreach(string offered in new[]{new string('a',64),"not-a-token"})
+await using(var peer=new LocalPeer())
+await using(var session=new Session(testDiagnostics))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,resumeToken=offered,windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    if(offered.Length==64)Check(session.ResumeToken==offered,"the Mac's reconnect token is kept in memory for a later resume");
+    else Check(session.ResumeToken==null,"a malformed reconnect token is ignored");
+}
+await using(var unused=new Session(testDiagnostics))
+{
+    var mac=new DiscoveredHost("Mac","192.168.1.7",4433,new string('b',64));
+    bool rejected=false;try{await unused.ConnectResume(mac,"short");}catch(ArgumentException){rejected=true;}
+    Check(rejected,"a resume attempt requires a well-formed token");
+}
+
 foreach(bool supportsKeyframes in new[]{true,false})
 await using(var peer=new LocalPeer())
 await using(var session=new Session(testDiagnostics))
