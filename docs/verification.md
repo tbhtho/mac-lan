@@ -1,5 +1,37 @@
 # Verification record
 
+## Alpha.43 - reconnect without re-approval, update deferral and keyboard fixes
+
+[Release v0.1.0-alpha.43](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.43)
+binds source `c1a46a991603de7fa54a23cdbf02340f7774a5a9`; signed-feed commit
+`4d222bf`. Changes are listed in the [release notes](release-notes-alpha43.md)
+and [protocol additions](protocol.md#alpha43-additions).
+
+The headless suite passed: 13 diagnostic, 295 core (scan-code mapping, AltGr,
+lock-screen and editing-key checks), 24 desktop workspace, 40 video queue,
+57 session (resume token checks), 38 updater workflow (deferral checks),
+38 reverse transfer and 46 transfer checks, presentation and viewer checks,
+Go tests including resume-token, slot takeover, resumable download and
+cleanup tests, Go vet, and the Windows Release build with zero
+warnings/errors. The same two link-creation checks skipped. The packaged
+Windows EXE passed standalone diagnostics without UI, capture or input hooks.
+An independent review of all changes since alpha.42 found no Swift compile
+problems; its reconnect and cleanup findings were fixed before release. The
+Swift changes were not compiled locally.
+
+The publisher's final feed push succeeded but its stderr progress output was
+reported as an error; the release and feed commit were confirmed on GitHub.
+All eight assets were downloaded anonymously and matched local files and the
+published checksum list. The canonical Mac app archive and legacy feed alias
+are identical. Downloaded Windows and Mac packages passed identity,
+provenance and credential checks. The anonymous public feed matched the
+committed feed and passed signature/binding verification.
+
+No installed or running app was replaced. Reconnecting, the keyboard hook
+thread, non-US layouts (including possible ISO key swapping on ISO Macs),
+update deferral and native Mac compilation still need the user's
+two-computer checks.
+
 ## Alpha.42 - update recovery, dead-connection detection and discovery fixes
 
 [Release v0.1.0-alpha.42](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.42)
