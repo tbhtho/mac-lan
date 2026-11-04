@@ -331,7 +331,7 @@ Hardware H.264 uses ScreenCaptureKit and VideoToolbox on the Mac. Windows WebCod
 
 App Priority captures one selected window, not all windows belonging to an app. Conservative scope checks can pause input; a closed, minimized, or resized target stops capture without falling back to the desktop. Input leases, EOF handling, and the supervisor recover from normal disconnects and failures; a simultaneous hard kill of the entire process tree or OS failure cannot guarantee synthetic-key release.
 
-Transfer staging uses bounded buffers and separate HTTPS, but shares LAN bandwidth with video. Windows needs temporary space for a folder ZIP, and the Mac needs staging and extraction space. See the full [transfer contract](file-transfer.md) for limits and destination rules. Mac-to-Windows selected-file receiving is described in the transfer contract. IME, multi-touch, stylus, and non-US physical-layout support remain unavailable.
+Transfer staging uses bounded buffers and separate HTTPS, but shares LAN bandwidth with video. Windows needs temporary space for a folder ZIP, and the Mac needs staging and extraction space. See the full [transfer contract](file-transfer.md) for limits and destination rules. Mac-to-Windows selected-file receiving is described in the transfer contract. IME, multi-touch, and stylus support remain unavailable. Non-US layouts are sent by physical position but remain unverified on hardware.
 
 [Protocol](protocol.md) · [Architecture](design.md) · [Hardware checklist](manual-validation.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md)
 
