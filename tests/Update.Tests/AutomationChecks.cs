@@ -47,6 +47,26 @@ internal static partial class Program
         string[]? manualArguments=null;
         var manual=new AutomaticUpdate(_=>Task.FromResult(Ready()),()=>Task.CompletedTask,_=>{},args=>manualArguments=args,()=>{});
         Check(await manual.Apply(Ready(),"installed.exe",123,()=>true,relaunch:false)&&!manualArguments!.Contains("--relaunch"),"Manual installation preserves the choice not to reopen the app");
+        bool active=true;long clock=1_000_000;int deferredStarts=0;
+        var deferring=new AutomaticUpdate(_=>Task.FromResult(Ready()),()=>throw new Exception("Deferred update cancelled transfers"),_=>{},_=>deferredStarts++,()=>{},()=>active,()=>clock);
+        Check(!await deferring.Apply(Ready(),"installed.exe",123,()=>true)&&deferring.Deferred&&deferredStarts==0,"An automatic update waits while a session is streaming, controlling or transferring");
+        active=false;clock+=59_000;
+        Check(!await deferring.Apply(Ready(),"installed.exe",123,()=>true)&&deferring.Deferred&&deferredStarts==0,"An automatic update waits for the idle grace period after disconnecting");
+        deferring.Observe();active=true;deferring.Observe();active=false;clock+=30_000;
+        Check(!await deferring.Apply(Ready(),"installed.exe",123,()=>true)&&deferredStarts==0,"A short session observed between checks restarts the idle grace period");
+        clock+=30_000;
+        var idleCleanup=new AutomaticUpdate(_=>Task.FromResult(Ready()),()=>Task.CompletedTask,_=>{},_=>deferredStarts++,()=>{},()=>active,()=>clock);
+        Check(await idleCleanup.Apply(Ready(),"installed.exe",123,()=>true)&&!idleCleanup.Deferred&&deferredStarts==1,"An automatic update installs once the app has had no session");
+        var idleAfterSession=new AutomaticUpdate(_=>Task.FromResult(Ready()),()=>Task.CompletedTask,_=>{},_=>deferredStarts++,()=>{},()=>active,()=>clock);
+        active=true;idleAfterSession.Observe();active=false;clock+=(long)AutomaticUpdate.IdleGrace.TotalMilliseconds;
+        Check(await idleAfterSession.Apply(Ready(),"installed.exe",123,()=>true)&&deferredStarts==2,"An automatic update installs after the session has been idle for the grace period");
+        active=true;
+        var startedDuringPreflight=new AutomaticUpdate(_=>{active=true;return Task.FromResult(Ready());},()=>throw new Exception("Session started during preflight was interrupted"),_=>{},_=>throw new Exception("Worker started"),()=>{},()=>active,()=>clock);
+        active=false;
+        Check(!await startedDuringPreflight.Apply(Ready(),"installed.exe",123,()=>true)&&startedDuringPreflight.Deferred,"A session that starts during fresh verification defers the automatic install");
+        active=true;int manualStarts=0;
+        var manualWhileActive=new AutomaticUpdate(_=>Task.FromResult(Ready()),()=>Task.CompletedTask,_=>{},_=>manualStarts++,()=>{},()=>active,()=>clock);
+        Check(await manualWhileActive.Apply(Ready(),"installed.exe",123,()=>true,automatic:false)&&manualStarts==1,"Restart to update installs immediately even during a session");
         foreach(var (seconds,delay) in new[]{(0,5),(29,5),(30,30),(3600,30)})
             Check(AutomaticUpdate.CheckInterval(TimeSpan.FromSeconds(seconds))==TimeSpan.FromSeconds(delay),"Polling uses launch warmup then steady cadence at uptime "+seconds);
     }

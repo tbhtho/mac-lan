@@ -75,7 +75,7 @@ internal sealed partial class MainWindow : Window
     {
         Title="mac-lan - Connect your Mac";WindowStyle=WindowStyle.SingleBorderWindow;ResizeMode=ResizeMode.CanResize;Topmost=false;ShowInTaskbar=true;MinWidth=680;MinHeight=540;Width=840;Height=720;
         Glass.Apply(this);Content=root;
-        automaticUpdater=new(UpdateProcess.Call,PrepareUpdateRestart,UpdateProcess.RememberApply,UpdateProcess.StartDetached,()=>{Disconnect();Quit();});
+        automaticUpdater=new(UpdateProcess.Call,PrepareUpdateRestart,UpdateProcess.RememberApply,UpdateProcess.StartDetached,()=>{Disconnect();Quit();},UpdateSessionActive);
         updatesButton.Click+=(_,_)=>ShowUpdates();
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
@@ -533,21 +533,33 @@ internal sealed partial class MainWindow : Window
             if(quitting&&!closing)Close();
         }
     }
+    // Automatic updates wait while Windows is connecting, connected, controlling or transferring files.
+    bool UpdateSessionActive()=>connecting||openingFiles||session?.IsPaired==true||gate.CanRoute||filesWindow?.IsBusy==true;
     async Task CheckUpdates()
     {
+        automaticUpdater.Observe();
         if(checkingUpdates||closing||quitting||awaitingFileTransfer||automaticUpdater.Scheduled)return;
         if(showingUpdates){if(updatesDialog!=null)await updatesDialog.CheckAutomatically();return;}
-        var preferences=UpdatePreferences.Load();if(!preferences.Automatic)return;checkingUpdates=true;
+        var preferences=UpdatePreferences.Load();checkingUpdates=true;
         try
         {
+            await UpdateProcess.CleanupOnce();
+            if(!preferences.Automatic)return;
             var result=await UpdateProcess.DownloadAvailable(preferences,text=>updatesButton.ToolTip=text);
-            updatesButton.Content=UpdateDownload.Ready(result)?"Updating…":"Updates";
-            updatesButton.ToolTip=UpdateDownload.Ready(result)?"Installing the verified update and reopening mac-lan…":result.GetProperty("message").GetString();
-            await automaticUpdater.Apply(result,Payloads.Install,Environment.ProcessId,()=>
+            bool ready=UpdateDownload.Ready(result);
+            updatesButton.Content=ready?"Updating…":"Updates";
+            updatesButton.ToolTip=ready?"Installing the verified update and reopening mac-lan…":result.GetProperty("message").GetString();
+            bool installing=await automaticUpdater.Apply(result,Payloads.Install,Environment.ProcessId,()=>
             {
                 var latest=UpdatePreferences.Load();
                 return !closing&&!quitting&&!showingUpdates&&!awaitingFileTransfer&&latest.Automatic&&latest.Channel==preferences.Channel;
             });
+            if(ready&&!installing&&automaticUpdater.Deferred)
+            {
+                string tag=result.GetProperty("stage").GetProperty("plan").GetProperty("tag").GetString()??"";
+                updatesButton.Content="Update ready";
+                updatesButton.ToolTip="Update "+tag+" ready — installs when you disconnect. Open Updates to restart now.";
+            }
         }
         catch(Exception e){updatesButton.ToolTip="Update check unavailable: "+e.Message;}
         finally{checkingUpdates=false;}

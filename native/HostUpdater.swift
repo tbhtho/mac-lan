@@ -41,6 +41,8 @@ final class HostUpdater {
            let result=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] {
             lastMessage="Last update: "+(result["message"] as? String ?? "finished")
         }
+        // Drop update leftovers (old stages, backups, partial downloads) that rollback no longer needs.
+        run(["cleanup","--install",appBundleURL.path]) { _,_ in }
         scheduleNextCheck()
         if automatic { check(manual:false) }
     }
@@ -111,13 +113,20 @@ final class HostUpdater {
             if let fresh=verifiedUpdateStage(result) {
                 self.stage=fresh
                 self.app?.updateMenu.title="Restart to Update…"
-                self.lastMessage="A verified update is ready. Automatic updates install and reopen mac-lan, briefly disconnecting sharing."
+                if self.automatic && self.app?.sharingIdle() == false {
+                    // Never interrupt a viewer, controller or transfer. The next poll
+                    // installs once sharing has been idle for a minute.
+                    self.app?.updateMenu.title="Update Ready – Installs When Idle"
+                    self.lastMessage="A verified update is ready and installs automatically once Windows disconnects and sharing has been idle for a minute. Choose it to restart now."
+                } else {
+                    self.lastMessage="A verified update is ready. Automatic updates install and reopen mac-lan when sharing is idle."
+                }
             } else {
                 self.stage=nil
                 self.lastMessage=result?["message"] as? String ?? error ?? "Downloaded update could not be revalidated."
             }
             self.app?.updateMenu.toolTip=self.lastMessage
-            if self.stage?["canApply"] as? Bool == true && self.automatic {self.apply(manual:false)}
+            if self.stage?["canApply"] as? Bool == true && self.automatic && self.app?.sharingIdle() == true {self.apply(manual:false)}
             else if manual {self.present()}
         }
     }
@@ -135,7 +144,7 @@ final class HostUpdater {
         let bundle=appBundleURL.path
         run(["preflight","--stage",path,"--install",bundle]) { [weak self] result,error in
             guard let self=self else {return}
-            guard !app.state.quitting,manual || self.automatic else {self.busy=false;return}
+            guard !app.state.quitting,manual || (self.automatic && app.sharingIdle()) else {self.busy=false;return}
             guard verifiedUpdateStage(result,expectedTag:tag) != nil else {
                 self.busy=false;self.lastMessage=result?["message"] as? String ?? error ?? "Update could not be verified.";self.stage=nil
                 self.app?.updateMenu.toolTip=self.lastMessage;if manual {self.present()};return
