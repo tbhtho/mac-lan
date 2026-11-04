@@ -122,6 +122,9 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     var selectedAddress: String?
     var fingerprint = ""
     var updater: HostUpdater!
+    // Reported by the host: a connected Windows session or a file transfer.
+    var hostBusy = false
+    var lastBusy: TimeInterval = 0
     var updateMenu: NSMenuItem!
     var automaticUpdates: NSMenuItem!
 
@@ -385,6 +388,11 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
                 menuBar.button?.setAccessibilityLabel("mac-lan: ready, approval required")
             case "consent": presentConsent(object)
             case "state": if wantsSharing && !state.quitting { statusText = hostMessage(line) ?? "Connection changed." }
+            case "activity":
+                if let busy = object["busy"] as? Bool {
+                    if busy || hostBusy { lastBusy = ProcessInfo.processInfo.systemUptime }
+                    hostBusy = busy
+                }
             default: break
             }
         }
@@ -503,6 +511,8 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         if let message = hostMessage(errorBuffer) { lastHostError = message }
         errorBuffer.removeAll()
         state.receive(.stop); fingerprint = ""; identityText = ""
+        if hostBusy { lastBusy = ProcessInfo.processInfo.systemUptime }
+        hostBusy = false
         menuBar.button?.setAccessibilityLabel("mac-lan: not sharing")
         menuStop.isEnabled = false; menuStart.title = "Start Sharing"
         statusText = code == 0 ? "Not sharing. Start again when you want a new connection." : lastHostError ?? "Sharing stopped. Check permissions and the local network, then start again."
@@ -516,6 +526,12 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         if updater.stage?["canApply"] as? Bool == true {updater.present()} else {updater.check(manual:true)}
     }
     @objc func toggleAutomaticUpdates() {updater.toggle()}
+    // Automatic updates wait until Windows is not connected, no transfer or
+    // approval is pending, and that has held for the grace period.
+    func sharingIdle(grace:TimeInterval=60)->Bool {
+        if consent != nil || (process != nil && hostBusy) { return false }
+        return lastBusy == 0 || ProcessInfo.processInfo.systemUptime - lastBusy >= grace
+    }
 }
 // Writing to the host after it exits (Stop Sharing racing a crash) must surface as a
 // caught write error in send(), not a SIGPIPE that kills the menu-bar app.

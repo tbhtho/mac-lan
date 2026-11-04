@@ -277,6 +277,11 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 			case <-ctx.Done():
 			}
 		}()
+		// The menu-bar app defers automatic updates while this reports busy.
+		// Older menu apps ignore unknown message types.
+		go watchSharingActivity(ctx, s, nil, func(busy bool) {
+			broker.emit(map[string]any{"type": "activity", "busy": busy})
+		})
 	}
 	if !gui && !noUpdates {
 		startHostUpdates(ctx, cancel, s)

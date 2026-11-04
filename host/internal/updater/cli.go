@@ -61,7 +61,7 @@ func Run(args []string, out io.Writer) int {
 		}
 	}()
 	if len(args) == 0 {
-		result.Message = "Use info, check, stage, preflight, apply, rollback or console."
+		result.Message = "Use info, check, stage, preflight, apply, rollback, cleanup or console."
 		return 2
 	}
 	if args[0] == "info" {
@@ -81,6 +81,17 @@ func Run(args []string, out io.Writer) int {
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
 		result.Message = "Invalid updater arguments"
 		return 2
+	}
+	if args[0] == "cleanup" {
+		// Local only: no feed or network access is needed to drop leftovers.
+		local, err := LocalEngine()
+		if err != nil {
+			result.Message = err.Error()
+			return 1
+		}
+		removed := local.Cleanup(*install)
+		result = Result{OK: true, Status: "cleaned", Version: local.Current, Message: fmt.Sprintf("Removed %d old update item(s).", len(removed))}
+		return 0
 	}
 	var e *Engine
 	var err error

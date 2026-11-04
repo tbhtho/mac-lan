@@ -71,6 +71,15 @@ internal static class UpdateProcess
         }
         finally{downloads.Release();}
     }
+    static bool cleaned;
+    // Once per launch, drop update leftovers (old stages, backups next to mac-lan.exe,
+    // stale partial downloads) that rollback no longer needs. Failures are harmless.
+    internal static async Task CleanupOnce()
+    {
+        if(cleaned)return;cleaned=true;
+        try{await Call("cleanup","--install",Payloads.Install);}
+        catch(Exception e)when(e is IOException or InvalidOperationException or JsonException or System.ComponentModel.Win32Exception or OperationCanceledException){}
+    }
     internal static void StartDetached(string[] arguments)
     {
         string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"MAC-DOW","updates","runner-"+Guid.NewGuid().ToString("N"));
@@ -105,7 +114,7 @@ internal sealed class UpdateDialog : Window
         Owner=owner;Title="mac-lan Updates";Width=570;Height=510;MinWidth=470;MinHeight=420;WindowStartupLocation=WindowStartupLocation.CenterOwner;Glass.Apply(this);
         var content=new StackPanel{Margin=new Thickness(28)};Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
         content.Children.Add(new TextBlock{Text="Keep mac-lan up to date",FontSize=25,FontWeight=FontWeights.SemiBold});
-        content.Children.Add(new TextBlock{Text="Automatic updates check on launch, every 5 seconds for the first 30 seconds, then every 30 seconds. Verified updates install and reopen mac-lan automatically, briefly disconnecting sharing. Turn automatic updates off to restart manually.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,0)});
+        content.Children.Add(new TextBlock{Text="Automatic updates check on launch, every 5 seconds for the first 30 seconds, then every 30 seconds. Verified updates install and reopen mac-lan automatically once you have disconnected from the Mac and no file transfer has run for a minute. Turn automatic updates off to restart manually.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,10,0,0)});
         content.Children.Add(description);content.Children.Add(actions);
         apply.Style=(Style)FindResource("PrimaryButton");
         apply.Click+=async(_,_)=>await Run(Apply);actions.Children.Add(apply);
@@ -148,7 +157,7 @@ internal sealed class UpdateDialog : Window
         {
             var latest=UpdatePreferences.Load();return !dismissed&&latest.Automatic&&latest.Channel==preferences.Channel;
         }))return;
-        apply.IsEnabled=true;description.Text="Update "+tag+" is ready. Restart to install it and keep your settings.";
+        apply.IsEnabled=true;description.Text="Update "+tag+(automaticUpdater.Deferred?" is ready and installs automatically when you disconnect. Restart now to install it immediately and keep your settings.":" is ready. Restart to install it and keep your settings.");
     }
     async Task Apply()
     {
@@ -156,7 +165,7 @@ internal sealed class UpdateDialog : Window
         var result=await UpdateProcess.Call("preflight","--stage",stage,"--install",Payloads.Install);
         if(!UpdateDownload.Ready(result,tag)){Describe(result);apply.IsEnabled=false;return;}
         description.Text="Preparing to restart…";
-        await automaticUpdater.Apply(result,Payloads.Install,Environment.ProcessId,()=>!dismissed,relaunch.IsChecked==true);
+        await automaticUpdater.Apply(result,Payloads.Install,Environment.ProcessId,()=>!dismissed,relaunch.IsChecked==true,automatic:false);
     }
     async Task Rollback()
     {

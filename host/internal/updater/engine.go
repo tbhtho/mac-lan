@@ -130,8 +130,14 @@ func (e *Engine) Stage(ctx context.Context, channel string) (Stage, error) {
 	if err = os.MkdirAll(e.Root, 0700); err != nil {
 		return Stage{}, err
 	}
-	dir, err := os.MkdirTemp(e.Root, "stage-")
-	if err != nil {
+	// A completed earlier download of this exact asset is reused instead of
+	// downloading again; every check below still runs on it.
+	dir := e.reusableStage(p)
+	if dir == "" {
+		if dir, err = e.downloadStage(ctx, p); err != nil {
+			return Stage{}, err
+		}
+	} else if err = os.RemoveAll(filepath.Join(dir, "preview")); err != nil {
 		return Stage{}, err
 	}
 	s := Stage{Directory: dir, Plan: p}
@@ -141,21 +147,14 @@ func (e *Engine) Stage(ctx context.Context, channel string) (Stage, error) {
 			_ = os.RemoveAll(dir)
 		}
 	}()
-	partial := filepath.Join(dir, "download.partial")
-	if err = e.Source.Download(ctx, p, partial); err != nil {
-		return s, err
-	}
 	archive := filepath.Join(dir, p.Asset.Name)
-	f, err := os.Open(partial)
+	f, err := os.Open(archive)
 	if err != nil {
 		return s, err
 	}
 	err = CheckDigest(f, p.Asset.Size, p.Asset.Digest)
 	f.Close()
 	if err != nil {
-		return s, err
-	}
-	if err = os.Rename(partial, archive); err != nil {
 		return s, err
 	}
 	payload := filepath.Join(dir, "preview")
