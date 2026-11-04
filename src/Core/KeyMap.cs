@@ -12,9 +12,44 @@ public static class KeyMap
         [0x78]=101,[0x79]=109,[0x7A]=103,[0x7B]=111,[0x24]=115,[0x21]=116,[0x2E]=117,[0x23]=119,[0x22]=121,[0x25]=123,[0x27]=124,[0x28]=125,[0x26]=126,
         // Windows shortcuts keep working: Ctrl and left Alt are Command (Ctrl+V pastes, Alt+Tab
         // switches apps), right Alt is Option, and the Windows key held with another key is Control.
-        [0x5B]=59,[0x5C]=62,[0x2D]=114,[0x7C]=105,[0x7D]=107,[0x7E]=113,
+        [0x5B]=59,[0x5C]=62,[0x2D]=114,[0x7C]=105,[0x7D]=107,[0x7E]=113,[0x7F]=106,[0x80]=64,[0x81]=79,[0x82]=80,
         [0x60]=82,[0x61]=83,[0x62]=84,[0x63]=85,[0x64]=86,[0x65]=87,[0x66]=88,[0x67]=89,[0x68]=91,[0x69]=92,
         [0x6A]=67,[0x6B]=69,[0x6D]=78,[0x6E]=65,[0x6F]=75,[0x90]=71
     };
     public static int? MacCode(int windowsVirtualKey) => Codes.TryGetValue(windowsVirtualKey,out int code) ? code : null;
+
+    // Physical keys: PC set-1 scan codes (0x100 marks the extended E0 prefix, LLKHF_EXTENDED)
+    // to Mac virtual key codes. Mac key codes name positions on an ANSI keyboard, not
+    // characters, so sending positions lets the Mac's own input source choose the character.
+    static readonly Dictionary<int,int> Scans = new()
+    {
+        [0x01]=53,[0x02]=18,[0x03]=19,[0x04]=20,[0x05]=21,[0x06]=23,[0x07]=22,[0x08]=26,[0x09]=28,[0x0A]=25,[0x0B]=29,[0x0C]=27,[0x0D]=24,
+        [0x0E]=51,[0x0F]=48,[0x10]=12,[0x11]=13,[0x12]=14,[0x13]=15,[0x14]=17,[0x15]=16,[0x16]=32,[0x17]=34,[0x18]=31,[0x19]=35,[0x1A]=33,[0x1B]=30,
+        [0x1C]=36,[0x1E]=0,[0x1F]=1,[0x20]=2,[0x21]=3,[0x22]=5,[0x23]=4,[0x24]=38,[0x25]=40,[0x26]=37,[0x27]=41,[0x28]=39,[0x29]=50,
+        [0x2B]=42,[0x2C]=6,[0x2D]=7,[0x2E]=8,[0x2F]=9,[0x30]=11,[0x31]=45,[0x32]=46,[0x33]=43,[0x34]=47,[0x35]=44,
+        [0x37]=67,[0x39]=49,[0x3A]=57,
+        [0x3B]=122,[0x3C]=120,[0x3D]=99,[0x3E]=118,[0x3F]=96,[0x40]=97,[0x41]=98,[0x42]=100,[0x43]=101,[0x44]=109,[0x57]=103,[0x58]=111,
+        [0x64]=105,[0x65]=107,[0x66]=113,[0x67]=106,[0x68]=64,[0x69]=79,[0x6A]=80,[0x6B]=90,
+        // Numeric keypad with Num Lock on.
+        [0x47]=89,[0x48]=91,[0x49]=92,[0x4A]=78,[0x4B]=86,[0x4C]=87,[0x4D]=88,[0x4E]=69,[0x4F]=83,[0x50]=84,[0x51]=85,[0x52]=82,[0x53]=65,
+        [0x145]=71,[0x11C]=76,[0x135]=75,
+        // ISO key beside left Shift, and the JIS Yen and Ro keys.
+        [0x56]=10,[0x7D]=93,[0x73]=94,
+        // Extended navigation keys.
+        [0x147]=115,[0x148]=126,[0x149]=116,[0x14B]=123,[0x14D]=124,[0x14F]=119,[0x150]=125,[0x151]=121,[0x152]=114,[0x153]=117
+    };
+    public static int? MacCodeForScan(int scan,bool extended) =>
+        scan is > 0 and <= 0xFF && Scans.TryGetValue(scan|(extended?0x100:0),out int code) ? code : null;
+
+    // Character keys move between layouts (AZERTY swaps A and Q, QWERTZ swaps Y and Z), so they
+    // are matched by position. Modifiers, Space, editing keys and the numeric keypad keep their
+    // virtual keys: their meaning does not depend on the layout, and the keypad's depends on Num Lock.
+    public static bool IsLayoutKey(int scan,bool extended) =>
+        scan is > 0 and <= 0xFF && (extended ? scan==0x1C :
+            scan is >= 0x02 and <= 0x0D or >= 0x10 and <= 0x1B or >= 0x1E and <= 0x29 or >= 0x2B and <= 0x35 or 0x56 or 0x73 or 0x7D);
+
+    // The Mac key for one low-level Windows event: by physical position for character keys,
+    // otherwise by virtual key. VK_PACKET carries a Unicode character in its scan field, not a key.
+    public static int? MacCode(int windowsVirtualKey,int scan,bool extended) =>
+        windowsVirtualKey!=0xE7&&IsLayoutKey(scan,extended) ? MacCodeForScan(scan,extended) : MacCode(windowsVirtualKey);
 }

@@ -83,7 +83,7 @@ internal sealed partial class MainWindow : Window
         monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
         root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;desktop.Presented+=TryAutomaticControl;BuildSetup();
-        keyboard=new KeyboardHook(()=>gate.CanRoute&&OwnerIsForeground(),(code,down)=>session?.Send(new{type="key",code,down}),Escape);
+        keyboard=new KeyboardHook((code,down)=>session?.Send(new{type="key",code,down}),Escape);keyboard.InputLost+=()=>gate.Disarm("foreground-lost");
         gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
         Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
@@ -404,7 +404,7 @@ internal sealed partial class MainWindow : Window
         if(focusViewer)(appView??desktop).Focus();RefreshContext();
         if(!gate.Arm()){status.Text="Connect, wait for a fresh frame and focus the remote window first.";return;}
         if(ControlVideoBlockReason() is string blocked){gate.Disarm(blocked);status.Text="Waiting for fresh video; control remains off.";return;}
-        try{keyboard.Install();controlIssue=null;controlGeneration++;LogDiagnostic("control-armed","ok",UiHealth());SendLease();UpdateControl();}catch(Exception ex){LogDiagnostic("control-failed","keyboard-unavailable",error:ex);gate.Disarm("keyboard-unavailable");status.Text="Cannot acquire keyboard: "+ex.Message;}
+        try{keyboard.Install(new WindowInteropHelper(appWindow??this).Handle);controlIssue=null;controlGeneration++;LogDiagnostic("control-armed","ok",UiHealth());SendLease();UpdateControl();}catch(Exception ex){LogDiagnostic("control-failed","keyboard-unavailable",error:ex);gate.Disarm("keyboard-unavailable");status.Text="Cannot acquire keyboard: "+ex.Message;}
     }
     void RequestControl(){if(session?.IsReady!=true)return;ShowRemote();Dispatcher.BeginInvoke(()=>{(appWindow??this).Activate();Arm();},DispatcherPriority.Input);}
     void TryAutomaticControl()
