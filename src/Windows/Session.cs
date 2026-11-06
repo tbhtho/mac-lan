@@ -67,7 +67,7 @@ internal sealed class Session : IAsyncDisposable
     const int New=0,Authenticating=1,Paired=2,Starting=3,Ready=4,Stopped=5;
     int phase;
     int maxFPS=30;
-    string? remoteError;
+    string? remoteError,remoteCode;
     string? videoError;
     Uri? transferEndpoint;
     string? fingerprint;
@@ -99,6 +99,14 @@ internal sealed class Session : IAsyncDisposable
         if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _)||!IsHexToken(resumeToken))throw new ArgumentException("Invalid reconnect request.");
         return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="resume",token=resumeToken});
     }
+    // Signs in as a PC this Mac remembered from an earlier approval; no prompt on the Mac.
+    public Task ConnectTrusted(DiscoveredHost host,string device,string token)
+    {
+        if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _)||!TrustedMacs.Valid(host.Fingerprint,device,token))throw new ArgumentException("Invalid remembered Mac.");
+        return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="trusted",device,token});
+    }
+    /// <summary>Remembered-PC credential the Mac issued after a fresh approval.</summary>
+    public (string Device,string Token)? TrustedDevice {get;private set;}
     static bool IsHexToken(string? value)=>value is {Length:64}&&value.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f');
     /// <summary>Reconnect token from the Mac's catalog; kept in memory only.</summary>
     public string? ResumeToken {get;private set;}
@@ -108,7 +116,7 @@ internal sealed class Session : IAsyncDisposable
     {
         if(!DiscoveredHost.TryCreate(host.Name,host.Address,host.Port,host.Fingerprint,out _) ||
            pairNumber.Length!=6||pairNumber.Any(c=>c<'0'||c>'9'))throw new ArgumentException("Invalid guided pairing request.");
-        return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="pair",code=pairNumber});
+        return ConnectCore(host.Address,host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),host.Fingerprint,new{type="pair",code=pairNumber,name=Environment.MachineName});
     }
     async Task ConnectCore(string host,string port,string fingerprint,object authentication)
     {
@@ -244,6 +252,8 @@ internal sealed class Session : IAsyncDisposable
                                 }
                                 if(value.TryGetProperty("transferToken",out var transfer)&&transfer.ValueKind==JsonValueKind.String&&transfer.GetString() is string capability&&capability.Length==64&&capability.All(c=>c is >= '0' and <= '9' or >= 'a' and <= 'f'))
                                     transferTarget=new TransferTarget(transferEndpoint!,fingerprint!,capability,stop.Token);
+                                if(value.TryGetProperty("trustedDevice",out var trusted)&&trusted.ValueKind==JsonValueKind.Object&&trusted.TryGetProperty("id",out var deviceId)&&trusted.TryGetProperty("token",out var deviceToken)&&TrustedMacs.Valid(fingerprint,deviceId.GetString(),deviceToken.GetString()))
+                                    TrustedDevice=(deviceId.GetString()!,deviceToken.GetString()!);
                                 if(value.TryGetProperty("resumeToken",out var resume)&&resume.ValueKind==JsonValueKind.String&&IsHexToken(resume.GetString()))ResumeToken=resume.GetString();
                                 phase=Paired;
                             }
@@ -259,6 +269,7 @@ internal sealed class Session : IAsyncDisposable
                             {
                                 var text=error.GetString()?.Trim();
                                 if(!string.IsNullOrEmpty(text))remoteError=text[..Math.Min(text.Length,1024)];
+                                if(value.TryGetProperty("code",out var errorCode)&&errorCode.ValueKind==JsonValueKind.String&&errorCode.GetString()=="unknown-device")remoteCode="unknown-device";
                             }
                         }
                         if(t.GetString() is "catalog" or "ready" or "video" or "controlStatus" or "status" or "error")
@@ -271,7 +282,7 @@ internal sealed class Session : IAsyncDisposable
         catch(Exception ex)when(ex is WebSocketException or OperationCanceledException or JsonException or InvalidDataException){if(!stop.IsCancellationRequested)Abort("Connection stopped: "+ex.Message,ex is WebSocketException?"receive-failed":"receive-invalid",ex);}
     }
     public void Abort(string reason,string code="local-abort",Exception? error=null)
-    {lock(lifecycle){if(phase==Stopped)return;Log("session-ended",code,error:error);phase=Stopped;EndCode=remoteError!=null?"host-error":code;diagnosticTimer?.Dispose();if(remoteError!=null)reason="Mac stopped: "+remoteError;stop.Cancel();outgoing.Writer.TryComplete();socket.Abort();}Ended?.Invoke(reason);}
+    {lock(lifecycle){if(phase==Stopped)return;Log("session-ended",code,error:error);phase=Stopped;EndCode=remoteCode??(remoteError!=null?"host-error":code);diagnosticTimer?.Dispose();if(remoteError!=null)reason="Mac stopped: "+remoteError;stop.Cancel();outgoing.Writer.TryComplete();socket.Abort();}Ended?.Invoke(reason);}
     public async ValueTask DisposeAsync()
     {Abort("Disconnected; keys released by Mac watchdog.","disposed");try{await Task.WhenAll(reader??Task.CompletedTask,writer??Task.CompletedTask).ConfigureAwait(false);}catch(OperationCanceledException){}socket.Dispose();stop.Dispose();}
 }

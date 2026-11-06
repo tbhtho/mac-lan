@@ -63,7 +63,7 @@ func (s *server) sharingBusy() bool {
 	}
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
-	return s.active != nil
+	return s.streaming
 }
 
 // watchSharingActivity samples sharing state every few seconds until ctx ends.
@@ -105,7 +105,7 @@ func scheduleAutomaticUpdate(ctx context.Context, s *server, idle *sharingIdle, 
 	}
 	// Checked under connectionMu so no session can start between this check
 	// and the updating reservation below.
-	if idle != nil && !idle.observe(transferring || s.active != nil) {
+	if idle != nil && !idle.observe(transferring || s.streaming) {
 		s.connectionMu.Unlock()
 		return false, errUpdateDeferred
 	}

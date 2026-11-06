@@ -74,3 +74,34 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   switching between the desktop and App Priority, with backoff of 0.5, 1, 2,
   4, 8 and 15 seconds. A user disconnect, quitting, or a second Mac capture
   error within a minute does not resume.
+
+## Alpha.45 additions
+
+- The Mac keeps one TLS identity across launches in the per-user application
+  support folder (`MAC-DOW/identity.json`, owner-only, links refused). If it is
+  missing or damaged a new identity is created; remembered PCs then need one new
+  approval. If the folder is unavailable, a per-launch identity is used as before.
+- A `pair` message may carry `"name"` (the PC name, shown on the Mac; at most 64
+  printable characters kept). After the user approves a guided pairing, the
+  catalog carries `"trustedDevice": {"id": <32 hex>, "token": <64 hex>}`. The Mac
+  stores only the SHA-256 of the token (`MAC-DOW/trusted-pcs.json`, owner-only,
+  up to 16 PCs, least recently used dropped).
+- `{"type":"trusted","device":...,"token":...}` is accepted as the first message.
+  The host compares the hash in constant time, keeps the private-LAN peer check,
+  treats the PC as approved for viewing, and never issues another credential for
+  it. It is not bound to an address, so a PC on DHCP keeps working. It may also
+  replace the same address's stale connection, like `resume`. An unknown or wrong
+  credential receives `{"type":"error","code":"unknown-device"}` before the close.
+  Only clients that send a `name` with `pair` receive a credential.
+- Windows keeps the credential DPAPI-encrypted for the current user in
+  `%LOCALAPPDATA%\MAC-DOW\trusted-macs.json`, connects automatically when a
+  remembered fingerprint is discovered (not after a user Disconnect in the same
+  run, and waiting 2, 4, 8 ... up to 30 minutes after each time it gives up), and
+  forgets the entry only on `unknown-device`. **Forget Remembered PCs** on the
+  Mac revokes every saved PC, this run's approvals and reconnect tokens, and
+  disconnects the current PC; **Forget remembered Macs** on Windows removes its
+  saved entries.
+- Automatic updates on both sides now wait only while video or control runs,
+  during transfers, or while a connection attempt is in progress. An idle
+  remembered connection (files and clipboard) no longer holds them back; it
+  reconnects by itself afterwards.

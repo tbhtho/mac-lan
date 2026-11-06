@@ -158,6 +158,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menuStop.image = symbol("stop.circle")
         menu.addItem(withTitle:"Send File to Windows…",action:#selector(sendFileToWindows),keyEquivalent:"").image = symbol("doc.badge.arrow.up")
         menu.addItem(withTitle:"Cancel Outgoing File",action:#selector(cancelOutgoingFile),keyEquivalent:"")
+        menu.addItem(withTitle:"Forget Remembered PCs",action:#selector(forgetRememberedPCs),keyEquivalent:"")
         menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"").image = symbol("network")
         menu.addItem(.separator())
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
@@ -215,6 +216,10 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         }
     }
     @objc func cancelOutgoingFile() { send(["type":"cancel-file"]) }
+    @objc func forgetRememberedPCs() {
+        guard process != nil else { statusText = "Start sharing, then choose Forget Remembered PCs."; return }
+        send(["type":"forget-pcs"])
+    }
     @objc func reopen() {
         NSApp.activate(ignoringOtherApps:true)
         refreshPermissions()
@@ -409,7 +414,7 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         if kind == "pair" {
             title = "Connect Windows to this Mac?"
             code = object["code"] as? String ?? ""
-            detail = "Allow only if Windows shows the same number. Windows can then send files to Downloads/mac-lan and view this screen until sharing stops. Keyboard and mouse stay off until you click the Mac view on Windows."
+            detail = "Allow only if Windows shows the same number. This Mac then remembers the PC: it can send files to Downloads/mac-lan, share the clipboard, view this screen and reconnect later without asking again. Keyboard and mouse stay off until you click the Mac view on Windows. Remove it with Forget Remembered PCs in this menu."
         } else if kind == "stream" {
             title = "Let Windows view this screen?"
             code = nil

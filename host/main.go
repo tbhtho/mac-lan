@@ -154,16 +154,27 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 			diagnostics.Emit("mac", "permissions-ok", "ok", map[string]int{"screenPermission": 1})
 		}
 	}
-	cert, fp, err := identity()
+	// A stable identity and remembered PCs live in the per-user application support
+	// folder; if it is unavailable, sharing still works with a per-launch identity.
+	var trust *trustStore
+	cert, fp, err := tls.Certificate{}, "", errors.New("no private folder")
+	if root, er := os.UserConfigDir(); er == nil {
+		dir := filepath.Join(root, "MAC-DOW")
+		if cert, fp, err = persistentIdentity(dir); err == nil {
+			trust = loadTrustStore(dir)
+		}
+	}
 	if err != nil {
-		return err
+		if cert, fp, err = identity(); err != nil {
+			return err
+		}
 	}
 	secret := make([]byte, 32)
 	if _, err = rand.Read(secret); err != nil {
 		return err
 	}
 	token := hex.EncodeToString(secret)
-	s := &server{token: token, peerAllowed: privateIP, slot: make(chan struct{}, 1)}
+	s := &server{token: token, peerAllowed: privateIP, slot: make(chan struct{}, 1), trust: trust}
 	userHome, err := os.UserHomeDir()
 	if err != nil {
 		return errors.New("Cannot locate the Mac Downloads folder")
@@ -189,6 +200,18 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	var scanner *bufio.Scanner
 	if gui {
 		broker = newUIBroker(os.Stdin, os.Stdout, func(kind, path string, emit func(map[string]any)) {
+			if kind == "forget-pcs" {
+				message := "Remembered PCs are unavailable on this Mac."
+				if s.trust != nil {
+					if n, err := s.forgetRemembered(); err != nil {
+						message = "Could not update the remembered PC list. Try again."
+					} else {
+						message = fmt.Sprintf("Forgot %d remembered PC(s) and disconnected Windows. They must be approved on this Mac again.", n)
+					}
+				}
+				emit(map[string]any{"type": "state", "message": message})
+				return
+			}
 			s.transfers.outgoingCommand(kind, path, func(message string) {
 				emit(map[string]any{"type": "state", "message": message})
 			})
@@ -213,13 +236,13 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	}
 	if gui {
 		s.pair = func(peer, code string) bool {
-			return broker.ask("pair", map[string]any{"peer": peer, "code": code, "message": "Allowing lets this PC send files to Downloads/mac-lan and view this screen until sharing stops. Keyboard and mouse stay off until you click the Mac view on Windows."}, 45*time.Second)
+			return broker.ask("pair", map[string]any{"peer": peer, "code": code, "message": "Allowing remembers this PC: it can send files to Downloads/mac-lan, view this screen and reconnect later without asking again. Keyboard and mouse stay off until you click the Mac view on Windows. Use Forget Remembered PCs in the mac-lan menu to remove it."}, 45*time.Second)
 		}
 	} else {
 		s.pair = func(peer, code string) bool {
 			fmt.Printf("Windows pairing request: %s. Compare this number on Windows.\n", code)
 			if !terminalConsent {
-				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nAllowing lets this PC send files to Downloads/mac-lan and view this screen until sharing stops. Only allow the request you started.")
+				return nativeConsent("Pair with your Windows PC?\n\nCompare this number on Windows: " + code + "\n\nAllowing remembers this PC: it can send files to Downloads/mac-lan, view this screen and reconnect later without asking again. Only allow the request you started.")
 			}
 			fmt.Print("Type ALLOW to approve this pairing request: ")
 			return scanner.Scan() && scanner.Text() == "ALLOW"

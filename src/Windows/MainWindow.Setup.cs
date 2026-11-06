@@ -17,6 +17,8 @@ internal sealed partial class MainWindow
         pairButton=MakeButton("Connect",async()=>await ConnectNearby());pairButton.Style=(Style)FindResource("PrimaryButton");pairButton.IsEnabled=false;pairButton.MinWidth=144;setup.Children.Add(pairButton);
         setup.Children.Add(new TextBlock{Text="Macs on your network",FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,18,0,8)});
         nearby.Style=(Style)FindResource("Catalog");nearby.IsEnabled=false;setup.Children.Add(nearby);
+        var forget=MakeButton("Forget remembered Macs",ForgetRememberedMacs);forget.HorizontalAlignment=HorizontalAlignment.Left;forget.Margin=new Thickness(0,8,0,0);
+        forget.ToolTip="Approved Macs connect automatically. Forgetting them makes the next connection ask for approval on the Mac.";setup.Children.Add(forget);
         nearby.MouseDoubleClick+=async(_,e)=>{if(e.OriginalSource is DependencyObject d&&ItemsControl.ContainerFromElement(nearby,d) is ListBoxItem&&pairButton.IsEnabled)await ConnectNearby();};
         nearby.SelectionChanged+=(_,_)=>pairButton.IsEnabled=!paired&&!connecting&&nearby.SelectedItem is DiscoveredHost;
         pairingProgress.Text="Looking for your Mac on this network...";
@@ -40,7 +42,7 @@ internal sealed partial class MainWindow
         codec.Width=252;quality.Children.Add(qualityRow);
         quality.Children.Add(new TextBlock{Text="The desktop targets 60 fps with H.264 and a maximum width of 1920 pixels. The full desktop keeps its proportions, with black bars when needed. Actual frame rate depends on your Mac, PC and network. Compatible JPEG uses more network bandwidth.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,6,0,8)});
         streamSection.Children.Add(new Expander{Header="Streaming quality",Content=quality});
-        streamSection.Children.Add(MakeButton("Disconnect",()=>Disconnect()));setup.Children.Add(streamSection);
+        streamSection.Children.Add(MakeButton("Disconnect",()=>UserDisconnect()));setup.Children.Add(streamSection);
 
         var options=new StackPanel{Margin=new Thickness(0,8,0,8)};monitors.Width=double.NaN;monitors.DisplayMemberPath="DisplayName";Field(options,"Display for Windows / Mac tabs",monitors);
         options.Children.Add(new TextBlock{Text="The tab strip reserves its own space. App title bars stay below it.",Foreground=Muted,FontSize=12,Margin=new Thickness(0,8,0,10)});

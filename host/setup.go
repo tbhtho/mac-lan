@@ -117,7 +117,7 @@ func newUIBroker(in io.Reader, out io.Writer, command ...func(string, string, fu
 			if r.Type == "stop" {
 				return
 			}
-			if (r.Type == "send-file" || r.Type == "cancel-file") && len(command) > 0 {
+			if (r.Type == "send-file" || r.Type == "cancel-file" || r.Type == "forget-pcs") && len(command) > 0 {
 				command[0](r.Type, r.Path, b.emit)
 				continue
 			}
