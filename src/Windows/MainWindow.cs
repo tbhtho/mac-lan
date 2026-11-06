@@ -699,6 +699,8 @@ internal sealed class RemoteView : WebView2
         bridge.Reset();LastPresented=0;armed=false;frameWatchdog.Stop();VideoInvalidated?.Invoke();
         if(ready){CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="clear",epoch=bridge.Epoch}));PostConfiguration();}
     }
+    // Late callbacks (a session ending during shutdown) must not reach a disposed WebView.
+    protected override void Dispose(bool disposing){ready=false;frameWatchdog.Stop();base.Dispose(disposing);}
     public void SetArmed(bool value)
     {
         armed=value&&bridge.Ready&&LastPresented>0&&currentStream?.Invoke()==true;

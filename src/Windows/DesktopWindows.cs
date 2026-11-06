@@ -19,6 +19,7 @@ internal sealed class DesktopWindows:IDesktopWindows
     [DllImport("user32.dll")] static extern bool EnumWindows(WindowProc callback,nint data);
     [DllImport("user32.dll")] static extern bool IsWindow(nint window);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] static extern nint GetWindow(nint window,uint command);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(nint window,out uint process);
     [DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")] static extern nint GetWindowLongPtr(nint window,int index);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(nint window,StringBuilder name,int capacity);
@@ -40,7 +41,7 @@ internal sealed class DesktopWindows:IDesktopWindows
             GetWindowThreadProcessId(window,out uint process);
             if(process==0||process==(uint)Environment.ProcessId)return true;
             long style=GetWindowLongPtr(window,-16).ToInt64(),extended=GetWindowLongPtr(window,-20).ToInt64();
-            if((extended&0x80)!=0||((style&0x00C40000)==0&&(extended&0x40000)==0))return true;
+            if(!DesktopWindowRules.IsAppWindow(style,extended,owned:GetWindow(window,4)!=0))return true;
             var name=new StringBuilder(128);GetClassName(window,name,name.Capacity);
             if(name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "#32768" or "tooltips_class32")return true;
             if(DwmGetWindowAttribute(window,14,out int cloaked,sizeof(int))==0&&cloaked!=0)return true;

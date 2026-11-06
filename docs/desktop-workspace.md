@@ -23,6 +23,13 @@ without deliberately activating restored windows. A maximized window keeps its
 current display state. Snap groups and app-specific docking relationships are
 not recreated.
 
+From alpha.44, app windows follow the Alt+Tab rule: framed windows and unowned
+top-level windows move, including frameless clients such as game launchers that
+draw their own title bar. Tool windows, no-activate overlays, child-style windows
+and owned frameless popups stay. A moved app that puts itself back on the Mac
+display (for example by re-centering) is moved off again within about a second,
+and Windows still restores its original position.
+
 Already minimized apps stay untouched until the user restores them. If an app is
 minimized after mac-lan moved it, restoration waits until it is unminimized while
 mac-lan is still running. Shell/tool windows, other virtual desktops and mac-lan's

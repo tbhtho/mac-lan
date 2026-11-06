@@ -39,6 +39,8 @@ Alpha.42: a failed automatic update reopens mac-lan; **Restore previous version*
 
 Alpha.43: Windows reconnects to the same Mac by itself after a drop, without a new approval on the Mac, and the MacBook tab shows a Reconnecting or Disconnected card with **Reconnect** instead of a black screen. Opening or closing App Priority no longer needs re-pairing. Automatic updates wait until the connection is idle. Keyboard fixes cover the lock screen, non-US layouts by key position, AltGr and word-wise editing. See [release notes](docs/release-notes-alpha43.md). These changes need two-computer testing.
 
+Alpha.44: frameless Windows apps, such as game launchers, now move off the MacBook display too, and an app that moves itself back is moved off again, so it no longer sits behind the Mac picture and takes focus. A shutdown crash is also fixed. See [release notes](docs/release-notes-alpha44.md).
+
 ## Updates
 
 Alpha.38 supplies native click counts for remote double/triple clicks, described in
