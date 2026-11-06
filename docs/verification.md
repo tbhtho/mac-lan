@@ -1,5 +1,34 @@
 # Verification record
 
+## Alpha.45 - remembered PCs and Macs
+
+[Release v0.1.0-alpha.45](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.45)
+binds source `8e22ae803ac6212219a0c748291d135da212c915`; signed-feed commit
+`5fc9780`. See the [release notes](release-notes-alpha45.md) and
+[protocol additions](protocol.md#alpha45-additions).
+
+The headless suite passed: 71 session checks (DPAPI round trip, encrypted
+storage, damaged-file handling, credential capture, explicit refusal), Go tests
+for the trust store, persistent identity, pairing-then-remembered login without
+a prompt and the explicit `unknown-device` refusal, streaming-only update
+deferral, Go vet for Windows and darwin/arm64, and the Windows Release build with
+zero warnings/errors. The packaged Windows EXE passed standalone diagnostics.
+An independent security review found no way to skip the Mac prompt without a
+valid remembered secret; its findings (stale approval wording in the Mac dialog,
+updates blocked by idle connections, credentials forgotten on ordinary drops,
+crashes on a damaged Windows file, Forget leaving the live session, a trust-store
+rollback error, auto-connect during the identity dialog, unbounded retries) were
+fixed before release. The Swift changes (one menu item, dialog text) were not
+compiled locally.
+
+All eight assets were downloaded anonymously and matched local files and the
+published checksum list; the Mac app archive and legacy alias are identical;
+downloaded packages passed identity, provenance and credential checks; the
+anonymous feed matched the committed feed and passed signature verification.
+The publisher's final feed push succeeded despite reporting git's stderr output
+as an error. The saved Mac identity, automatic connection and the new menu item
+still need the user's two-computer checks.
+
 ## Alpha.44 - frameless Windows apps leave the MacBook display
 
 [Release v0.1.0-alpha.44](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.44)
