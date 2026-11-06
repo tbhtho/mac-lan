@@ -1,5 +1,36 @@
 # Verification record
 
+## Alpha.44 - frameless Windows apps leave the MacBook display
+
+[Release v0.1.0-alpha.44](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.44)
+binds source `56e65ca9489e3a33ca8017eb143f12e121a74222`; signed-feed commit
+`f34b488`. See the [release notes](release-notes-alpha44.md).
+
+Root cause came from the user's PC: a read-only listing of visible windows
+showed a frameless game client (style `0x14020000`, no caption or sizing
+frame) on the display covered by the Mac picture as the foreground window,
+while framed browser and chat windows had moved. The local diagnostic log
+showed repeated `window-deactivated` control releases on the MacBook tab.
+Handoff eligibility now follows the Alt+Tab rule, and a moved window that
+returns is moved off again. The same log showed an alpha.42 shutdown crash
+(`ObjectDisposedException` in the viewer), also fixed.
+
+The headless suite passed, including 33 desktop workspace checks (nine new,
+with the observed window styles), Go vet and the Windows Release build with
+zero warnings/errors; the same two link-creation checks skipped. The packaged
+Windows EXE passed standalone diagnostics. The first source push was refused
+because another GitHub CLI account was active; after switching back to the
+publishing account at the user's request, the release published, and the
+publisher's final feed push succeeded despite reporting git's stderr output
+as an error.
+
+All eight assets were downloaded anonymously and matched local files and the
+published checksum list; the Mac app archive and legacy alias are identical;
+downloaded packages passed identity, provenance and credential checks; the
+anonymous feed matched the committed feed and passed signature verification.
+No window was moved during development checks; the move still needs a check
+on the user's PC.
+
 ## Alpha.43 - reconnect without re-approval, update deferral and keyboard fixes
 
 [Release v0.1.0-alpha.43](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.43)
