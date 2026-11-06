@@ -30,6 +30,26 @@ DesktopWindow Window(int handle,string monitor,int x=-1800,int y=100,int width=8
     Check(original.All(w=>desktop.Current[w.Handle]==w),"restoration preserves normal bounds and minimized/maximized placement data");
 }
 {
+    // Styles observed on a real PC: a frameless game client (no caption or sizing frame)
+    // stayed behind the Mac picture and kept taking focus.
+    Check(DesktopWindowRules.IsAppWindow(0x14020000,0x00000000,owned:false),"a frameless, unowned app window such as a game launcher is moved off the Mac display");
+    Check(DesktopWindowRules.IsAppWindow(0x17CF0000,0x00200100,owned:false),"a normal framed browser window is moved");
+    Check(DesktopWindowRules.IsAppWindow(0x16CF0000,0x00000100,owned:true),"an owned dialog with a caption still moves with its app");
+    Check(!DesktopWindowRules.IsAppWindow(0x94000000,0x08080080,owned:false),"a tool-window overlay such as a GPU overlay is left alone");
+    Check(!DesktopWindowRules.IsAppWindow(0x94000000,0x08000000,owned:false),"a no-activate popup is left alone");
+    Check(!DesktopWindowRules.IsAppWindow(0x94000000,0x00000000,owned:true),"an owned frameless popup such as a menu or tooltip is left alone");
+    Check(!DesktopWindowRules.IsAppWindow(0x54000000,0x00000000,owned:false),"a child-style window is left alone");
+}
+{
+    var desktop=new SyntheticDesktop(Window(1,"mac"));var original=desktop.Current[1];var layout=new DesktopWorkspace(desktop);
+    layout.Activate("mac",monitors);
+    desktop.Current[1]=desktop.Current[1] with{MonitorId="mac",Bounds=new(-1500,200,800,600)};
+    layout.Activate("mac",monitors);
+    Check(desktop.Current[1].MonitorId=="pc","an app that moves itself back behind the Mac picture is moved off again");
+    layout.Restore();
+    Check(desktop.Current[1]==original,"restoring after a repeated move returns the original placement, not the re-entry position");
+}
+{
     var smaller=new MonitorArea("pc",0,40,1000,700,144,true);
     var desktop=new SyntheticDesktop(Window(1,"mac",-1800,100,800,600));var layout=new DesktopWorkspace(desktop);
     layout.Activate("mac",new[]{source,smaller});

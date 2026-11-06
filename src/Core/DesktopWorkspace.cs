@@ -9,6 +9,24 @@ public interface IDesktopWindows
     bool Move(DesktopWindow window,MonitorArea destination,WindowBounds bounds);
     bool Restore(DesktopWindow window);
 }
+public static class DesktopWindowRules
+{
+    const long Child=0x40000000,Caption=0x00C00000,ThickFrame=0x00040000;
+    const long ToolWindow=0x80,AppWindow=0x40000,NoActivate=0x08000000;
+    /// <summary>
+    /// Whether a visible top-level window is an app window that should leave the Mac display.
+    /// Framed windows (caption or sizing border) and explicit app windows qualify, as before.
+    /// Unowned windows qualify too, as in Alt+Tab, so frameless app windows such as game
+    /// launchers or custom-drawn clients are not left behind the Mac picture. Tool windows,
+    /// no-activate overlays, child-style windows and owned frameless popups do not.
+    /// </summary>
+    public static bool IsAppWindow(long style,long extended,bool owned)
+    {
+        if((extended&ToolWindow)!=0||(style&Child)!=0)return false;
+        if((extended&AppWindow)!=0||(style&(Caption|ThickFrame))!=0)return true;
+        return !owned&&(extended&NoActivate)==0;
+    }
+}
 public sealed class DesktopWorkspace(IDesktopWindows windows)
 {
     readonly Dictionary<nint,DesktopWindow> saved=new();
@@ -24,8 +42,12 @@ public sealed class DesktopWorkspace(IDesktopWindows windows)
             if(!windows.IsCurrent(entry.Value))saved.Remove(entry.Key);
         foreach(var window in windows.Capture())
         {
-            if(window.Minimized||window.MonitorId!=sourceId||saved.ContainsKey(window.Handle))continue;
-            if(windows.Move(window,target,MapBounds(window.Bounds,from,target)))saved.Add(window.Handle,window);
+            if(window.Minimized||window.MonitorId!=sourceId)continue;
+            // An app may move itself back (re-centering on the primary display, for example).
+            // Move it off again but keep the first snapshot, which holds its real position.
+            if(saved.TryGetValue(window.Handle,out var first)&&windows.IsCurrent(first))
+            {windows.Move(first with{Bounds=window.Bounds},target,MapBounds(window.Bounds,from,target));continue;}
+            if(windows.Move(window,target,MapBounds(window.Bounds,from,target)))saved[window.Handle]=window;
         }
     }
     public static WindowBounds MapBounds(WindowBounds bounds,MonitorArea from,MonitorArea target)
