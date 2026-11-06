@@ -66,6 +66,12 @@ internal sealed partial class MainWindow : Window
     uint? pendingAppWindow;
     int reconnectAttempt;
     long lastHostErrorResume,pairedAt;
+    // Macs that approved this PC before. A remembered Mac connects by itself when it
+    // appears on the network, unless the user disconnected it in this run.
+    readonly TrustedMacs trustedMacs=TrustedMacs.ForCurrentUser();
+    bool trustedAttempt,autoConnectSuppressed,confirmingIdentity;
+    long autoConnectAfter,autoConnectBackoff=120000;
+    TrustedMac? Remembered(DiscoveredHost? host)=>host==null?null:trustedMacs.Find(host.Fingerprint);
     string? lastEndReason;
     readonly DispatcherTimer reconnectTimer=new();
     static readonly TimeSpan[] ReconnectDelays=[TimeSpan.FromSeconds(0.5),TimeSpan.FromSeconds(1),TimeSpan.FromSeconds(2),TimeSpan.FromSeconds(4),TimeSpan.FromSeconds(8),TimeSpan.FromSeconds(15)];
@@ -77,7 +83,7 @@ internal sealed partial class MainWindow : Window
         Glass.Apply(this);Content=root;
         automaticUpdater=new(UpdateProcess.Call,PrepareUpdateRestart,UpdateProcess.RememberApply,UpdateProcess.StartDetached,()=>{Disconnect();Quit();},UpdateSessionActive);
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,Disconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,UserDisconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
         tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
         monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
@@ -224,6 +230,7 @@ internal sealed partial class MainWindow : Window
             string? previous=(nearby.SelectedItem as DiscoveredHost)?.Fingerprint;
             nearby.ItemsSource=found;nearby.SelectedItem=found.FirstOrDefault(h=>h.Fingerprint==previous)??(found.Count==1?found[0]:null);
             pairingProgress.Text=found.Count==0?(result.GetProperty("message").GetString()??"")+" This list refreshes automatically.":found.Count==1?"Found your Mac. Choose Connect.":"Choose your Mac, then Connect.";
+            if(!autoConnectSuppressed&&!confirmingIdentity&&!Reconnecting&&Environment.TickCount64>=autoConnectAfter&&found.FirstOrDefault(h=>Remembered(h)!=null) is DiscoveredHost known){nearby.SelectedItem=known;ConnectRemembered(known,false);}
             if(found.Count!=lastFound){lastFound=found.Count;Telemetry.Report(found.Count==0?"discovery-empty":"discovery-ready","ok",found.Count);}
         }
         catch(Exception e){Telemetry.Report("discovery-failed",e.GetType().Name);if(!paired&&!connecting)pairingProgress.Text="Could not search this network yet. Keep the Mac app open on the same network; mac-lan keeps looking.";}
@@ -234,9 +241,16 @@ internal sealed partial class MainWindow : Window
         if(connecting||paired)return;
         if(nearby.SelectedItem is not DiscoveredHost selected){pairingProgress.Text="Find and select your Mac first.";return;}
         string identity=Pairing.IdentityCode(selected.Fingerprint);
-        // The Mac ID is per Mac launch, so an identical fingerprint is the Mac already confirmed in this run.
+        // An identical fingerprint is the Mac whose ID the user already confirmed in this run.
+        if(Remembered(selected)!=null){autoConnectSuppressed=false;ConnectRemembered(selected,true);return;}
         bool known=lastHost?.Fingerprint==selected.Fingerprint;
-        if(!known&&!ConfirmDialog.Ask(this,"Is this your Mac?",identity,"Check that the mac-lan menu on your Mac shows this same Mac ID. The network name alone is not proof. Your Mac then asks once to allow the connection.","Continue"))return;
+        if(!known)
+        {
+            // Discovery keeps running behind the modal dialog; it must not auto-connect elsewhere meanwhile.
+            confirmingIdentity=true;
+            try{if(!ConfirmDialog.Ask(this,"Is this your Mac?",identity,"Check that the mac-lan menu on your Mac shows this same Mac ID. The network name alone is not proof. Your Mac then asks once to allow the connection, and remembers this PC afterwards.","Continue"))return;}
+            finally{confirmingIdentity=false;}
+        }
         connecting=true;Disconnect();lastHost=selected;resumeToken=null;
         pairButton.IsEnabled=false;pairButton.Content="Waiting for Mac...";nearby.IsEnabled=false;
         string number=System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000,1000000).ToString();
@@ -281,7 +295,7 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;pairedAt=Environment.TickCount64;resumeToken=s.ResumeToken;if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
+            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;pairedAt=Environment.TickCount64;resumeToken=s.ResumeToken;trustedAttempt=false;autoConnectBackoff=120000;if(s.TrustedDevice is var(device,secret)&&lastHost!=null){trustedMacs.Remember(new(lastHost.Name,lastHost.Fingerprint,device,secret));Telemetry.Report("mac-remembered");}if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
                 // A fresh pairing already approved viewing, so close the connection page and show the Mac.
                 if(fresh&&wasResume)Dispatcher.BeginInvoke(()=>{if(session==s&&paired)ResumeView();},DispatcherPriority.Background);
                 else if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired){connectionWindow?.Close();ShowRemote();}},DispatcherPriority.Background);
@@ -324,6 +338,21 @@ internal sealed partial class MainWindow : Window
     }
     // Network drops, a sleeping Mac, view switches and closing App Priority resume with the
     // Mac's reconnect token. A user disconnect, quitting, or a Mac without tokens does not.
+    // Connects to a Mac that remembered this PC, without the identity dialog or a Mac prompt.
+    void ConnectRemembered(DiscoveredHost host,bool show)
+    {
+        if(paired||connecting||Remembered(host)==null)return;
+        CancelReconnect();Disconnect();lastHost=host;resumeToken=null;resumeWantsView=show;
+        pairButton.IsEnabled=false;pairButton.Content="Connecting...";nearby.IsEnabled=false;
+        status.Text=pairingProgress.Text="Connecting to "+host.Name+"...";
+        _=TryResume();
+    }
+    void UserDisconnect(){autoConnectSuppressed=true;Disconnect();}
+    void ForgetRememberedMacs()
+    {
+        int count=trustedMacs.ForgetAll();
+        status.Text=pairingProgress.Text=count<0?"Could not update the remembered Mac list on this PC. Try again.":count==0?"No Macs are remembered on this PC.":$"Forgot {count} remembered Mac(s). The next connection asks for approval on the Mac.";
+    }
     void HandleEnded(Session s,string why)
     {
         string? code=s.EndCode;
@@ -334,8 +363,12 @@ internal sealed partial class MainWindow : Window
         // A resume attempt that reached the Mac but ended before a new catalog has spent
         // or lost its token; only an unreachable Mac keeps it for another try.
         if(resuming&&code!="connect-failed")resumeToken=null;
+        // Only the Mac's explicit refusal forgets a remembered Mac; a restart, update or
+        // dropped connection keeps the credential for the next attempt.
+        if(code=="unknown-device"&&lastHost!=null){trustedMacs.Forget(lastHost.Fingerprint);why="Your Mac no longer remembers this PC. Choose Reconnect and approve it on the Mac.";}
+        trustedAttempt=false;
         resuming=false;
-        bool resumable=resumeToken!=null&&lastHost!=null&&!closing&&!quitting&&code is not ("app-closed" or "disposed" or "user-disconnect");
+        bool resumable=(resumeToken!=null||Remembered(lastHost)!=null)&&lastHost!=null&&!closing&&!quitting&&code is not ("app-closed" or "disposed" or "user-disconnect");
         // A Mac capture error keeps the pairing (files, clipboard) but does not restart video by
         // itself, and a second one within a minute stops reconnecting so an error cannot loop.
         if(first&&resumable&&code=="host-error"){if(Environment.TickCount64-lastHostErrorResume<60000)resumable=false;else lastHostErrorResume=Environment.TickCount64;}
@@ -350,27 +383,30 @@ internal sealed partial class MainWindow : Window
             if(appWindow!=null){viewProgress.Text="Reconnecting to "+MacName+"…";viewProgress.Visibility=Visibility.Visible;}
             return;
         }
-        pendingAppWindow=null;resumeToken=null;
+        // Each time automatic connection gives up, wait longer (2, 4, 8 ... up to 30 minutes).
+        pendingAppWindow=null;resumeToken=null;autoConnectAfter=Environment.TickCount64+autoConnectBackoff;autoConnectBackoff=Math.Min(autoConnectBackoff*2,30*60*1000);
         status.Text=pairingProgress.Text=why;
         viewProgress.Text=why+" Open Connection to reconnect.";viewProgress.Visibility=Visibility.Visible;
         if(remote&&appWindow==null)ShowEnded(why);
     }
     async Task TryResume()
     {
-        if(closing||quitting||session?.IsPaired==true||lastHost==null||resumeToken==null){resuming=false;return;}
+        var remembered=Remembered(lastHost);
+        if(closing||quitting||session?.IsPaired==true||lastHost==null||resumeToken==null&&remembered==null){resuming=false;return;}
         // The Mac may have moved to another address on the same network; prefer the latest discovery result.
         var host=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??lastHost;
         if(session!=null){var old=session;session=null;_=old.DisposeAsync();}
         resuming=true;connecting=true;
         var s=CreateSession();Telemetry.Report("session-resume-start");
-        try{await s.ConnectResume(host,resumeToken);}
+        trustedAttempt=resumeToken==null;
+        try{if(resumeToken!=null)await s.ConnectResume(host,resumeToken);else await s.ConnectTrusted(host,remembered!.Device,remembered.Token);}
         catch(Exception e){s.Abort("Could not reach "+MacName+".","connect-failed",e);}
     }
     void CancelReconnect(){reconnectTimer.Stop();resuming=false;reconnectAttempt=0;pendingAppWindow=null;}
     void ManualReconnect()
     {
-        if(resumeToken!=null&&lastHost!=null){CancelReconnect();resumeWantsView=true;ShowReconnecting();_=TryResume();return;}
-        // After a Mac restart its ID changes; select it by name so pairing can start, with the identity check.
+        if((resumeToken!=null||Remembered(lastHost)!=null)&&lastHost!=null){CancelReconnect();autoConnectSuppressed=false;resumeWantsView=true;ShowReconnecting();_=TryResume();return;}
+        // If the Mac's ID changed (its saved identity was reset), select it by name so pairing can start, with the identity check.
         if(lastHost!=null)nearby.SelectedItem=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Name==lastHost.Name)??nearby.SelectedItem;
         ShowSetup();
         if(nearby.SelectedItem is DiscoveredHost)_=ConnectNearby();
@@ -540,7 +576,9 @@ internal sealed partial class MainWindow : Window
         }
     }
     // Automatic updates wait while Windows is connecting, connected, controlling or transferring files.
-    bool UpdateSessionActive()=>connecting||Reconnecting||openingFiles||session?.IsPaired==true||gate.CanRoute||filesWindow?.IsBusy==true;
+    // An idle connection (files and clipboard only) reconnects by itself after an update, so only
+    // viewing, control, transfers or an attempt in progress hold an automatic update back.
+    bool UpdateSessionActive()=>connecting||Reconnecting||openingFiles||session?.IsReady==true||session?.IsStarting==true||gate.CanRoute||filesWindow?.IsBusy==true;
     async Task CheckUpdates()
     {
         automaticUpdater.Observe();

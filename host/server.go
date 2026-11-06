@@ -194,10 +194,15 @@ type server struct {
 	active       *websocket.Conn
 	activeDone   chan struct{}
 	activePeer   string
+	// streaming is true while video or control runs; an idle remembered PC that
+	// stays connected for files and clipboard does not hold back updates.
+	streaming bool
 	// In-memory reconnect credentials per approved peer, valid only while this
 	// sharing process runs. They let the same Windows PC return after a drop
 	// without a new physical approval, within the scope the user already granted.
-	resumes    map[string]resumeCredential
+	resumes map[string]resumeCredential
+	// PCs approved on this Mac in earlier sessions (nil when unavailable).
+	trust      *trustStore
 	stopped    bool
 	updating   bool
 	stream     func(func([]byte), func(string), <-chan input) error
@@ -245,7 +250,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(4096)
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var auth struct{ Type, Token, Code string }
+	var auth struct{ Type, Token, Code, Device, Name string }
 	if c.ReadJSON(&auth) != nil {
 		c.Close()
 		if held {
@@ -253,7 +258,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	authenticated := false
+	authenticated, freshPairing := false, false
 	if !held {
 		// The same PC is replacing a connection the Mac still holds (a drop or sleep
 		// not yet detected). Only an instantly verifiable credential may close it;
@@ -262,6 +267,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			authenticated = s.takeOverSlot(peer)
 		} else if auth.Type == "auth" && len(auth.Token) == 64 && len(s.token) == 64 && subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1 {
 			authenticated = s.takeOverSlot(peer)
+		} else if auth.Type == "trusted" && s.trust != nil && s.trust.verify(auth.Device, auth.Token, time.Now()) {
+			authenticated = s.takeOverSlot(peer)
+			if authenticated {
+				s.approve(peer)
+			}
 		}
 		if !authenticated {
 			c.Close()
@@ -295,13 +305,23 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		authenticated = subtle.ConstantTimeCompare([]byte(auth.Token), []byte(s.token)) == 1
 	} else if auth.Type == "resume" && len(auth.Token) == 64 {
 		authenticated = s.redeemResume(peer, auth.Token, time.Now())
+	} else if auth.Type == "trusted" && s.trust != nil && s.trust.verify(auth.Device, auth.Token, time.Now()) {
+		// A PC the user approved on this Mac before; approval covers viewing as well.
+		authenticated = true
+		s.approve(peer)
 	} else if auth.Type == "pair" && s.pair != nil && validPairNumber(auth.Code) && s.prompts.allow(time.Now()) {
 		authenticated = s.pair(peer, auth.Code)
 		if authenticated {
 			s.approve(peer)
+			freshPairing = true
 		}
 	}
 	if !authenticated {
+		if auth.Type == "trusted" {
+			// Lets Windows forget a credential this Mac no longer knows, instead of
+			// guessing from an ordinary dropped connection.
+			_ = c.WriteJSON(map[string]string{"type": "error", "code": "unknown-device", "message": "This Mac no longer remembers this PC."})
+		}
 		diagnostics.Emit("mac", "pairing-denied", "not-approved", nil)
 		return
 	}
@@ -332,6 +352,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.viewApproved(peer) {
 		if resume, er := s.issueResume(peer, time.Now()); er == nil {
 			catalog["resumeToken"] = resume
+		}
+	}
+	// A PC the user just approved is remembered, so it can reconnect after either
+	// app restarts. Older Windows builds ignore this field.
+	if freshPairing && s.trust != nil && auth.Name != "" {
+		if id, secret, er := s.trust.remember(auth.Name, time.Now()); er == nil {
+			catalog["trustedDevice"] = map[string]string{"id": id, "token": secret}
 		}
 	}
 	if transferToken != "" {
@@ -549,7 +576,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stop()
 		}
 	}
+	s.connectionMu.Lock()
+	s.streaming = true
+	s.connectionMu.Unlock()
 	err = s.stream(send, report, events)
+	s.connectionMu.Lock()
+	s.streaming = false
+	s.connectionMu.Unlock()
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		// Do not enqueue the native failure and immediately close the socket:
 		// wait for the single writer to send it so Windows can show the reason.

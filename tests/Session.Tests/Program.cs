@@ -20,6 +20,57 @@ void Check(bool condition,string message){if(!condition)throw new Exception(mess
 string diagnosticRoot=Path.Combine(Path.GetTempPath(),"mac-lan-session-test-"+Guid.NewGuid().ToString("N"));
 await using var testDiagnostics=new DiagnosticLog(diagnosticRoot,"synthetic-test" );
 
+{
+    string folder=Path.Combine(Path.GetTempPath(),"mac-lan-trust-test-"+Guid.NewGuid().ToString("N"));
+    try
+    {
+        string file=Path.Combine(folder,"trusted-macs.json");
+        var store=new TrustedMacs(file,Dpapi.Protect,Dpapi.Unprotect);
+        var mac=new TrustedMac("Studio Mac",new string('c',64),new string('d',32),new string('e',64));
+        store.Remember(mac);
+        Check(store.Find(mac.Fingerprint)==mac,"a Mac that approved this PC is remembered with its credential");
+        Check(!File.ReadAllText(file).Contains(mac.Token),"the remembered Mac's secret is encrypted on disk with DPAPI");
+        Check(new TrustedMacs(file,Dpapi.Protect,Dpapi.Unprotect).Find(mac.Fingerprint)==mac,"a remembered Mac survives a Windows app restart");
+        store.Remember(mac with{Token=new string('f',64)});
+        Check(store.Load().Count==1&&store.Find(mac.Fingerprint)!.Token==new string('f',64),"re-approving the same Mac replaces its old credential");
+        var broken=new TrustedMacs(file,Dpapi.Protect,_=>throw new CryptographicFailure("other account"));
+        Check(broken.Find(mac.Fingerprint)==null,"a secret that cannot be decrypted for this account is ignored");
+        store.Remember(new TrustedMac("Other",new string('a',64),new string('b',32),new string('9',64)));
+        store.Forget(mac.Fingerprint);
+        Check(store.Find(mac.Fingerprint)==null&&store.Load().Count==1,"forgetting one Mac keeps the others");
+        Check(store.ForgetAll()==1&&store.Load().Count==0,"Forget remembered Macs removes every saved Mac");
+        store.Remember(mac with{Token="short"});
+        Check(store.Load().Count==0,"a malformed credential is never saved");
+        foreach(string damaged in new[]{"[null]","[{\"Name\":null,\"Fingerprint\":null,\"Device\":null,\"Secret\":null}]","{not json","[{\"Secret\":\"***\"}]"})
+        {
+            File.WriteAllText(file,damaged);
+            Check(store.Load().Count==0,"a damaged remembered-Mac file is ignored instead of stopping mac-lan: "+damaged[..Math.Min(damaged.Length,12)]);
+        }
+    }
+    finally{if(Directory.Exists(folder))Directory.Delete(folder,true);}
+}
+await using(var peer=new LocalPeer())
+await using(var session=new Session(testDiagnostics))
+{
+    var catalog=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Message+=m=>{if(m.GetProperty("type").GetString()=="catalog")catalog.TrySetResult();};
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="catalog",maxFps=60,trustedDevice=new{id=new string('1',32),token=new string('2',64)},windows=Array.Empty<object>()});
+    await catalog.Task.WaitAsync(TimeSpan.FromSeconds(3));
+    Check(session.TrustedDevice==(new string('1',32),new string('2',64)),"the remembered-PC credential from a fresh approval reaches Windows");
+}
+await using(var session=new Session(testDiagnostics))
+{
+    var peer=new LocalPeer();
+    var ended=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.Ended+=_=>ended.TrySetResult();
+    await peer.Connect(session);await peer.Next();
+    await peer.Send(new{type="error",code="unknown-device",message="This Mac no longer remembers this PC."});
+    await peer.DisposeAsync();
+    await ended.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    Check(session.EndCode=="unknown-device","only the Mac's explicit refusal marks a remembered credential as unknown");
+}
+
 foreach(string offered in new[]{new string('a',64),"not-a-token"})
 await using(var peer=new LocalPeer())
 await using(var session=new Session(testDiagnostics))

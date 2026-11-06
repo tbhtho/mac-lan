@@ -51,15 +51,15 @@ func fakeIdle(start time.Time) (*sharingIdle, *time.Time) {
 	return &sharingIdle{now: func() time.Time { return now }}, &now
 }
 
-func TestAutomaticUpdateDefersWhileWindowsIsConnected(t *testing.T) {
+func TestAutomaticUpdateDefersWhileWindowsIsStreaming(t *testing.T) {
 	idle, now := fakeIdle(time.Unix(1000, 0))
-	s := &server{active: &websocket.Conn{}}
-	accepted, err := scheduleAutomaticUpdate(context.Background(), s, idle, func() error { t.Error("worker while connected"); return nil })
+	s := &server{active: &websocket.Conn{}, streaming: true}
+	accepted, err := scheduleAutomaticUpdate(context.Background(), s, idle, func() error { t.Error("worker while streaming"); return nil })
 	if accepted || !errors.Is(err, errUpdateDeferred) || s.updating {
-		t.Fatal("connected session was interrupted", accepted, err)
+		t.Fatal("streaming session was interrupted", accepted, err)
 	}
-	// Disconnect, then still wait for the grace period.
-	s.active = nil
+	// Stop viewing (a remembered PC may stay connected for files), then still wait for the grace period.
+	s.streaming = false
 	*now = now.Add(automaticUpdateIdleGrace - time.Second)
 	if accepted, err = scheduleAutomaticUpdate(context.Background(), s, idle, func() error { t.Error("worker inside grace period"); return nil }); accepted || !errors.Is(err, errUpdateDeferred) {
 		t.Fatal("installed before the idle grace period", err)
