@@ -1158,3 +1158,33 @@ The existing manual Actions workflow remains unrun; no billing scope was added. 
 - Installed gh 2.88.0 is below the safe signature-verification prerequisite. A prior alpha.2 verification probe used it and returned no attestations. After finding GHSA-8xvp-7hj6-mcj9, no further signature commands used that version. User-managed CLI upgrade/security review is separate from this project; no credentials were rotated or changed.
 - Alpha.3 Mac Go host is cross-compiled for darwin/arm64, **unrun**. Swift capture source unchanged from alpha.2; packaged helper is reused byte-for-byte from the SHA-256 checked alpha.2 native archive, with provenance recorded inside the package. No alpha.3 native execution or end-to-end streaming validation is claimed.
 - Current releases lack signed GitHub provenance: secure automatic apply/rollback remain blocked. The implemented usable path is check + explicit authenticated staging + clear manual fallback.
+
+## Alpha.48 - reconnect after a Mac restart, remote commands
+
+[Release v0.1.0-alpha.48](https://github.com/tbhtho/mac-lan/releases/tag/v0.1.0-alpha.48)
+binds source `23f2cdc8e61889ee4bd4df60c4886d10846e4f1b`; signed-feed commit
+`e65ad51`. See the [release notes](release-notes-alpha48.md) and
+[remote commands](remote-commands.md).
+
+The headless suite passed on the release commit, with `TEMP` pointed at a
+writable folder. One earlier run of the Go host tests on that commit failed and
+was not captured; nine later runs of the host, remote and updater packages and a
+complete run of the suite passed, so its cause is unknown. New Go tests join both
+ends over a pinned TLS WebSocket on loopback and cover the opt-in switches,
+output and exit codes, approval and refusal on both ends, cancel and time limit,
+a dropped connection during a running command, file and folder transfer,
+refusal to overwrite, deployment, the loopback endpoint and the MCP protocol.
+The packaged Windows EXE passed standalone diagnostics and answered MCP
+`initialize` and `tools/call` over pipes. The Go race detector could not run
+(no C toolchain). No Swift source changed.
+
+All eight assets were downloaded anonymously and matched local files; the Mac
+app archive and legacy alias are identical; the packages passed identity,
+provenance and credential checks before publication; the anonymous feed matched
+the committed feed and passed signature verification. The publisher again
+reported git stderr output as an error after its final push succeeded.
+
+Not established: any remote command on a Mac (zsh execution, the approval
+dialog, stopping a process group), the Windows Terminal window and approval
+prompt on hardware, and the reconnect change against a restarting Mac. These
+need the two-computer checks.
