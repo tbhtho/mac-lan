@@ -1,8 +1,8 @@
 # Remote commands, terminal and MCP server
 
-Unreleased source work after alpha.47. It lets either computer run shell commands and copy
+First shipped in alpha.48. It lets either computer run shell commands and copy
 files on the other one, from mac-lan's own terminal or from an AI agent connected through an
-MCP server. Nothing here has run on a Mac yet; see [What is checked](#what-is-checked).
+MCP server. Nothing here had run on a Mac when it shipped; see [What is checked](#what-is-checked).
 
 ## Using it
 
