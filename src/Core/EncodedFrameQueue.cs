@@ -30,8 +30,8 @@ public sealed class EncodedFrameQueue
         lock(sync)
         {
             Expire(receivedMilliseconds);
-            if(!MediaPacket.TryRead(packet,out var media)||packet.Length>MaximumPacketBytes||packet.Length>maxBytes||media.Kind is <1 or >3){Reset();return;}
-            byte kind=media.Kind;
+            if(packet.Length<10||packet.Length>MaximumPacketBytes||packet.Length>maxBytes||packet[0] is <1 or >3){Reset();return;}
+            byte kind=packet[0];
             if(kind==1)
             {
                 Reset();jpeg=true;pending.Add(new(packet,receivedMilliseconds));bytes=packet.Length;return;
@@ -72,7 +72,7 @@ public sealed class EncodedFrameQueue
         {
             tailBytes+=pending[i].Packet.Length;
             if(pending.Count-i>maxFrames||tailBytes>maxBytes||nowMilliseconds-pending[i].Received>maxAgeMilliseconds)break;
-            if((pending[i].Packet[0]&0x7f) is not (1 or 2))continue;
+            if(pending[i].Packet[0] is not (1 or 2))continue;
             pending.RemoveRange(0,i);bytes=tailBytes;return;
         }
         Reset();

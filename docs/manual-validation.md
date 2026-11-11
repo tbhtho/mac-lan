@@ -114,23 +114,3 @@ After native Apple Silicon compilation succeeds and the user explicitly grants t
 - Quit both apps; confirm no listeners/children, hooks, autostart entries, credentials or persisted screen images remain.
 
 Do not treat CI compile/self-tests as this hardware validation.
-
-
-## Alpha.46 audio/video alignment
-
-- Update both computers to matching alpha.46 builds through the in-app updater.
-  Do not replace or restart the user's running editing session automatically.
-- In After Effects preview a clip with a visible flash and simultaneous click.
-  Record Windows display and speaker output together with a suitable external
-  camera/microphone; compare repeated offset measurements at the start and after
-  10 minutes. Record versions, codec, output device, refresh rate and preview fps.
-  RTT/fps and headless clock tests are not a substitute for this measurement.
-- Check paused/static frames, starting/stopping preview, scrubbing, keyframe
-  recovery, reconnect, Mac/Windows tab changes, output-device changes and a brief
-  network stall. Sound must not overlap itself or replay a stale burst afterward.
-- Check H.264 and JPEG; test old/new endpoint pairs for legacy compatibility.
-- Assess the added video buffering while moving the mouse and editing. The
-  default 60 ms lead can rise for the reported audio output latency (200 ms cap).
-  Report responsiveness separately from measured audio/video offset.
-- Hover control is intentionally unchanged: a focused selected desktop already
-  auto-arms. Hovering an inactive window must not steal focus or redirect keys.

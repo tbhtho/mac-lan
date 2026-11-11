@@ -138,23 +138,3 @@ foreach(int delay in new[]{18,25,40})
     Check(bridge.Acknowledge(bridge.Epoch,next)&&!bridge.Acknowledge(bridge.Epoch,next),"each matching acknowledgment releases one batch exactly once");
 }
 Console.WriteLine(checks+" video queue checks passed; synthetic packets only.");
-
-{
-    var extended=Packet(0x82,123,21);BinaryPrimitives.WriteUInt64BigEndian(extended.AsSpan(9,8),10000001);
-    Check(MediaPacket.TryRead(extended,out var media)&&media.Kind==2&&media.PayloadOffset==17&&media.CaptureMicroseconds==10000001,"extended media timestamps retain their exact header and payload boundary");
-    var queue=new EncodedFrameQueue();queue.Enqueue(extended,0);queue.Enqueue(Packet(0x83,124,21),1);
-    Check(queue.Drain(2).Count==2,"extended H264 frames preserve dependency order");
-    Check(!MediaPacket.TryRead(extended.AsSpan(0,17),out _),"an extended header without payload is rejected");
-    BinaryPrimitives.WriteUInt64BigEndian(extended.AsSpan(9,8),ulong.MaxValue);
-    Check(!MediaPacket.TryRead(extended,out _),"timestamps outside JavaScript exact integer range are rejected");
-}
-{
-    var scheduled=new Queue<Action>();var heard=new List<uint>();AudioDispatchQueue audio=null!;
-    audio=new AudioDispatchQueue(action=>scheduled.Enqueue(action),packet=>{heard.Add(Sequence(packet));audio.Clear();},()=>0);
-    audio.Enqueue(Packet(0x84,1,21));audio.Enqueue(Packet(0x84,2,21));scheduled.Dequeue()();
-    Check(heard.SequenceEqual(new uint[]{1}),"clearing audio during a batch invalidates its remaining callbacks");
-    audio.Enqueue(Packet(0x84,3,21));audio.Clear();while(scheduled.TryDequeue(out var callback))callback();
-    Check(heard.Count==1&&audio.Count==0,"stream clearing discards pending audio and leaves its drain reusable");
-    audio.Enqueue(Packet(0x84,4,21));while(scheduled.TryDequeue(out var callback))callback();
-    Check(heard.Last()==4,"fresh extended audio drains after a clear");
-}

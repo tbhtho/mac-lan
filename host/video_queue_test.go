@@ -264,8 +264,8 @@ func TestVideoBurstPreservesEncodedDependencies(t *testing.T) {
 func TestMacAudioIsWrittenBeforeQueuedVideoAndNeverQueuedAsVideo(t *testing.T) {
 	q := newVideoQueue()
 	q.push(append([]byte{2, 0, 0, 0, 1, 0, 0, 0, 0}, 0xAA), time.Now())
-	audio := make(chan queuedAudioPacket, 1)
-	audio <- queuedAudioPacket{data: []byte{4, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2}, at: time.Now()}
+	audio := make(chan []byte, 1)
+	audio <- []byte{4, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2}
 	done := make(chan struct{})
 	var kinds []byte
 	writeQueuedVideo(done, q, make(chan statusMessage), audio, func(text bool, data []byte) error {
@@ -277,124 +277,5 @@ func TestMacAudioIsWrittenBeforeQueuedVideoAndNeverQueuedAsVideo(t *testing.T) {
 	})
 	if len(kinds) != 2 || kinds[0] != 4 || kinds[1] != 2 {
 		t.Fatalf("audio must go out first, got kinds %v", kinds)
-	}
-}
-
-func TestMediaPacketKindsAndHeaders(t *testing.T) {
-	for _, flag := range []byte{0, 0x80} {
-		minimum := 10
-		if flag != 0 {
-			minimum = 18
-		}
-		for kind := byte(1); kind <= 4; kind++ {
-			packet := encodedFixture(flag|kind, 7, minimum)
-			if got, ok := mediaPacketKind(packet); !ok || got != kind {
-				t.Fatalf("kind %x rejected", flag|kind)
-			}
-			if _, ok := mediaPacketKind(packet[:minimum-1]); ok {
-				t.Fatalf("truncated kind %x accepted", flag|kind)
-			}
-		}
-	}
-	for _, kind := range []byte{0, 5, 0x40, 0x85, 0xff} {
-		if _, ok := mediaPacketKind(encodedFixture(kind, 1, 18)); ok {
-			t.Fatalf("unknown kind %x accepted", kind)
-		}
-	}
-}
-
-func TestExtendedVideoQueuePreservesDependenciesAndPayload(t *testing.T) {
-	q := newVideoQueue()
-	now := time.Now()
-	for i, kind := range []byte{0x82, 0x83, 0x83} {
-		packet := encodedFixture(kind, uint32(i+1), 18)
-		binary.BigEndian.PutUint64(packet[9:17], uint64(123000+i))
-		packet[17] = 0xaa
-		q.push(packet, now)
-	}
-	for i := 0; i < 3; i++ {
-		packet, ok := q.pop(now)
-		if !ok || binary.BigEndian.Uint32(packet[1:5]) != uint32(i+1) || binary.BigEndian.Uint64(packet[9:17]) != uint64(123000+i) || packet[17] != 0xaa {
-			t.Fatal("extended frame damaged or dropped")
-		}
-	}
-}
-
-func TestAudioBacklogExpiresAndCannotStarveVideo(t *testing.T) {
-	q := newVideoQueue()
-	q.push(encodedFixture(2, 1, 10), time.Now())
-	audio := make(chan queuedAudioPacket, 24)
-	audio <- queuedAudioPacket{data: encodedFixture(4, 99, 10), at: time.Now().Add(-audioQueueMaxAge - time.Second)}
-	for i := 0; i < 23; i++ {
-		audio <- queuedAudioPacket{data: encodedFixture(0x84, uint32(i+1), 18), at: time.Now()}
-	}
-	done := make(chan struct{})
-	writes := 0
-	writeQueuedVideo(done, q, nil, audio, func(_ bool, data []byte) error {
-		writes++
-		if data[0] != 2 {
-			t.Fatalf("stale audio played or video starved: kind %x", data[0])
-		}
-		close(done)
-		return nil
-	})
-	if writes != 1 {
-		t.Fatalf("writes = %d", writes)
-	}
-}
-
-func TestContinuousFreshAudioAllowsVideoAfterOnePacket(t *testing.T) {
-	q := newVideoQueue()
-	q.push(encodedFixture(0x82, 1, 18), time.Now())
-	audio := make(chan queuedAudioPacket, 24)
-	for i := 0; i < 24; i++ {
-		audio <- queuedAudioPacket{data: encodedFixture(0x84, uint32(i+1), 18), at: time.Now()}
-	}
-	done := make(chan struct{})
-	var order []byte
-	writeQueuedVideo(done, q, nil, audio, func(_ bool, data []byte) error {
-		order = append(order, data[0])
-		if len(order) == 2 {
-			close(done)
-		}
-		return nil
-	})
-	if len(order) != 2 || order[0] != 0x84 || order[1] != 0x82 {
-		t.Fatalf("unfair audio/video order: %v", order)
-	}
-}
-
-func TestExtendedMediaTraversesServerWithoutBreakingVideoChain(t *testing.T) {
-	s := &server{token: strings.Repeat("m", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
-		catalog: func() ([]window, error) { return nil, nil },
-		consent: func(r start) bool { return r.MediaClock },
-		stream: func(send func([]byte), _ func(string), events <-chan input) error {
-			send(encodedFixture(0x82, 1, 18))
-			send(encodedFixture(0x84, 77, 21))
-			send(encodedFixture(0x83, 2, 18))
-			for range events {
-			}
-			return nil
-		},
-	}
-	c := connectFixture(t, s)
-	if err := c.WriteJSON(start{Type: "start", FPS: 60, Width: 1280, Quality: 70, MediaClock: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[byte]uint32{}
-	for len(seen) < 3 {
-		kind, packet, err := c.ReadMessage()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if kind == websocket.BinaryMessage {
-			seen[packet[0]] = binary.BigEndian.Uint32(packet[1:5])
-		}
-	}
-	if seen[0x82] != 1 || seen[0x83] != 2 || seen[0x84] != 77 {
-		t.Fatalf("misrouted extended media: %v", seen)
 	}
 }

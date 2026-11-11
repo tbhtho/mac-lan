@@ -88,7 +88,7 @@ internal sealed partial class MainWindow : Window
         tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
         monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
-        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>{session?.AudioQueue?.Clear();gate.Disarm("video-stale");};desktop.KeyframeNeeded+=RequestKeyframe;desktop.Presented+=TryAutomaticControl;BuildSetup();
+        root.Children.Add(body);desktop=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);desktop.VideoInvalidated+=()=>gate.Disarm("video-stale");desktop.KeyframeNeeded+=RequestKeyframe;desktop.Presented+=TryAutomaticControl;BuildSetup();
         keyboard=new KeyboardHook((code,down)=>session?.Send(new{type="key",code,down}),Escape);keyboard.InputLost+=()=>gate.Disarm("foreground-lost");
         gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
@@ -275,7 +275,7 @@ internal sealed partial class MainWindow : Window
         {
             // One bounded background drain prevents audio from flooding the UI when
             // application startup delays it. Old PCM may be shed independently.
-            if(b.Length>9&&(b[0]&0x7f)==4){audio.Enqueue(b);return;}
+            if(b.Length>9&&b[0]==4){audio.Enqueue(b);return;}
             frames.Enqueue(b,Environment.TickCount64);
             Volatile.Write(ref s.VideoQueueFrames,frames.Count);Volatile.Write(ref s.VideoQueueBytes,frames.Bytes);
             if(Interlocked.Exchange(ref frameScheduled,1)!=0)return;
@@ -325,7 +325,7 @@ internal sealed partial class MainWindow : Window
         gate.Disarm("stream-start");viewProgress.Text="Approve viewing on your Mac. Video starts after you choose Allow.";viewProgress.Visibility=Visibility.Visible;
         if(app)
         {
-            remote=false;desktopWorkspace.Restore();body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>{session?.AudioQueue?.Clear();gate.Disarm("video-stale");};appView.KeyframeNeeded+=RequestKeyframe;
+            remote=false;desktopWorkspace.Restore();body.Child=null;appView=new RemoteView(HandlePointer,ReportVideo,LogDiagnostic);appView.VideoInvalidated+=()=>gate.Disarm("video-stale");appView.KeyframeNeeded+=RequestKeyframe;
             appWindow=new Window{Title=appLabel,Width=1100,Height=740,MinWidth=400,MinHeight=300,Content=RemotePanel(appView),WindowStartupLocation=WindowStartupLocation.CenterScreen};Glass.Apply(appWindow);
             appWindow.Activated+=(_,_)=>RefreshContext();appWindow.Deactivated+=(_,_)=>gate.SetContext(session?.IsReady==true,true,false,"window-deactivated");
             appWindow.Closed+=(_,_)=>{gate.Disarm("disconnected");if(session?.IsReady==true||session?.IsStarting==true)session.Abort("App window closed","app-window-closed");appView.Dispose();appView=null;appWindow=null;if(!closing){tabBar.DockTo(DisplayLayout.Select(Native.Monitors(),preferred));ShowDesktop();}};
@@ -461,7 +461,7 @@ internal sealed partial class MainWindow : Window
     void Escape(){gate.Disarm("manual");if(appWindow==null)ShowDesktop();else{appWindow.Title=AppTitle();UpdateControl();}}
     string? ControlVideoBlockReason()=>session==null?"disconnected":VideoFreshness.BlockReason(controlPermission,(appView??desktop).LastPresented,session.NativeAlive,session.LastFrame,Stopwatch.GetTimestamp(),Stopwatch.Frequency);
     bool CanControlVideo()=>ControlVideoBlockReason()==null;
-    void SendLease(){bool playback=session?.IsReady==true&&(remote||appWindow!=null);desktop.SetPlaybackActive(playback&&appWindow==null);appView?.SetPlaybackActive(playback);if(!playback)session?.AudioQueue?.Clear();if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
+    void SendLease(){if(session?.IsReady==true||session?.IsPaired==true&&session.CanTransfer){bool ready=session.IsReady;lastLease=Stopwatch.GetTimestamp();session.Send(new{type="lease",active=ready&&gate.CanRoute,generation=controlGeneration,view=ready&&(remote||appWindow!=null),stamp=lastLease});}}
     void Tick()
     {
         session?.UiTick();
@@ -706,17 +706,7 @@ internal sealed class RemoteView : WebView2
     }
     static bool MessageEpoch(JsonElement m,out long epoch){epoch=0;return m.TryGetProperty("epoch",out var value)&&value.ValueKind==JsonValueKind.Number&&value.TryGetInt64(out epoch);}
     public void Configure(JsonElement m){config=m;PostConfiguration();}
-    bool playbackActive;
-    public void SetPlaybackActive(bool active)
-    {
-        if(playbackActive==active)return;playbackActive=active;PostPlayback();
-    }
-    void PostPlayback(){if(ready)CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="playback",epoch=bridge.Epoch,active=playbackActive}));}
-    public void PlayAudio(byte[] packet)
-    {
-        if(ready&&playbackActive&&bridge.Ready&&currentStream?.Invoke()==true&&MediaPacket.TryRead(packet,out var media)&&media.Kind==4)
-            CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="audio",epoch=bridge.Epoch,data=Convert.ToBase64String(packet)}));
-    }
+    public void PlayAudio(byte[] packet){if(ready)CoreWebView2.PostWebMessageAsJson("{\"type\":\"audio\",\"pcm\":\""+Convert.ToBase64String(packet,9,packet.Length-9)+"\"}");}
     public void ShowMacCursor(JsonElement m){if(ready)CoreWebView2.PostWebMessageAsJson(m.GetRawText());}
     void PostConfiguration()
     {
@@ -745,7 +735,7 @@ internal sealed class RemoteView : WebView2
     void ResetEpoch()
     {
         bridge.Reset();LastPresented=0;armed=false;frameWatchdog.Stop();VideoInvalidated?.Invoke();
-        if(ready){CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="clear",epoch=bridge.Epoch}));PostConfiguration();PostPlayback();}
+        if(ready){CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="clear",epoch=bridge.Epoch}));PostConfiguration();}
     }
     // Late callbacks (a session ending during shutdown) must not reach a disposed WebView.
     protected override void Dispose(bool disposing){ready=false;frameWatchdog.Stop();base.Dispose(disposing);}

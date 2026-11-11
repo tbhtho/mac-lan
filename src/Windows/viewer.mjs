@@ -1,20 +1,18 @@
-import {parseFrame,parseMediaPacket,MediaClock,SequenceGate,mapPointer,videoFrameDuration} from './viewer-core.mjs';
+import {parseFrame,SequenceGate,mapPointer,videoFrameDuration} from './viewer-core.mjs';
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true}),hint=document.querySelector('#hint');
 const post=m=>chrome.webview.postMessage(m);
 let decoder,configuredCodec,config,sequence=new SequenceGate(),armed=false,drawn=0,encode=0,lastDecode=0,started=performance.now(),pending=new Map(),jpegBusy=false,serial=0,renderGeneration=0,streamEpoch=0,lastBatch=0;
 let frameDuration=videoFrameDuration({fps:60}),activationPointer=null,controlRequested=false,heldPointerButtons=0;
 let recoveries=0;
 const MAX_BATCH_FRAMES=8,MAX_BATCH_BYTES=4*1024*1024,MAX_BUFFERED_FRAMES=64,MAX_BUFFERED_BYTES=8*1024*1024,MAX_BUFFERED_MS=250;
-let encoded=[],bufferedBytes=0,pumping=false,queueTimer=null,pictures=[],paintRequest=null,queuedJpeg=null;
+let encoded=[],bufferedBytes=0,pumping=false,queueTimer=null,picture=null,paintRequest=null,queuedJpeg=null;
 const input=m=>post({...m,epoch:streamEpoch});
-const mediaClock=new MediaClock();let playbackActive=true;
-function observeMedia(captureMs,now){if(mediaClock.observe(captureMs,now))stopAudio();}
 function show(text){hint.textContent=text;}
 function reset(clearPicture=true){
   renderGeneration++;if(queueTimer!==null){clearTimeout(queueTimer);queueTimer=null;}if(paintRequest!==null){cancelAnimationFrame(paintRequest);paintRequest=null;}
-  for(const queued of pictures)queued.frame.close();pictures=[];stopAudio();if(clearPicture)mediaClock.reset();if(decoder){try{decoder.close();}catch{}decoder=null;}
+  if(picture){picture.frame.close();picture=null;}if(decoder){try{decoder.close();}catch{}decoder=null;}
   configuredCodec=null;sequence.reset();pending.clear();encoded=[];bufferedBytes=0;queuedJpeg=null;clearMove();
-  if(clearPicture){audioSequence=null;ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
+  if(clearPicture){ctx.clearRect(0,0,canvas.width,canvas.height);drawn=0;}
 }
 // A reset viewer asks the Mac for a keyframe instead of waiting for the next periodic one.
 // The Mac's current pointer shape (resize arrows, I-beam, hand) replaces the plain arrow.
@@ -28,51 +26,20 @@ function setCursor(m){
     if(cursorUrl)URL.revokeObjectURL(cursorUrl);cursorUrl=url;
   }catch{}
 }
-// Keep handles for every scheduled source: resetting a time cursor alone leaves
-// old sources audible and makes a burst overlap itself. Audio and video share
-// capture timestamps when both endpoints support the extended envelope.
-let audioContext=null,audioAt=0,audioSequence=null;
-const audioSources=new Set();
-function stopAudio(){
-  for(const source of audioSources){source.onended=null;try{source.stop();}catch{}try{source.disconnect();}catch{}}
-  audioSources.clear();audioAt=0;
-}
-function audioTimeFor(due,now){
-  const stamp=audioContext.getOutputTimestamp?.();
-  if(stamp&&Number.isFinite(stamp.contextTime)&&stamp.contextTime>0&&Number.isFinite(stamp.performanceTime)&&Math.abs(now-stamp.performanceTime)<1000)
-    return stamp.contextTime+(due-stamp.performanceTime)/1000;
-  // baseLatency and outputLatency describe separate graph/device stages.
-  const latency=Math.max(0,Number(audioContext.baseLatency)||0)+Math.max(0,Number(audioContext.outputLatency)||0);
-  return audioContext.currentTime+(due-now)/1000-latency;
-}
-function playAudio(m){
-  if(typeof m.data!=='string'||m.data.length===0||m.data.length>262144)return;
+// Mac audio: 16-bit stereo PCM at 48 kHz, scheduled back to back about 50 ms ahead.
+// If playback drifts outside 20-250 ms of lead, it restarts at 50 ms instead of piling up.
+let audioContext=null,audioAt=0;
+function playAudio(pcm){
+  if(typeof pcm!=='string'||pcm.length===0||pcm.length>262144)return;
   try{
-    const packet=parseMediaPacket(base64Bytes(m.data));if(packet.kind!==4||packet.data.byteLength%4!==0)return;
-    const advance=audioSequence===null?1:(packet.sequence-audioSequence)>>>0;
-    if(advance===0||advance>0x7fffffff)return;
-    audioSequence=packet.sequence;
-    if(!audioContext){audioContext=new AudioContext({sampleRate:48000,latencyHint:'interactive'});audioContext.addEventListener('statechange',()=>{if(audioContext.state!=='running')stopAudio();});}
-    if(audioContext.state!=='running'){stopAudio();void audioContext.resume().catch(()=>{});return;}
-    const now=performance.now(),current=audioContext.currentTime;
-    const latency=Math.max(0,Number(audioContext.baseLatency)||0)+Math.max(0,Number(audioContext.outputLatency)||0);
-    mediaClock.ensureLead(latency*1000+20);observeMedia(packet.captureMs,now);
-    const due=mediaClock.due(packet.captureMs),frames=packet.data.byteLength/4,duration=frames/48000;
-    if(!frames||duration>0.25)return;
-    if(audioSources.size>=32||audioAt>current+0.25)stopAudio();
-    let at=due===null?Math.max(audioAt,current+0.05):audioTimeFor(due,now);
-    // An old host cannot describe a missing chunk, so restart its bounded queue.
-    if(due===null&&advance>1){stopAudio();at=current+0.05;}
-    if(at>current+0.25)return;
-    const start=Math.max(at,audioAt,current+0.005),skip=Math.max(0,Math.ceil((start-at)*48000));
-    if(skip>=frames)return; // Do not replay late sound or compress a lost interval.
-    const buffer=audioContext.createBuffer(2,frames-skip,48000),left=buffer.getChannelData(0),right=buffer.getChannelData(1);
-    const samples=new DataView(packet.data.buffer,packet.data.byteOffset,packet.data.byteLength);
-    for(let i=skip;i<frames;i++){left[i-skip]=samples.getInt16(i*4,true)/32768;right[i-skip]=samples.getInt16(i*4+2,true)/32768;}
+    audioContext??=new AudioContext({sampleRate:48000,latencyHint:'interactive'});
+    const bytes=base64Bytes(pcm);
+    const samples=new Int16Array(bytes.buffer,0,bytes.byteLength>>1);const frames=samples.length>>1;if(frames===0)return;
+    const buffer=audioContext.createBuffer(2,frames,48000);const left=buffer.getChannelData(0),right=buffer.getChannelData(1);
+    for(let i=0;i<frames;i++){left[i]=samples[2*i]/32768;right[i]=samples[2*i+1]/32768;}
     const source=audioContext.createBufferSource();source.buffer=buffer;source.connect(audioContext.destination);
-    source.onended=()=>{audioSources.delete(source);source.disconnect();};audioSources.add(source);
-    try{source.start(start);}catch{audioSources.delete(source);source.disconnect();return;}
-    audioAt=start+buffer.duration;
+    const now=audioContext.currentTime;if(audioAt<now+0.02||audioAt>now+0.25)audioAt=now+0.05;
+    source.start(audioAt);audioAt+=buffer.duration;
   }catch{}
 }
 function recover(message){
@@ -93,31 +60,18 @@ function watchQueue(){
   const generation=renderGeneration;
   queueTimer=setTimeout(()=>{if(generation!==renderGeneration)return;queueTimer=null;if(performance.now()-oldestBuffered()>=MAX_BUFFERED_MS)recover('Decoder delayed; waiting for a fresh keyframe');else watchQueue();},Math.max(1,MAX_BUFFERED_MS-(performance.now()-oldest)));
 }
-function present(frame,queuedAt,captureMs,refresh=false){
-  pictures.push({frame,queuedAt,captureMs,refresh});
-  while(pictures.length>16)pictures.shift().frame.close();
-  schedulePaint();
-}
-function schedulePaint(){
-  if(paintRequest!==null||!pictures.length)return;
+function present(frame,queuedAt){
+  if(picture)picture.frame.close();picture={frame,queuedAt};if(paintRequest!==null)return;
   const generation=renderGeneration,epoch=streamEpoch;
   paintRequest=requestAnimationFrame(()=>{
-    if(generation!==renderGeneration)return;paintRequest=null;const now=performance.now();let queued=null;
-    while(pictures.length){
-      const next=pictures[0],due=mediaClock.due(next.captureMs);
-      if(now-next.queuedAt>=MAX_BUFFERED_MS||!next.refresh&&due!==null&&now-due>120){pictures.shift().frame.close();continue;}
-      if(due!==null&&due>now+2)break;
-      if(queued)queued.frame.close();queued=pictures.shift();
-    }
-    if(queued){const latest=queued.frame;
-      try{
-        const width=latest.displayWidth??latest.width,height=latest.displayHeight??latest.height;
-        if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;
-        ctx.drawImage(latest,0,0);drawn++;post({type:'presented',epoch});
-        show(armed?'CONTROLLING MAC - Ctrl+Alt+Shift+Backspace releases':'VIEW ONLY - click to control Mac');
-      }finally{latest.close();}
-    }
-    schedulePaint();
+    if(generation!==renderGeneration)return;paintRequest=null;const queued=picture;picture=null;if(!queued)return;const latest=queued.frame;
+    try{
+      if(performance.now()-queued.queuedAt>=MAX_BUFFERED_MS)return;
+      const width=latest.displayWidth??latest.width,height=latest.displayHeight??latest.height;
+      if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;
+      ctx.drawImage(latest,0,0);drawn++;post({type:'presented',epoch});
+      show(armed?'CONTROLLING MAC - Ctrl+Alt+Shift+Backspace releases':'VIEW ONLY - click to control Mac');
+    }finally{latest.close();}
   });
 }
 function pump(){
@@ -145,18 +99,17 @@ function newDecoder(){
     const submitted=pending.get(frame.timestamp);if(!submitted){frame.close();return;}
     if(performance.now()-submitted.queuedAt>=MAX_BUFFERED_MS){frame.close();recover('Decoder delayed; waiting for a fresh keyframe');return;}
     pending.delete(frame.timestamp);bufferedBytes-=submitted.data.byteLength;lastDecode=performance.now()-submitted.queuedAt;
-    decoderFailures=0;present(frame,submitted.queuedAt,submitted.captureMs,submitted.key);pump();watchQueue();
+    decoderFailures=0;present(frame,submitted.queuedAt);pump();watchQueue();
   },error:e=>{if(generation===renderGeneration&&created===decoder){noteDecoderFailure();recover('Decoder reset; waiting for keyframe: '+e.message);}}});
   decoder=created;decoder.configure(config);configuredCodec=config.codec;
   decoder.addEventListener('dequeue',()=>{if(generation===renderGeneration&&created===decoder)pump();});
 }
 async function receivePacket(p,queuedAt=performance.now()){
-  observeMedia(p.captureMs,queuedAt);
   encode=p.encodeMs;
   if(p.kind===1){
     if(performance.now()-queuedAt>=MAX_BUFFERED_MS)return;
     if(jpegBusy){queuedJpeg={packet:p,queuedAt,generation:renderGeneration,epoch:streamEpoch};return;}jpegBusy=true;const generation=renderGeneration,epoch=streamEpoch;
-    try{const image=await createImageBitmap(new Blob([p.data],{type:'image/jpeg'}));if(generation!==renderGeneration||epoch!==streamEpoch||performance.now()-queuedAt>=MAX_BUFFERED_MS){image.close();return;}lastDecode=performance.now()-queuedAt;present(image,queuedAt,p.captureMs,true);}
+    try{const image=await createImageBitmap(new Blob([p.data],{type:'image/jpeg'}));if(generation!==renderGeneration||epoch!==streamEpoch||performance.now()-queuedAt>=MAX_BUFFERED_MS){image.close();return;}lastDecode=performance.now()-queuedAt;present(image,queuedAt);}
     catch(err){if(generation===renderGeneration&&epoch===streamEpoch)recover('Video error: '+err.message);}
     finally{jpegBusy=false;const next=queuedJpeg;queuedJpeg=null;if(next&&next.generation===renderGeneration&&next.epoch===streamEpoch)void receivePacket(next.packet,next.queuedAt);}return;
   }
@@ -169,15 +122,14 @@ async function receivePacket(p,queuedAt=performance.now()){
   if(!decoder||decoder.state!=='configured'||configuredCodec!==config.codec){
     if(!p.key)return;if(decoder){reset(false);sequence.accept(p.sequence,true);}newDecoder();
   }
-  const timestamp=Math.round(++serial*frameDuration);encoded.push({timestamp,key:p.key,data:p.data,captureMs:p.captureMs,queuedAt});bufferedBytes+=p.data.byteLength;pump();watchQueue();
+  const timestamp=Math.round(++serial*frameDuration);encoded.push({timestamp,key:p.key,data:p.data,queuedAt:performance.now()});bufferedBytes+=p.data.byteLength;pump();watchQueue();
 }
 chrome.webview.addEventListener('message',async e=>{
   const m=e.data;
-  if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;if(!next)heldPointerButtons=0;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC - escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY - control released');return;}
+  if(m.type==='armed'){if(!epochFor(m))return;const next=m.active===true;if(next&&!armed&&document.activeElement!==canvas)canvas.focus();armed=next;if(!next)heldPointerButtons=0;controlRequested=false;document.body.classList.toggle('armed',armed);show(armed?'CONTROLLING MAC � escape Ctrl+Alt+Shift+Backspace':'VIEW ONLY � control released');return;}
   if(m.type==='clear'){if(!epochFor(m,true))return;activationPointer=null;controlRequested=false;armed=false;heldPointerButtons=0;document.body.classList.toggle('armed',false);reset();config=null;show('VIEW ONLY - stream paused or disconnected');if(m.epoch!==undefined)post({type:'clearAck',epoch:streamEpoch});return;}
   if(m.type==='cursor'){setCursor(m);return;}
-  if(m.type==='playback'){if(!epochFor(m))return;const active=m.active===true;if(active!==playbackActive){stopAudio();mediaClock.reset();audioSequence=null;}playbackActive=active;return;}
-  if(m.type==='audio'){if(epochFor(m)&&playbackActive&&!document.hidden)playAudio(m);return;}
+  if(m.type==='audio'){playAudio(m.pcm);return;}
   if(m.type==='video'){
     if(!epochFor(m,true))return;
     // Older desktop hosts advertise fill; always preserve the received picture's proportions.
@@ -201,7 +153,7 @@ chrome.webview.addEventListener('message',async e=>{
   }catch(err){if(generation===renderGeneration&&epoch===streamEpoch)recover('Video error: '+err.message);}
   finally{post(batch?{type:'frameAck',epoch:m.epoch,batch:m.batch}:{type:'frameAck'});}
 });
-setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',fps:drawn/Math.max(secs,.1),encodeMs:encode,decodeMs:lastDecode,queueFrames:encoded.length+pending.size,bufferedBytes,decoderQueue:decoder?.decodeQueueSize??0,recoveries,message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps - encode ${encode.toFixed(1)} ms - local decode/submit ${lastDecode.toFixed(1)} ms - ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
+setInterval(()=>{let secs=(performance.now()-started)/1000;post({type:'stats',fps:drawn/Math.max(secs,.1),encodeMs:encode,decodeMs:lastDecode,queueFrames:encoded.length+pending.size,bufferedBytes,decoderQueue:decoder?.decodeQueueSize??0,recoveries,message:`${(drawn/Math.max(secs,.1)).toFixed(1)} fps � encode ${encode.toFixed(1)} ms � local decode/submit ${lastDecode.toFixed(1)} ms � ${config?'H.264 (hardware preferred)':'JPEG'}`});drawn=0;started=performance.now();},1000);
 function coords(e){const r=canvas.getBoundingClientRect();return mapPointer(e.clientX-r.left,e.clientY-r.top,r.width,r.height,canvas.width,canvas.height);}
 // A high-polling mouse reports up to 1000 moves a second. Only the newest absolute
 // position matters, so a burst collapses into one message per animation frame and any
@@ -251,5 +203,3 @@ canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
 window.addEventListener('blur',()=>releaseControl('viewer-blur'));
-
-document.addEventListener?.('visibilitychange',()=>{if(document.hidden)stopAudio();});

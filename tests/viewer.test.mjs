@@ -1,4 +1,4 @@
-import {parseFrame, parseMediaPacket, MediaClock, SequenceGate, mapPointer, videoFrameDuration} from '../src/Windows/viewer-core.mjs';
+import {parseFrame, SequenceGate, mapPointer, videoFrameDuration} from '../src/Windows/viewer-core.mjs';
 import assert from 'node:assert/strict';
 assert.throws(()=>parseFrame(new Uint8Array(3)));
 assert.throws(()=>parseFrame(new Uint8Array([9,0,0,0,0,0,0,0,0])));
@@ -28,20 +28,3 @@ assert.deepEqual(mapPointer(200,150,400,300,1920,1080,'fit'),{x:.5,y:.5});
 assert.equal(videoFrameDuration({fps:60}),1000000/60);
 for(const fps of [null,undefined,0,-1,61,'60',60.5])assert.equal(videoFrameDuration({fps}),1000000/60);
 console.log('PASS frame envelope, loss recovery at keyframe, pointer mapping');
-
-for(const kind of [1,2,3,4]){
- const bytes=new Uint8Array(21),v=new DataView(bytes.buffer);bytes[0]=kind|0x80;v.setUint32(1,23);v.setUint32(9,1);v.setUint32(13,500);
- const value=parseMediaPacket(bytes);assert.equal(value.kind,kind);assert.equal(value.captureMs,(4294967296+500)/1000);assert.equal(value.data.length,4);
- if(kind===4)assert.throws(()=>parseFrame(bytes));else assert.equal(parseFrame(bytes).sequence,23);
- assert.throws(()=>parseMediaPacket(bytes.subarray(0,17)));
- v.setUint32(9,0xffffffff);assert.throws(()=>parseMediaPacket(bytes));
-}
-{
- const clock=new MediaClock();clock.observe(1000,10000);assert.equal(clock.due(1000),10060);
- assert.equal(clock.observe(10000,10001),true);assert.equal(clock.due(10000),10061,'fresh media corrects a stale initial image in one step');
- clock.observe(1000,10002);assert.equal(clock.due(10000),10061,'old interleaved samples cannot rebase the clock upward');
- clock.reset();assert.equal(clock.due(1000),null);
- clock.observe(1000,100);clock.observe(1010,120);assert.ok(clock.due(1010)>=170&&clock.due(1010)<=170.04,'ordinary arrival jitter cannot move playout by more than slow correction');
- clock.ensureLead(500);assert.equal(clock.lead,200,'device lead is capped');
-}
-console.log('PASS extended media envelopes and shared clock discontinuity/drift bounds');

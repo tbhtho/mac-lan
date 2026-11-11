@@ -51,7 +51,7 @@ func TestPairedIdleReleaseAndLeaseDoNotEndSessionOrStartCapture(t *testing.T) {
 		consent: func(r start) bool { consentCalled <- r; return <-allow },
 		stream: func(send func([]byte), _ func(string), events <-chan input) error {
 			streamCalled <- struct{}{}
-			send(encodedFixture(1, 1, 10))
+			send([]byte{1, 2, 3})
 			for range events {
 			}
 			return nil
@@ -94,7 +94,7 @@ func TestPairedIdleReleaseAndLeaseDoNotEndSessionOrStartCapture(t *testing.T) {
 			t.Fatal("approved stream", err)
 		}
 		if kind == websocket.BinaryMessage {
-			if !bytes.Equal(frame, encodedFixture(1, 1, 10)) {
+			if !bytes.Equal(frame, []byte{1, 2, 3}) {
 				t.Fatal("wrong fixture frame")
 			}
 			break
@@ -155,7 +155,7 @@ func TestNativeStatusBurstDoesNotDisconnectApprovedCapture(t *testing.T) {
 			for i := 0; i < 1000; i++ {
 				status(`{"type":"status","paused":false,"message":"Encoder property fixture unsupported"}`)
 			}
-			send(encodedFixture(1, 1, 10))
+			send([]byte{1, 2, 3})
 			for range events {
 			}
 			return nil
@@ -182,14 +182,14 @@ func TestInputPressureDoesNotEndApprovedCapture(t *testing.T) {
 		catalog: func() ([]window, error) { return nil, nil },
 		consent: func(start) bool { return true },
 		stream: func(send func([]byte), status func(string), events <-chan input) error {
-			send(encodedFixture(1, 1, 10))
+			send([]byte{1, 2, 3})
 			close(streaming)
 			// A stalled native helper must not turn viewer input pressure into a
 			// disconnect; the session keeps video and control state alive.
 			time.Sleep(250 * time.Millisecond)
 			for e := range events {
 				if e.Type == "release" {
-					send(encodedFixture(1, 9, 10))
+					send([]byte{9})
 					// Keep the session up while the client reads its proof frame.
 					for range events {
 					}
@@ -218,7 +218,7 @@ func TestInputPressureDoesNotEndApprovedCapture(t *testing.T) {
 		if err != nil {
 			t.Fatalf("approved capture ended after input pressure: %v", err)
 		}
-		if kind == websocket.BinaryMessage && bytes.Equal(frame, encodedFixture(1, 9, 10)) {
+		if kind == websocket.BinaryMessage && bytes.Equal(frame, []byte{9}) {
 			return
 		}
 	}
@@ -257,7 +257,7 @@ func TestInputPressureReleasesHeldEdgesBeforeRenewedLease(t *testing.T) {
 						batch = append(batch, e)
 						if e.Type == "lease" {
 							observed <- batch
-							send(encodedFixture(1, 9, 10))
+							send([]byte{9})
 							for range events {
 							}
 							return nil
@@ -368,7 +368,7 @@ func TestInputPressureReleasesHeldEdgesBeforeRenewedLease(t *testing.T) {
 				return
 			}
 			kind, frame, err := c.ReadMessage()
-			if err != nil || kind != websocket.BinaryMessage || !bytes.Equal(frame, encodedFixture(1, 9, 10)) {
+			if err != nil || kind != websocket.BinaryMessage || !bytes.Equal(frame, []byte{9}) {
 				t.Fatalf("video did not survive input pressure: %v", err)
 			}
 		})
@@ -437,7 +437,7 @@ func TestAuthenticatedConsentAndFrames(t *testing.T) {
 		catalog: func() ([]window, error) { return []window{{ID: 42, Title: "Editor", App: "Example"}}, nil },
 		consent: func(start) bool { consent++; return true },
 		stream: func(send func([]byte), status func(string), events <-chan input) error {
-			send(append(encodedFixture(1, 1, 10)[:9], 0xff, 0xd8, 0xff, 0xd9))
+			send([]byte{0xff, 0xd8, 0xff, 0xd9})
 			for e := range events {
 				if e.Type == "release" {
 					break
@@ -480,7 +480,7 @@ func TestAuthenticatedConsentAndFrames(t *testing.T) {
 			t.Fatal(err)
 		}
 		if kind == websocket.BinaryMessage {
-			gotFrame = bytes.Equal(data, append(encodedFixture(1, 1, 10)[:9], 0xff, 0xd8, 0xff, 0xd9))
+			gotFrame = bytes.Equal(data, []byte{0xff, 0xd8, 0xff, 0xd9})
 			break
 		}
 	}
