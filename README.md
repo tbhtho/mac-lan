@@ -1,70 +1,96 @@
-# mac-lan
+<h1 align="center">mac-lan</h1>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) ![Windows x64 and Apple Silicon](https://img.shields.io/badge/platform-Windows_x64_%7C_Apple_Silicon-blue.svg)
+<p align="center"><b>Your Mac desktop and your Windows desktop, one tab apart.</b><br>
+View and control a Mac from a Windows PC on the same network, share files and the clipboard, and run commands on either one from the other.</p>
 
-Your Mac desktop and Windows desktop, one tab apart on the same LAN.
+<p align="center">
+  <img src="https://img.shields.io/badge/status-preview-orange.svg" alt="Status: preview">
+  <img src="https://img.shields.io/badge/viewer-Windows_10%2F11_x64-blue.svg" alt="Viewer: Windows 10/11 x64">
+  <img src="https://img.shields.io/badge/host-Apple_Silicon_macOS_14%2B-lightgrey.svg" alt="Host: Apple Silicon macOS 14+">
+  <img src="https://img.shields.io/badge/network-LAN_only-8A2BE2.svg" alt="Network: LAN only">
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT">
+</p>
 
-[**Download the latest preview**](https://github.com/tbhtho/mac-lan/releases) · [Validation status](docs/verification.md)
+<p align="center"><a href="https://github.com/tbhtho/mac-lan/releases/latest"><b>Download the latest preview</b></a></p>
+
+## What it is
+
+mac-lan puts a slim bar at the top of a Windows display with two tabs, **Windows** and **MacBook**. One click shows the Mac's live desktop full screen, with its sound, and your keyboard and mouse control it. Another click and you are back in Windows. Everything travels directly between the two computers over your own Wi-Fi or Ethernet: there is no account, no cloud relay and no port forwarding.
+
+It is two apps: a Windows viewer and a menu-bar app on the Mac.
 
 ## Get started
 
-1. On **Windows 10/11 x64**, download and run **mac-lan-setup.exe** (alpha.17 or later). It installs mac-lan for your account without administrator access, with a Start menu entry, an optional desktop shortcut, and an uninstaller in Windows Settings → Apps. The portable single **mac-lan.exe** remains available. Both include the .NET runtime; an existing [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) is required.
-2. On **Apple Silicon macOS 14+**, open **mac-lan-macos-arm64.dmg** (alpha.18 or later), drag **mac-lan** onto **Applications** in the window that appears, eject the disk image, and open mac-lan from Applications. mac-lan is signed with its own certificate, not an Apple Developer ID: if macOS says it could not verify mac-lan, choose **Open Anyway** in System Settings → Privacy & Security. From alpha.20, Screen Recording and Accessibility grants carry over to later updates; when moving to alpha.20 from an earlier build, remove mac-lan from both lists with **–** and allow it again once. The **mac-lan-macos-arm64.tar.gz** archive (alpha.15 or later) remains available. Its menu-bar icon provides sharing, permissions, updates, and Quit; no Terminal window is needed. First launch builds the native menu using your existing Apple command-line tools; video setup builds the capture helper. These tools are still required.
-3. Put both computers on the same LAN. On Windows, open **Connection**; nearby Macs appear as cards automatically. Choose yours and **Connect** (or double-click it), compare the pairing number, and approve it on the Mac once. From alpha.45 the Mac and PC remember each other, so later connections, including after restarts, need no approval and Windows connects automatically when the Mac appears; **Forget Remembered PCs** in the Mac menu or **Forget remembered Macs** on the Connection page undoes this, and mac-lan switches to the **MacBook** tab.
-4. Use the Mac menu's access items to allow **Screen Recording** for video and **Accessibility** for control in **System Settings → Privacy & Security**, then restart sharing. macOS may require fresh grants for **mac-lan**, even if Terminal was already allowed. Pairing and file transfer can start before Screen Recording is granted. From alpha.36, selecting **MacBook** activates keyboard and mouse automatically once permissions, fresh video and focus are ready. Alpha.35 still requires one activation click in the Mac picture. **Ctrl+Alt+Shift+Backspace** releases control.
+1. **Windows 10/11 x64:** download and run **mac-lan-setup.exe**. It installs for your account without administrator access. The single portable **mac-lan.exe** works too. Both include .NET; the [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) must be present, as it is on current Windows.
+2. **Apple Silicon Mac, macOS 14 or later:** open **mac-lan-macos-arm64.dmg**, drag **mac-lan** to **Applications** and open it. It lives in the menu bar. The app is signed with its own certificate, not an Apple Developer ID, so the first time choose **Open Anyway** in System Settings → Privacy & Security. The first launch compiles its native parts with Apple's command-line tools, which must already be installed (`xcode-select --install`).
+3. **Connect:** put both computers on the same network. On Windows the Mac appears as a card; choose **Connect**, check that the Mac ID matches the one in the Mac's menu, and approve the pairing number on the Mac once. After that they remember each other and connect by themselves.
+4. **Allow access on the Mac:** use the menu's **Allow Screen Recording…** for video and **Allow Keyboard & Mouse…** for control, then restart sharing. Files and the clipboard work before either is granted.
 
-The unsigned preview may be blocked by OS security. Keep those protections enabled and use a trusted [source build](docs/development.md) if needed. No firewall, router, security setting, or Apple developer tool is changed or installed automatically.
+> [!NOTE]
+> Keep your OS protections on. mac-lan changes no firewall, router or security setting, and installs nothing else.
 
-## In the app
+## Features
 
-- **Window:** closing the connection page with its X keeps mac-lan running in the bar; **Quit** in the bar exits.
-- **Auto-hide top bar:** from alpha.36, choose **Bar → Auto-hide top bar**. Move the pointer to the display's top edge to reveal it; it hides after you leave, with a thin edge kept available. The setting is saved between launches. Turn the same option off to keep the bar visible.
-- **Move between monitors:** from alpha.41, use **Display** beside the top tabs to choose **Left / Right**, or **Top / Bottom** for stacked screens. Larger layouts show numbered display choices. The selector follows your Windows display arrangement and stays in sync with Connection settings; one-display setups disable it.
-- **Windows / MacBook tabs:** switch between your local desktop and the live Mac picture from a slim (32-pixel), dark, translucent bar (acrylic on Windows 11 22H2+, solid on older Windows). The desktop bar reserves space above maximized Windows apps, with a monitor selector and primary-monitor fallback. From alpha.36, Windows apps on the MacBook display move to another available monitor and return when you select Windows. Apps already minimized stay minimized, and one-monitor setups stay in place; see [monitor handoff](docs/desktop-workspace.md).
-- **Full desktop:** a **1920-pixel width cap and 60 fps target**, preserving the complete Mac desktop's proportions without changing its display mode. A 16:10 desktop can stream at 1920×1200; smaller sources are not enlarged, and height is capped at 2160 pixels. Windows fits the picture with bars where needed; the bars do not activate or control the Mac. Only the immediate Windows cursor appears in the stream, and it takes the Mac pointer's shape (resize arrows, text I-beam, link hand).
-- **App Priority:** put one selected Mac window in a movable, resizable Windows window titled with the Mac app's name, with no mac-lan bar or toolbar. It opens sized to that window's shape and preserves its aspect ratio. Click it to control; Ctrl+Alt+Shift+Backspace or switching away releases; closing it ends the stream. Menus, dialogs, and other Mac windows remain outside that view; closing, minimizing, or resizing the selected Mac window stops its stream.
-- **Sound:** Mac audio plays on Windows while you view the Mac, and the MacBook's own speakers are muted until the stream ends.
-- **Clipboard:** while paired, text copied on either computer can be pasted on both (up to 256 KB; images and files are not shared).
-- **Files:** send files, ZIPs, or whole folders from Windows to the paired Mac, with drag-and-drop, progress, and cancellation. They arrive in **Downloads/mac-lan** (alpha.22 and later; earlier builds used Downloads/MAC-DOW) with existing items preserved. Folders arrive as folders; ZIPs stay ZIPs. For Mac → Windows (requires updated apps on both computers), choose **Send File to Windows…** in the Mac menu, then **Files → Receive from Mac** on Windows and choose a new destination filename. See [transfer limits](docs/file-transfer.md).
-- **Terminal and AI agents (alpha.48, off by default):** run commands on the Mac from a **Terminal** window on Windows, or on the PC from a shell in the Mac's Terminal, with live output, `cd`, Stop, and file copies. An MCP server (`mac-lan.exe --mcp`) lets AI coding agents such as Claude Code or Codex list the paired computer, run commands, transfer files and deploy updates there. Each computer must switch this on first; destructive commands, overwrites and deployments ask you in mac-lan before they run. See [remote commands](docs/remote-commands.md).
-- **Control:** alpha.36 and later activate input on the MacBook tab without a second click; App Priority retains click activation. Focus loss, tab or monitor changes, and disconnect release held input. The focused MacBook tab resumes control when permission and video are ready; manual Stop remains stopped until you select MacBook again or explicitly resume. Windows shortcuts carry over: Ctrl and left Alt act as Command (Ctrl+C/V/Z, Alt+Tab), right Alt is Option, tapping the Windows key opens Spotlight, and the Windows key with another key acts as Control. From alpha.37, plain Ctrl+Space and left Alt+Space are blocked while controlling the Mac so they cannot accidentally open Spotlight; Ctrl+Shift+Space still reaches Mac apps. Ctrl+Left/Right and Ctrl+Backspace/Delete move or delete by word, as Option does on the Mac; left Alt+Left/Right still sends Command+Left/Right. AltGr acts as Option. Start, Windows-key shortcuts, and keys such as Menu or Print Screen stay out of Windows while you control the Mac. Volume and media keys stay with the PC. Ctrl+Alt+Delete remains with Windows and releases control, as do locking Windows and UAC prompts; Windows may still act on its own reserved shortcuts such as Win+L. **Connection** opens the connection page, which also has Disconnect.
-- **Streaming settings:** choose a width cap, H.264 bitrate, or compatible JPEG before starting video. Both codecs target 60 fps. JPEG uses more bandwidth; no 15/30 fps fallback starts automatically.
+- **Two tabs, one bar.** A 32-pixel bar reserves its own space above maximized apps. It can auto-hide, and **Display** moves it and the Mac view between monitors. Windows apps on that display move aside while the Mac is shown and come back afterwards.
+- **Full desktop.** Hardware H.264 at up to 1920 pixels wide with a 60 fps target, keeping the Mac's proportions. The Mac's own display mode is not changed.
+- **App Priority.** Put one Mac window in its own resizable Windows window instead of the whole desktop.
+- **Control.** Selecting **MacBook** hands over keyboard and mouse. Ctrl and left Alt act as Command, the Windows key opens Spotlight, and Ctrl+Alt+Shift+Backspace always releases. Losing focus, switching tabs or a stale picture releases held keys.
+- **Sound.** Mac audio plays on Windows while you watch, and the Mac's speakers are muted until you stop.
+- **Clipboard.** Text copied on one computer pastes on the other (up to 256 KB).
+- **Files.** Drag files or folders to the Mac; they arrive in **Downloads/mac-lan**. **Send File to Windows…** in the Mac menu goes the other way. Transfers are verified with SHA-256 and never overwrite.
+- **Reconnects by itself.** After a drop, a sleep or an update, Windows finds the Mac again and resumes without a new approval.
+- **Signed automatic updates.** Both apps update from this repository's releases through a signed feed, waiting until you are not viewing, controlling or transferring.
 
-There is no image or file clipboard, microphone, IME, multi-touch, or stylus support. Character keys are sent by physical position, so the Mac's selected input source decides which character they type; choose the same layout on both computers. Non-US layouts, AltGr and the ISO key beside left Shift have not been checked on real hardware. Rapid pointer movement is coalesced before it reaches the Mac; if control input still outruns the Mac, held keys are released and control pauses instead of ending the video stream. Alpha.35 needs another click to resume; alpha.36 and later resume automatically on the focused MacBook tab once permissions and video are ready. Brief Wi-Fi or driver stalls are tolerated: control releases after a moment without a lease, while video keeps running for up to 15 seconds without a viewer message. Capture performance and latency depend on the Mac, Windows decoder, and LAN; a 60 fps target is not a measured throughput guarantee. The user confirmed alpha.14 works. The new menu-bar app, permission identity, proportional native capture, and Mac update/relaunch still require the user's two-computer checks in the [hardware checklist](docs/manual-validation.md). The alpha.15 Mac launcher is cross-compiled; its AppKit menu and capture helper compile on the Mac at first use.
+## Terminal and AI agents
 
-Alpha.36 also adds video recovery requests after decoder stalls, bounded pending audio work during Windows UI delays, and filtering for unsupported extra mouse buttons. See [validation status](docs/verification.md) for headless checks and remaining hardware tests.
+From alpha.48 either computer can run commands on the other. It is off until you switch it on.
 
-Alpha.40: plain Ctrl+Space sends Mac Control+Space for shortcuts such as FX Console, while Ctrl+C/V retain their Command mapping. Forwarded scrolling is marked as mouse-wheel input instead of a continuous trackpad gesture. This does not register a hardware mouse with macOS; After Effects zoom behavior still depends on its preferences. Native Mac compilation and After Effects behavior remain unverified.
+- **Windows → Mac:** **Terminal** in the top bar. Each line runs on the Mac in zsh with live output; `cd` changes folder, **Stop** ends a command, **Send files here…** copies files into the current Mac folder.
+- **Mac → Windows:** **Remote Commands… → Open Remote Terminal on Windows** in the Mac menu.
+- **AI agents:** mac-lan is a stdio [MCP](https://modelcontextprotocol.io) server, so a coding agent on one computer can build, test and deploy on the other:
 
-Alpha.42: a failed automatic update reopens mac-lan; **Restore previous version** on Windows holds that update until **Check now**; the Mac frees a session from a sleeping PC within about a minute, and Windows ends a stream after 8 seconds of Mac silence; short Wi-Fi stalls no longer end streams; Macs on two networks stay discoverable; a second Windows launch opens the running copy. See [release notes](docs/release-notes-alpha42.md). These changes need two-computer testing.
+  ```
+  claude mcp add mac-lan -- "C:\path\to\mac-lan.exe" --mcp
+  claude mcp add mac-lan -- "/Applications/mac-lan.app/Contents/Helpers/MacDowHost" --mcp
+  ```
 
-Alpha.43: Windows reconnects to the same Mac by itself after a drop, without a new approval on the Mac, and the MacBook tab shows a Reconnecting or Disconnected card with **Reconnect** instead of a black screen. Opening or closing App Priority no longer needs re-pairing. Automatic updates wait until the connection is idle. Keyboard fixes cover the lock screen, non-US layouts by key position, AltGr and word-wise editing. See [release notes](docs/release-notes-alpha43.md). These changes need two-computer testing.
+  **Copy MCP setup command** in the Terminal window or the Remote Commands menu gives the exact line. Tools: `list_devices`, `execute_command`, `get_execution_status`, `cancel_execution`, `transfer_file`, `deploy_update`. Agents that need a public HTTPS endpoint cannot connect; there is no relay.
 
-Alpha.44: frameless Windows apps, such as game launchers, now move off the MacBook display too, and an app that moves itself back is moved off again, so it no longer sits behind the Mac picture and takes focus. A shutdown crash is also fixed. See [release notes](docs/release-notes-alpha44.md).
+| Switch (each computer has both, both start off) | What it allows |
+|---|---|
+| Let the other computer run commands here | Commands and file reads or writes on this computer, with your account's rights |
+| Let AI agents and local tools use the link | Programs on this computer may use the link to the other one |
 
-Alpha.45: after you approve a PC on the Mac once, both remember each other. The Mac keeps the same Mac ID across launches, and Windows connects by itself, with no approval on the Mac, whenever the remembered Mac is on the network. Use **Forget Remembered PCs** (Mac menu) or **Forget remembered Macs** (Windows Connection page) to undo it. Automatic updates now wait only while you view, control or transfer files; an idle connection reconnects by itself after the update. See [release notes](docs/release-notes-alpha45.md).
+Commands that delete files, discard Git work, change system settings, need administrator rights, end programs or download and run scripts, any replacement of existing files, and every deployment are shown in a mac-lan prompt and run only if you approve. Agents cannot flip a switch or answer a prompt. Each computer keeps a `remote-audit.log` of what it was asked to do. The prompt list is a safety net, not a sandbox: an approved or ordinary command has your full rights.
 
-Alpha.47 restores the alpha.45 audio/video and input implementation after reports of intermittent control and unusable scrolling in alpha.46. See [release notes](docs/release-notes-alpha47.md).
+A command that is running when the connection drops keeps going for two minutes and its output resumes on reconnect. It is a command runner, not a terminal emulator: no full-screen programs, password prompts or colors.
 
-Alpha.48: after the Mac restarts, Windows finds its new address before reconnecting, so **Reconnect** works without opening Connection; a crash on quit is fixed. It also adds remote commands (a **Terminal** on Windows, a shell on the Mac and an MCP server for AI agents), off until you switch them on. See [release notes](docs/release-notes-alpha48.md).
+## Privacy and security
 
-## Updates
+- Traffic is TLS 1.3 between the two computers on private addresses only. Windows pins the Mac's certificate fingerprint; the Mac remembers only a hash of each PC's secret.
+- Pairing needs a physical approval on the Mac. **Forget Remembered PCs** (Mac) and **Forget remembered Macs** (Windows) undo it.
+- Diagnostics on Windows stay on the PC in `%LOCALAPPDATA%\MAC-DOW\diagnostics`. Mac diagnostics contain fixed event codes and counters, never screen contents, input or file names.
 
-Alpha.38 supplies native click counts for remote double/triple clicks, described in
-[development notes](docs/development.md#remote-mouse-multi-clicks-local-fix).
-Update the Mac host to receive the fix; alpha.37 does not contain it.
-Alpha.38 also skips unchanged cursor PNG encoding and releases held input
-if the Mac or Windows input queue cannot accept a discrete event; see the
-[optimization notes](docs/development.md#local-cursor-and-congestion-improvements).
+## Limits
 
-Install **alpha.14 or later on both computers once** from this repository's [public releases](https://github.com/tbhtho/mac-lan/releases). Earlier builds used a withdrawn feed and cannot discover this update. Close both apps before replacing them; settings and the Mac's existing private diagnostic configuration stay in their current locations.
+- Apple Silicon Macs only; one PC controls a Mac at a time.
+- A Mac whose screen has a different shape from your monitor shows bars at the sides or top.
+- No image or file clipboard, microphone, IME, multi-touch or stylus. Keys are sent by physical position, so use the same keyboard layout on both.
+- The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network.
+- This is a preview. Releases are checked with headless tests and on the author's two computers, not on a range of hardware.
 
-From **alpha.41**, automatic updates check at launch, every 5 seconds during the first 30 seconds, then every 30 seconds. Signed updates download, install, and reopen mac-lan automatically. Installation releases control, cancels active transfers cleanly, and briefly disconnects sharing; reconnect and approve viewing afterward. Turn off **Install updates automatically** in Windows Updates or the Mac menu to keep installation manual. Network availability, feed propagation, and download time affect when an update arrives. No GitHub sign-in is needed. Alpha.14–40 still require **Restart to update** once to install alpha.41, or use the installers above. An alpha.14 command-line host updates through a compatibility package: its next normal launch installs and opens **~/Applications/mac-lan.app**, preserving the old extracted folder. Manual installation of the app archive is also available. After restarting, pair and approve viewing again before activating control. Earlier private diagnostic bootstrap packages are not public downloads.
+## Building
 
-From **alpha.43**, a ready automatic update waits while Windows is connected, controlling, or transferring files, and installs once nothing has used the connection for a minute. **Restart to update** still installs immediately. Interrupted downloads resume instead of starting over, and old update copies and `.MAC-DOW-backup-*` files are removed, keeping only the latest backup and rollback record. This needs two-computer testing.
+Windows packaging needs the .NET 10 SDK, Go 1.24+, Node 22+ and Python 3:
 
-The public Mac package has no embedded diagnostic destination. Existing Mac-only diagnostic configuration is preserved locally. Mac diagnostics contain fixed event codes and counters, never screen pixels, input contents, pairing secrets, or transfer names and contents. Windows diagnostics stay local.
+```powershell
+./scripts/test.ps1              # headless tests; starts no UI or capture
+./scripts/package-windows.ps1   # artifacts/mac-lan.exe
+./scripts/package-macos-app.ps1 # cross-compiled Mac app archive
+```
 
-Alpha.34 and later add [detailed Windows disconnect logs](docs/windows-diagnostics.md), saved automatically in `%LOCALAPPDATA%\MAC-DOW\diagnostics`. Open **Connection → Display and diagnostics → Open logs folder** after a failure. Logs include heartbeat timing, transport errors, control state and decoder health, with automatic rotation. Earlier downloads contain only the earlier basic logging.
+On an Apple Silicon Mac with Go and Apple's command-line tools, `bash scripts/build-macos.sh` builds and self-tests the native parts. The Go code under `host` is shared: the Mac host, and a small helper bundled into the Windows app for discovery, updates and remote commands.
 
-[Development and earlier releases](docs/development.md) · [Protocol](docs/protocol.md) · [Architecture](docs/design.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT license](LICENSE)
+## License
+
+[MIT](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and shipped with the apps.

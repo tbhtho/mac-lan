@@ -60,7 +60,9 @@ $sumLines=foreach($path in @($windowsPath,$setupPath,$macPath,$appPath,$dmgPath,
 [IO.File]::WriteAllText($sumsPath,($sumLines -join "`n")+"`n",[Text.UTF8Encoding]::new($false))
 if($ValidateOnly){Write-Output "Validated $tag at $commit; no remote changes made.";return}
 $remote=Invoke-Checked -Command gh -Arguments @('api',"repos/$repository") | ConvertFrom-Json
-if($remote.id -ne $config.repositoryId -or $remote.private){throw 'The intended existing repository must already be public'}
+# repositoryId in the build configuration is the product identity installed apps pin in the signed feed.
+# It is no longer GitHub's numeric id: the repository was re-created under the same name.
+if($remote.full_name -ne $repository -or $remote.private){throw 'The release repository must be the public tbhtho/mac-lan'}
 $remoteHead=(Invoke-Checked -Command git -Arguments @('ls-remote','origin','refs/heads/main')) -split '\s+'
 if($remoteHead[0] -ne $commit){throw 'Push the packaged source commit to main before publishing'}
 $releases=@(Get-Releases)

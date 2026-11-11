@@ -12,3 +12,4 @@ artifacts/
 /.release-private/
 __pycache__/
 /host/nativeembed/
+AGENTS.md
