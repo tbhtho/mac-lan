@@ -40,6 +40,9 @@ internal sealed partial class MainWindow : Window
     string appLabel="";
     bool appSized;
     FileTransferWindow? filesWindow;
+    // Runs commands on the Mac and accepts them from it; see RemoteAgent.
+    readonly RemoteAgent remoteAgent=new();
+    TerminalWindow? terminalWindow;
     ClipboardSync? clipboard;
     bool remote,closing,connecting,openingFiles,awaitingFileTransfer,quitting;
     string? preferred;
@@ -83,7 +86,8 @@ internal sealed partial class MainWindow : Window
         Glass.Apply(this);Content=root;
         automaticUpdater=new(UpdateProcess.Call,PrepareUpdateRestart,UpdateProcess.RememberApply,UpdateProcess.StartDetached,()=>{Disconnect();Quit();},UpdateSessionActive);
         updatesButton.Click+=(_,_)=>ShowUpdates();
-        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,UserDisconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles);
+        tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,UserDisconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles,ShowTerminal);
+        remoteAgent.Prompt+=request=>Dispatcher.BeginInvoke(()=>AnswerRemotePrompt(request));
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
         tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
         monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
@@ -92,7 +96,7 @@ internal sealed partial class MainWindow : Window
         keyboard=new KeyboardHook((code,down)=>session?.Send(new{type="key",code,down}),Escape);keyboard.InputLost+=()=>gate.Disarm("foreground-lost");
         gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
-        Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();};
+        Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();remoteAgent.Start();};
         discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);Native.AddClipboardFormatListener(source.Handle);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
         // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
@@ -120,7 +124,7 @@ internal sealed partial class MainWindow : Window
                 e.Cancel=true;awaitingFileTransfer=true;gate.Disarm("shutdown");session?.Abort("Closed","app-closed");
                 await filesWindow.CancelAndWaitAsync();awaitingFileTransfer=false;Close();return;
             }
-            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");desktopWorkspace.Restore();keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed","app-closed");filesWindow?.Close();desktop.Dispose();tabBar.Dispose();
+            closing=true;Telemetry.Report("shutdown");gate.Disarm("shutdown");desktopWorkspace.Restore();keyboard.Dispose();timer.Stop();updateTimer.Stop();discoveryTimer.Stop();Native.UnregisterHotKey(new WindowInteropHelper(this).Handle,901);Native.RemoveClipboardFormatListener(new WindowInteropHelper(this).Handle);clipboard?.Dispose();clipboard=null;source?.RemoveHook(WndProc);appWindow?.Close();session?.Abort("Closed","app-closed");filesWindow?.Close();terminalWindow?.Close();remoteAgent.Dispose();desktop.Dispose();tabBar.Dispose();
         };
     }
     internal void Quit(){quitting=true;Close();}
@@ -145,6 +149,26 @@ internal sealed partial class MainWindow : Window
             var current=new FileTransferWindow(session);if(IsVisible)current.Owner=this;filesWindow=current;current.Closed+=(_,_)=>{if(ReferenceEquals(filesWindow,current))filesWindow=null;};current.Show();current.Activate();
         }
         finally{openingFiles=false;}
+    }
+    void ShowTerminal()
+    {
+        if(closing)return;
+        // Typing in the terminal must go to this PC, not to the Mac view.
+        gate.Disarm("terminal-open");SendLease();
+        if(terminalWindow!=null){terminalWindow.Activate();return;}
+        var window=new TerminalWindow(remoteAgent);terminalWindow=window;
+        window.Closed+=(_,_)=>{if(ReferenceEquals(terminalWindow,window))terminalWindow=null;};
+        window.Show();window.Activate();
+    }
+    // A destructive command, an overwrite or a deployment headed for the Mac waits for this answer.
+    void AnswerRemotePrompt(RemotePromptRequest request)
+    {
+        if(closing){remoteAgent.Answer(request.Id,false);return;}
+        gate.Disarm("remote-prompt");SendLease();
+        string origin=request.Origin=="agent"?"REQUEST FROM AN AI AGENT OR LOCAL TOOL":"YOUR COMMAND";
+        bool allow=RemotePrompt.Ask(terminalWindow is {IsVisible:true}?terminalWindow:null,request.Title,request.Detail,request.Reason,origin);
+        Telemetry.Report(allow?"remote-prompt-allowed":"remote-prompt-denied");
+        remoteAgent.Answer(request.Id,allow);
     }
     // On the MacBook tab, Connection opens over the Mac view instead of leaving it.
     Window? connectionWindow;
@@ -292,7 +316,7 @@ internal sealed partial class MainWindow : Window
         if(session!=s||!m.TryGetProperty("type",out var t))return;
         switch(t.GetString())
         {
-            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;pairedAt=Environment.TickCount64;resumeToken=s.ResumeToken;trustedAttempt=false;autoConnectBackoff=120000;if(s.TrustedDevice is var(device,secret)&&lastHost!=null){trustedMacs.Remember(new(lastHost.Name,lastHost.Fingerprint,device,secret));Telemetry.Report("mac-remembered");}if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;
+            case "catalog":bool fresh=connecting,wasResume=resuming;paired=true;connecting=false;resuming=false;pairedAt=Environment.TickCount64;resumeToken=s.ResumeToken;trustedAttempt=false;autoConnectBackoff=120000;if(s.TrustedDevice is var(device,secret)&&lastHost!=null){trustedMacs.Remember(new(lastHost.Name,lastHost.Fingerprint,device,secret));Telemetry.Report("mac-remembered");}if(wasResume)Telemetry.Report("session-resumed");clipboard?.Dispose();clipboard=s.TransferTarget is TransferTarget shared?new ClipboardSync(shared):null;if(s.SupportsRemote&&s.TransferTarget is TransferTarget remoteTarget)remoteAgent.Link(remoteTarget);else remoteAgent.Unlink();
                 // A fresh pairing already approved viewing, so close the connection page and show the Mac.
                 if(fresh&&wasResume)Dispatcher.BeginInvoke(()=>{if(session==s&&paired)ResumeView();},DispatcherPriority.Background);
                 else if(fresh)Dispatcher.BeginInvoke(()=>{if(session==s&&paired){connectionWindow?.Close();ShowRemote();}},DispatcherPriority.Background);
@@ -558,7 +582,7 @@ internal sealed partial class MainWindow : Window
         try{Directory.CreateDirectory(Telemetry.DirectoryPath);Process.Start(new ProcessStartInfo("explorer.exe"){Arguments="\""+Telemetry.DirectoryPath+"\"",UseShellExecute=true});}
         catch(Exception ex)when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception){LogDiagnostic("logs-folder-failed","open",error:ex);status.Text="Logs folder: "+Telemetry.DirectoryPath;}
     }
-    void Disconnect(){CancelReconnect();desktopWorkspace.Restore();clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
+    void Disconnect(){CancelReconnect();remoteAgent.Unlink();desktopWorkspace.Restore();clipboard?.Dispose();clipboard=null;paired=false;pairButton.Content="Connect";pairButton.IsEnabled=!connecting&&nearby.SelectedItem is DiscoveredHost;streamSection.Visibility=Visibility.Collapsed;gate.Disarm("disconnected");if(session!=null){var old=session;session=null;old.Abort("Disconnected","user-disconnect");_ = old.DisposeAsync();}desktop.Clear();appView?.Clear();windows.ItemsSource=null;status.Text="Disconnected. Control is released.";}
     void RefreshMonitors()
     {
         var all=Native.Monitors();if(all.Count==0)return;
@@ -611,7 +635,7 @@ internal sealed partial class MainWindow : Window
     // Automatic updates wait while Windows is connecting, connected, controlling or transferring files.
     // An idle connection (files and clipboard only) reconnects by itself after an update, so only
     // viewing, control, transfers or an attempt in progress hold an automatic update back.
-    bool UpdateSessionActive()=>connecting||Reconnecting||openingFiles||session?.IsReady==true||session?.IsStarting==true||gate.CanRoute||filesWindow?.IsBusy==true;
+    bool UpdateSessionActive()=>remoteAgent.State.Busy||connecting||Reconnecting||openingFiles||session?.IsReady==true||session?.IsStarting==true||gate.CanRoute||filesWindow?.IsBusy==true;
     async Task CheckUpdates()
     {
         automaticUpdater.Observe();

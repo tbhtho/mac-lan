@@ -37,6 +37,9 @@ func main() {
 		}
 		return
 	}
+	if code, handled := remoteCommandLine(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--diagnose" {
 		event, code := "manual-report", "ok"
 		if len(os.Args) > 2 {
@@ -181,6 +184,11 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	}
 	s.transfers = newTransferReceiver(filepath.Join(userHome, "Downloads", "mac-lan"))
 	s.clipboard = macClipboard()
+	remoteLink := startRemoteHost()
+	defer remoteLink.close()
+	if remoteLink != nil {
+		s.remote = remoteLink.node
+	}
 	s.videoError = videoError
 	s.catalog = func() ([]window, error) {
 		if videoError != "" {
@@ -200,6 +208,11 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 	var scanner *bufio.Scanner
 	if gui {
 		broker = newUIBroker(os.Stdin, os.Stdout, func(kind, path string, emit func(map[string]any)) {
+			if kind == "remote-menu" {
+				// The dialogs block; keep reading the menu's other messages meanwhile.
+				go remoteLink.menu(func(message string) { emit(map[string]any{"type": "state", "message": message}) })
+				return
+			}
 			if kind == "forget-pcs" {
 				message := "Remembered PCs are unavailable on this Mac."
 				if s.trust != nil {

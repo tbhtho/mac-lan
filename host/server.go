@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/tbhtho/MAC-DOW/host/internal/diagnostics"
+	"github.com/tbhtho/MAC-DOW/host/internal/remote"
 	"math"
 	"math/big"
 	"net"
@@ -208,6 +209,9 @@ type server struct {
 	stream     func(func([]byte), func(string), <-chan input) error
 	transfers  *transferReceiver
 	clipboard  *clipboard
+	// remote runs commands and file requests for the paired PC once this Mac's
+	// user has switched that on; nil when unavailable.
+	remote *remote.Node
 	videoError string
 	// selected is only accessed while slot is held.
 	selected start
@@ -220,6 +224,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/transfer" && s.transfers != nil {
 		s.transfers.serveHTTP(w, r, s.peerAllowed)
+		return
+	}
+	if r.URL.Path == "/remote" && s.transfers != nil && s.remote != nil {
+		s.serveRemote(w, r)
 		return
 	}
 	if r.URL.Path == "/clipboard" && s.transfers != nil && s.clipboard != nil {
@@ -334,6 +342,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer revoke()
+		if s.remote != nil {
+			// The remote-command link belongs to this pairing and ends with it. A
+			// command that is still running waits briefly for the PC to reconnect.
+			defer s.remote.Drop()
+		}
 	}
 	windows, err := s.catalog()
 	videoError := s.videoError
@@ -363,6 +376,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if transferToken != "" {
 		catalog["transferToken"] = transferToken
+		if s.remote != nil {
+			// Windows may open /remote with the same token. Older Windows builds ignore this.
+			catalog["remote"] = 1
+		}
 	}
 	if videoError != "" {
 		catalog["maxFps"] = 0

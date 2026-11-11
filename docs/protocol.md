@@ -2,7 +2,7 @@
 
 TLS 1.3 on the Mac server, RFC 6455 WebSocket at /session. Windows validates the exact SHA-256 DER certificate fingerprint through ClientWebSocket's supported native TLS validation callback. It refuses DNS names/public addresses. Self-signed identity and 256-bit random token exist only in host memory for that launch. No browser certificate warning bypass, trust-store modification, saved token or permanent pairing.
 
-One controller; private IPv4 interface/peers only; no Origin header allowed; JSON messages <=4096 bytes; binary frames <=4 MiB; 5 s authentication deadline. Native capture is a child process with no listening socket. File transfers use a separate authenticated HTTPS request, described in [file-transfer.md](file-transfer.md); file content never enters the video/input WebSocket. No remote executable commands or clipboard payloads.
+One controller; private IPv4 interface/peers only; no Origin header allowed; JSON messages <=4096 bytes; binary frames <=4 MiB; 5 s authentication deadline. Native capture is a child process with no listening socket. File transfers use a separate authenticated HTTPS request, described in [file-transfer.md](file-transfer.md); file content never enters the video/input WebSocket. The video/input WebSocket carries no executable commands or clipboard payloads; commands use the separate, opt-in `/remote` link described under [Remote commands](#remote-commands-unreleased).
 
 1. Client text: {"type":"auth","token":"64 hex digits"}.
 2. Host: {"type":"catalog","maxFps":60,"windows":[{"id":42,"app":"Editor","title":"document"}]}. New hosts also provide an ephemeral `transferToken` after pairing. When native video setup is unavailable, `maxFps` is 0, `videoError` explains the problem, and pairing/file transfer remain available. This never substitutes a lower frame rate.
@@ -105,3 +105,15 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   during transfers, or while a connection attempt is in progress. An idle
   remembered connection (files and clipboard) no longer holds them back; it
   reconnects by itself afterwards.
+
+## Remote commands (unreleased)
+
+- A catalog that carries a `transferToken` may also carry `"remote": 1`. Windows may then
+  open `GET /remote` as a WebSocket on the same listener, with the pinned certificate and
+  `Authorization: Bearer <transferToken>` from the paired address and no `Origin`. Other
+  requests receive 403. Older hosts answer 403 for the path and never send the flag.
+- The link ends when the session that issued the token ends; Windows opens a new one with the
+  next catalog's token. Commands that were running are reattached by id.
+- Neither computer runs a command or serves a file until its own user has switched remote
+  commands on; requests before that receive `code: "disabled"`.
+- Message types, limits and the approval rules are in [remote-commands.md](remote-commands.md).

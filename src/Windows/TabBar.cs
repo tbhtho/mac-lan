@@ -40,7 +40,7 @@ internal sealed class TabBar : Window,IDisposable
     bool registered,positioning,queued,disposed;
     string? monitor;
     HwndSource? source;
-    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,Action<MonitorArea> selectMonitor,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null)
+    public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,Action<MonitorArea> selectMonitor,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null,Action? terminal=null)
     {
         autoHide=new(preferences.LoadAutoHide());
         Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=TabBarLayout.Dip;
@@ -51,6 +51,7 @@ internal sealed class TabBar : Window,IDisposable
         Button ActionButton(string label,Action action){var b=new Button{Content=label,Style=ghost,Margin=new Thickness(2,0,0,0),MinHeight=24,Padding=new Thickness(10,2,10,2)};b.Click+=(_,_)=>action();return b;}
         var connectionButton=ActionButton("Connection",setup);
         if(files!=null)right.Children.Add(ActionButton("Files",files));
+        if(terminal!=null){var terminalButton=ActionButton("Terminal",terminal);terminalButton.ToolTip="Run commands on your Mac";right.Children.Add(terminalButton);}
         right.Children.Add(connectionButton);
         updateButton.Style=ghost;updateButton.Margin=new Thickness(2,0,0,0);updateButton.MinHeight=24;updateButton.Padding=new Thickness(10,2,10,2);
         right.Children.Add(updateButton);

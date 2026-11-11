@@ -4,6 +4,32 @@ internal static class Program
 {
     [STAThread] static void Main(string[] args)
     {
+        // An AI agent or a terminal starts mac-lan.exe with one of these to reach the running app's
+        // link to the Mac. The bundled helper does the work on this process's own stdin and stdout.
+        if(args.Length>0&&args[0] is "--mcp" or "--remote-shell")
+        {
+            // A windowed program does not hand its redirected stdin and stdout to a child by itself, so copy both ways.
+            var start=new System.Diagnostics.ProcessStartInfo(Payloads.Helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true};
+            start.ArgumentList.Add(args[0]=="--mcp"?"mcp":"remote-shell");
+            foreach(string argument in args.Skip(1))start.ArgumentList.Add(argument);
+            try
+            {
+                using var helper=System.Diagnostics.Process.Start(start);
+                if(helper==null){Environment.Exit(1);return;}
+                static void Pump(System.IO.Stream from,System.IO.Stream to)
+                {
+                    var buffer=new byte[64*1024];
+                    try{int count;while((count=from.Read(buffer,0,buffer.Length))>0){to.Write(buffer,0,count);to.Flush();}}
+                    catch(Exception e)when(e is System.IO.IOException or ObjectDisposedException or NotSupportedException){}
+                }
+                var toHelper=new Thread(()=>{Pump(Console.OpenStandardInput(),helper.StandardInput.BaseStream);try{helper.StandardInput.Close();}catch(Exception e)when(e is System.IO.IOException or ObjectDisposedException){}}){IsBackground=true};
+                toHelper.Start();
+                Pump(helper.StandardOutput.BaseStream,Console.OpenStandardOutput());
+                helper.WaitForExit();Environment.Exit(helper.ExitCode);
+            }
+            catch(Exception e)when(e is System.ComponentModel.Win32Exception or System.IO.IOException or InvalidOperationException){Environment.Exit(1);}
+            return;
+        }
         if(args.Contains("--package-diagnostics"))
         {
             var probeApp=new Application();

@@ -84,6 +84,8 @@ internal sealed class Session : IAsyncDisposable
     public bool SupportsKeyframes {get;private set;}
     public string? VideoError {get {lock(lifecycle)return videoError;}}
     public bool CanTransfer => TransferTarget!=null;
+    // Mac hosts with remote commands accept a second pinned connection at /remote with the transfer token.
+    public bool SupportsRemote {get;private set;}
     public TransferTarget? TransferTarget {get {lock(lifecycle)return phase is Paired or Starting or Ready?transferTarget:null;}}
     public long NativeAlive {get;private set;}
     public long LastFrame {get;private set;}
@@ -255,6 +257,7 @@ internal sealed class Session : IAsyncDisposable
                                 if(value.TryGetProperty("trustedDevice",out var trusted)&&trusted.ValueKind==JsonValueKind.Object&&trusted.TryGetProperty("id",out var deviceId)&&trusted.TryGetProperty("token",out var deviceToken)&&TrustedMacs.Valid(fingerprint,deviceId.GetString(),deviceToken.GetString()))
                                     TrustedDevice=(deviceId.GetString()!,deviceToken.GetString()!);
                                 if(value.TryGetProperty("resumeToken",out var resume)&&resume.ValueKind==JsonValueKind.String&&IsHexToken(resume.GetString()))ResumeToken=resume.GetString();
+                                SupportsRemote=transferTarget!=null&&value.TryGetProperty("remote",out var remoteLink)&&remoteLink.ValueKind==JsonValueKind.Number&&remoteLink.TryGetInt32(out int remoteVersion)&&remoteVersion>=1;
                                 phase=Paired;
                             }
                             if(t.GetString()=="ready"){if(phase!=Starting)throw new InvalidDataException("Unexpected stream response.");phase=Ready;}

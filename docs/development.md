@@ -411,3 +411,16 @@ Go tests create fixtures under `TEMP`. In a shell whose `TEMP` is a folder the
 account cannot fully use (for example `C:\Windows\TEMP`), the updater and menu
 tests fail with "Access is denied"; point `TEMP` and `TMP` at a writable folder
 such as `.cache/test-tmp` first.
+
+## Remote commands, terminal and MCP server (unreleased)
+
+`host/internal/remote` holds one implementation used by both computers: the command runner,
+the link protocol, file transfer, the loopback endpoint for local tools, a stdio MCP server
+and a line-based shell. The Mac host serves the link at `/remote` on its existing listener
+(`host/remote_host.go`). On Windows the bundled helper runs in `remote-agent` mode for the
+life of mac-lan.exe (`src/Windows/RemoteAgent.cs`), and `TerminalWindow.cs` is its window.
+`mac-lan.exe --mcp` and `MacDowHost --mcp` are thin clients of the running app. The Mac menu
+gains one item, **Remote Commands…**, which only sends `remote-menu` to the host; the host
+shows the choices with `osascript`, so the Swift change is one menu item and one action.
+Behavior, safety rules and what has and has not been checked are in
+[remote-commands.md](remote-commands.md).

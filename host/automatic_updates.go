@@ -58,7 +58,7 @@ func (t *transferReceiver) inUse() bool {
 
 // sharingBusy reports a connected Windows session or a file transfer.
 func (s *server) sharingBusy() bool {
-	if s.transfers.inUse() {
+	if s.transfers.inUse() || s.remoteBusy() {
 		return true
 	}
 	s.connectionMu.Lock()
@@ -97,7 +97,7 @@ func scheduleAutomaticUpdate(ctx context.Context, s *server, idle *sharingIdle, 
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	transferring := s.transfers.inUse()
+	transferring := s.transfers.inUse() || s.remoteBusy()
 	s.connectionMu.Lock()
 	if s.stopped || s.updating {
 		s.connectionMu.Unlock()
