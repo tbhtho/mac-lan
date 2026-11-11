@@ -385,3 +385,38 @@ The Mac menu's local picker creates one offer bound to the existing approved pai
 Fresh Mac validation: full Go race suite and native AppKit/capture self-tests passed. `assessment/FileReceive.net8.csproj` links unchanged production transfer classes and `tests/Transfer.Tests/ReceiveChecks.cs`; 38 checks passed using synthetic files and loopback TLS, covering empty/16 MiB payloads, Unicode, unsafe names, corruption, no overwrite, lost acknowledgment, cancellation, and disconnect. This is isolated .NET 8 validation, not acceptance of the production .NET 10 Windows/WPF build. The same checks run from `dotnet run --project tests/Transfer.Tests` on Windows. Native builds are headless; real two-computer interaction remains untested.
 
 Reproduce the isolated check with the installed .NET 8 SDK: set `DOTNET_GENERATE_ASPNET_CERTIFICATE=false`, `DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1`, and workspace-local `DOTNET_CLI_HOME`, `NUGET_PACKAGES` and normalized `TMPDIR`, then run `dotnet run --project assessment/FileReceive.net8.csproj`. Production target frameworks are unchanged. On macOS, temporary test TLS certificates and loopback listeners need execution outside the restrictive sandbox; they are not trusted or installed as development certificates.
+
+
+## Alpha.46 shared audio/video timing
+
+This release requests optional capture timestamps on both tracks. The
+Mac retains CoreMedia sample times through JPEG/H.264 encoding and PCM transport,
+including the original image time when re-sending a static recovery keyframe.
+Windows maps those times onto one playout clock instead of playing each track
+as soon as its independent queue drains. The default playout lead is 60 ms;
+reported audio-device latency can raise it, capped at 200 ms. This adds a small
+video buffer in exchange for alignment and is not a measured end-to-end latency.
+The output timestamp API is preferred, with a base/output-latency fallback.
+
+Audio source handles are stopped on overflow, stream reset, view departure and
+output suspension. Previously resetting only the time cursor could leave old
+sources playing on top of newer sound. Missing PCM remains a timed gap, duplicate
+chunks are rejected, and already-late samples are trimmed or dropped. A stale
+initial still image cannot set a clock that delays fresh audio for seconds.
+Decoded pictures wait for their capture deadline; recovery still images retain
+a bounded local queue-age check even when the original capture time is old.
+Clock correction follows minimum arrival delay slowly (at most 2 ms per second),
+with immediate downward rebasing only for a large source/local-clock mismatch.
+
+The host discards audio queued locally for more than 120 ms and services queued
+video after at most one audio chunk, so a burst cannot starve video. Windows keeps
+its existing bounded UI queue and additionally invalidates drained audio batches
+when a stream clears. The extended header is opt-in: new Windows with an older
+Mac retains legacy immediate-video/bounded-audio behavior, and an older Windows
+client still receives the original header from the new Mac.
+
+Deterministic audio/video clock fixtures and native Mac helper self-tests cover protocol, queues, ordering, reset and clock edge cases.
+These checks cannot measure the real speakers/display or After Effects preview.
+Do not advertise tighter measured sync until the two-computer flash/click checks
+in the manual validation guide are completed. Browser DOM/codec tests were blocked
+by browser startup crashes/timeouts that also affected the unchanged baseline.

@@ -105,3 +105,26 @@ TLS/WebSocket uses reliable ordered TCP. Loss can stall video behind retransmiss
   during transfers, or while a connection attempt is in progress. An idle
   remembered connection (files and clipboard) no longer holds them back; it
   reconnects by itself afterwards.
+
+
+## Optional media clock (alpha.46)
+
+New Windows starts include `"audio":true,"mediaClock":true`. A new host passes
+`media-clock` to its capture helper; omitted/false leaves legacy packets intact.
+Older hosts ignore the unknown field and continue the original format. The high
+bit of each packet kind identifies an extended header: `0x81` JPEG, `0x82` H.264
+keyframe, `0x83` H.264 delta, `0x84` audio. Sequence and encode duration remain at
+offsets 1 and 5. Offset 9 holds an unsigned 64-bit big-endian capture timestamp in
+microseconds; payload starts at 17. Zero means unavailable. Values above
+9007199254740991 and truncated headers are invalid. The 4 MiB packet cap includes
+the extended header. Audio has its own sequence; its payload is interleaved signed
+16-bit little-endian stereo PCM at exactly 48 kHz.
+
+Capture times on both tracks come from the same CoreMedia clock, not either
+computer's wall clock. H.264 encoder timestamp monotonicity is separate from the
+actual image capture time used for repeated keyframes. Windows' shared playout
+mapping is an alignment mechanism, not a synchronized one-way-latency metric.
+Audio messages inside the WebView bridge retain their full packet and stream
+epoch. Inactive playback and stale epochs cannot schedule sound; clear/recovery
+stops previously scheduled Web Audio sources. Host audio residence is bounded at
+120 ms and audio/video writes are interleaved after priority status traffic.

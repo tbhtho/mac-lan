@@ -43,6 +43,8 @@ Alpha.44: frameless Windows apps, such as game launchers, now move off the MacBo
 
 Alpha.45: after you approve a PC on the Mac once, both remember each other. The Mac keeps the same Mac ID across launches, and Windows connects by itself, with no approval on the Mac, whenever the remembered Mac is on the network. Use **Forget Remembered PCs** (Mac menu) or **Forget remembered Macs** (Windows Connection page) to undo it. Automatic updates now wait only while you view, control or transfer files; an idle connection reconnects by itself after the update. See [release notes](docs/release-notes-alpha45.md).
 
+Alpha.46 aligns audio and video using shared capture timestamps and bounded playback queues. Update both computers for the new timing; hardware sync remains unmeasured. See [release notes and verification limits](docs/release-notes-alpha46.md).
+
 ## Updates
 
 Alpha.38 supplies native click counts for remote double/triple clicks, described in

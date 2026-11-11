@@ -4,12 +4,22 @@ import vm from 'node:vm';
 import * as core from '../src/Windows/viewer-core.mjs';
 const source=fs.readFileSync('src/Windows/viewer.mjs','utf8').replace(/^import[^\n]+\n/,'');
 function runtime({manualDecoder=false}={}){
- const state={decoded:[],timestamps:[],creations:0,draws:0,closed:0,videoClosed:0,bitmaps:[],messages:[],focusCalls:0,decoders:[],frames:[],resizes:0,now:1};let handler,timer=0;
+ const state={decoded:[],timestamps:[],creations:0,draws:0,closed:0,videoClosed:0,bitmaps:[],messages:[],focusCalls:0,decoders:[],frames:[],resizes:0,now:1,audio:[],audioContext:null};let handler,timer=0;
  const noop=()=>{},listeners=new Map(),windowListeners=new Map(),captures=new Set();
  let width=640,height=480;const animation=new Map(),timers=new Map();
  const canvas={get width(){return width},set width(v){width=v;state.resizes++},get height(){return height},set height(v){height=v;state.resizes++},style:{},focus:()=>{state.focusCalls++;sandbox.document.activeElement=canvas;},addEventListener:(type,h)=>listeners.set(type,h),getBoundingClientRect:()=>({left:0,top:0,width:640,height:480}),setPointerCapture:id=>captures.add(id),hasPointerCapture:id=>captures.has(id),releasePointerCapture:id=>captures.delete(id),getContext:()=>({clearRect:noop,drawImage:()=>state.draws++})};
  class Decoder{constructor(c){state.creations++;state.decoders.push(this);this.c=c;this.state='unconfigured';this.decodeQueueSize=0;this.chunks=[];this.listeners=new Map()}configure(){this.state='configured'}close(){this.state='closed'}addEventListener(type,h){this.listeners.set(type,h)}decode(chunk){assert.equal(this.state,'configured');state.decoded.push(chunk.type);state.timestamps.push(chunk.timestamp);this.chunks.push(chunk);this.decodeQueueSize++;if(!manualDecoder)this.complete()}complete({stale=false}={}){const chunk=this.chunks.shift();assert.ok(chunk,'a submitted encoded frame is required');this.decodeQueueSize--;const frame={timestamp:chunk.timestamp,displayWidth:640,displayHeight:480,closed:false,close(){assert.equal(this.closed,false,'each decoded frame must close exactly once');this.closed=true;state.videoClosed++}};state.frames.push(frame);if(!stale)this.listeners.get('dequeue')?.();this.c.output(frame);return frame}}
- const sandbox={...core,console,performance:{now:()=>state.now},Uint8Array,DataView,Map,Blob,atob:s=>Buffer.from(s,'base64').toString('binary'),setInterval:noop,setTimeout:(fn,ms)=>{const id=++timer;timers.set(id,{fn,at:state.now+ms});return id},clearTimeout:id=>timers.delete(id),requestAnimationFrame:fn=>{const id=++timer;animation.set(id,fn);return id},cancelAnimationFrame:id=>animation.delete(id),window:{addEventListener:(type,h)=>windowListeners.set(type,h)},document:{querySelector:s=>s==='canvas'?canvas:{textContent:''},body:{classList:{toggle:noop}}},chrome:{webview:{postMessage:m=>state.messages.push(m),addEventListener:(_,h)=>handler=h}},VideoDecoder:Decoder,EncodedVideoChunk:class{constructor(v){Object.assign(this,v)}},createImageBitmap:()=>new Promise((resolve,reject)=>state.bitmaps.push(Object.assign(()=>resolve({width:640,height:480,close:()=>state.closed++}),{reject})))};
+ class AudioContextMock {
+  constructor(){this.state='running';this.baseLatency=0.005;this.outputLatency=0.015;this.destination={};this.listeners=new Map();state.audioContext=this;}
+  get currentTime(){return state.now/1000;}
+  getOutputTimestamp(){return {contextTime:this.currentTime-0.02,performanceTime:state.now};}
+  addEventListener(type,handler){this.listeners.set(type,handler);}
+  resume(){this.state='running';return Promise.resolve();}
+  changeState(value){this.state=value;this.listeners.get('statechange')?.();}
+  createBuffer(channels,frames,rate){return {duration:frames/rate,getChannelData:()=>new Float32Array(frames)};}
+  createBufferSource(){return {buffer:null,onended:null,stopped:false,disconnected:false,connect(){},disconnect(){this.disconnected=true;},start(at){this.at=at;state.audio.push(this);},stop(){this.stopped=true;}};}
+ }
+ const sandbox={...core,AudioContext:AudioContextMock,console,performance:{now:()=>state.now},Uint8Array,DataView,Map,Blob,atob:s=>Buffer.from(s,'base64').toString('binary'),setInterval:noop,setTimeout:(fn,ms)=>{const id=++timer;timers.set(id,{fn,at:state.now+ms});return id},clearTimeout:id=>timers.delete(id),requestAnimationFrame:fn=>{const id=++timer;animation.set(id,fn);return id},cancelAnimationFrame:id=>animation.delete(id),window:{addEventListener:(type,h)=>windowListeners.set(type,h)},document:{querySelector:s=>s==='canvas'?canvas:{textContent:''},body:{classList:{toggle:noop}}},chrome:{webview:{postMessage:m=>state.messages.push(m),addEventListener:(_,h)=>handler=h}},VideoDecoder:Decoder,EncodedVideoChunk:class{constructor(v){Object.assign(this,v)}},createImageBitmap:()=>new Promise((resolve,reject)=>state.bitmaps.push(Object.assign(()=>resolve({width:640,height:480,close:()=>state.closed++}),{reject})))};
  vm.runInContext(source,vm.createContext(sandbox));return {state,canvas,send:m=>Promise.resolve(handler({data:m})),scheduled:()=>({paints:[...animation.values()],timers:[...timers.values()].map(v=>v.fn)}),paint:()=>{const callbacks=[...animation.values()];animation.clear();for(const callback of callbacks)callback(state.now)},tick:ms=>{state.now+=ms;for(const [id,value] of [...timers])if(value.at<=state.now){timers.delete(id);value.fn()}},decodeOne:options=>state.decoders.at(-1).complete(options),pointer:(type,properties={})=>listeners.get(type)?.({clientX:320,clientY:240,pointerId:1,button:0,deltaY:5,preventDefault:noop,...properties}),blur:()=>windowListeners.get('blur')?.()};
 }
 function packet(kind,seq,payload){const b=Buffer.alloc(9+payload.length);b[0]=kind;b.writeUInt32BE(seq,1);b.writeUInt32BE(1000,5);Buffer.from(payload).copy(b,9);return {type:'frame',data:b.toString('base64')}}
@@ -281,4 +291,59 @@ for(const recoverDuringChord of [false,true]){
  h.state.messages.length=0;h.pointer('pointermove',{clientX:30,clientY:30});await h.send({type:'clear'});h.state.messages.length=0;
  h.paint();assert.equal(h.state.messages.length,0,'a stream reset discards a pending position from the old picture');
  console.log('PASS a high-polling pointer coalesces per animation frame and flushes before clicks, scrolls and stream resets');
+}
+
+function mediaPacket(kind,seq,captureMs,payload){
+ const b=Buffer.alloc(17+payload.length);b[0]=kind|0x80;b.writeUInt32BE(seq,1);b.writeUInt32BE(1000,5);b.writeBigUInt64BE(BigInt(Math.round(captureMs*1000)),9);Buffer.from(payload).copy(b,17);return {type:kind===4?'audio':'frame',data:b.toString('base64')};
+}
+const pcm=frames=>Buffer.alloc(frames*4);
+{
+ const h=runtime();h.tick(999);await h.send({type:'video',epoch:1,codec:'avc1.42c01f'});
+ await h.send({...mediaPacket(2,1,10000,key),epoch:1});
+ await h.send({...mediaPacket(4,1,10000,pcm(480)),epoch:1});
+ assert.equal(h.state.audio.length,1);const first=h.state.audio[0];
+ assert.ok(Math.abs(first.at+0.02-1.06)<0.000001,'audio output latency is subtracted so sound reaches the device at the shared video deadline');
+ h.paint();assert.equal(h.state.draws,0,'timestamped video waits for its shared playout deadline');
+ h.tick(60);h.paint();assert.equal(h.state.draws,1);
+ console.log('PASS audio output clock and timestamped video target the same playout time');
+}
+{
+ const h=runtime();h.tick(999);await h.send(mediaPacket(4,1,10000,pcm(480)));
+ await h.send(mediaPacket(4,2,10010,pcm(480)));await h.send(mediaPacket(4,4,10040,pcm(480)));
+ assert.equal(h.state.audio.length,3);
+ const [a,b,c]=h.state.audio;assert.ok(b.at>=a.at+a.buffer.duration-0.000001);
+ assert.ok(c.at>=b.at+b.buffer.duration+0.019,'missing capture samples remain a gap rather than compressing audio ahead of video');
+ await h.send(mediaPacket(4,4,10040,pcm(480)));assert.equal(h.state.audio.length,3,'duplicate audio cannot replay');
+ h.tick(200);await h.send(mediaPacket(4,5,10050,pcm(480)));assert.equal(h.state.audio.length,3,'fully late PCM is discarded');
+ console.log('PASS capture-time gaps, duplicate rejection and late dropping preserve audio timing');
+}
+{
+ const h=runtime();h.tick(999);await h.send({type:'video',epoch:1,codec:'avc1.42c01f'});await h.send({...mediaPacket(4,1,10000,pcm(960)),epoch:1});
+ const source=h.state.audio[0];await h.send({type:'clear',epoch:2});assert.equal(source.stopped,true);assert.equal(source.disconnected,true);
+ await h.send({...mediaPacket(4,2,10020,pcm(960)),epoch:1});assert.equal(h.state.audio.length,1,'previous epochs cannot play sound');
+ await h.send({...mediaPacket(4,1,20000,pcm(960)),epoch:2});assert.equal(h.state.audio.length,2,'a new stream may restart its audio sequence');
+ const resumed=h.state.audio[1];await h.send({type:'playback',epoch:2,active:false});assert.equal(resumed.stopped,true);
+ await h.send({...mediaPacket(4,2,20020,pcm(960)),epoch:2});assert.equal(h.state.audio.length,2,'hidden view rejects already queued audio messages');
+ await h.send({type:'playback',epoch:2,active:true});await h.send({...mediaPacket(4,3,30000,pcm(960)),epoch:2});assert.equal(h.state.audio.length,3);
+ h.state.audioContext.changeState('suspended');assert.equal(h.state.audio[2].stopped,true,'suspension cancels sources even with no further packets');
+ await h.send({...mediaPacket(4,4,30020,pcm(960)),epoch:2});assert.equal(h.state.audio.length,3,'the resume-triggering packet is discarded, not queued while suspended');
+ console.log('PASS epoch changes, hidden views and suspended output cancel scheduled audio');
+}
+{
+ const h=runtime();h.tick(999);await h.send({type:'video',codec:'avc1.42c01f'});
+ await h.send(mediaPacket(2,1,1000,key));await h.send(mediaPacket(4,1,10000,pcm(480)));
+ assert.equal(h.state.audio.length,1,'fresh audio rebases a clock initialized by an old static keyframe');
+ assert.ok(h.state.audio[0].at<1.1);
+ h.paint();assert.equal(h.state.draws,1,'an old static recovery keyframe can refresh a freshly decoded view');
+ await h.send(mediaPacket(3,2,10000,delta));h.tick(60);h.paint();assert.equal(h.state.draws,2);
+ console.log('PASS static keyframe recovery cannot poison the clock or suppress its first picture');
+}
+{
+ const h=runtime();h.tick(999);
+ for(let seq=1;seq<=60;seq++){const legacy=packet(4,seq,pcm(960));await h.send({...legacy,type:'audio'});}
+ const live=h.state.audio.filter(s=>!s.stopped);
+ assert.ok(live.length>0&&live.length<=11,'legacy bursts stay bounded');
+ for(let i=1;i<live.length;i++)assert.ok(live[i].at>=live[i-1].at+live[i-1].buffer.duration-0.000001,'live PCM buffers never overlap after a burst rebase');
+ assert.ok(h.state.audio.some(s=>s.stopped),'rebasing explicitly cancels previous scheduled sources');
+ console.log('PASS legacy audio burst recovery stops old sources instead of overlapping them');
 }

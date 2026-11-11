@@ -231,7 +231,7 @@ internal sealed class Session : IAsyncDisposable
                 using var message=new MemoryStream();WebSocketReceiveResult result;
                 do{result=await socket.ReceiveAsync(buffer,stop.Token).ConfigureAwait(false);Interlocked.Exchange(ref lastReceive,Stopwatch.GetTimestamp());if(result.MessageType==WebSocketMessageType.Close){Abort("Mac disconnected.","remote-close");return;}message.Write(buffer,0,result.Count);if(message.Length>4*1024*1024)throw new InvalidDataException("Oversized frame.");}while(!result.EndOfMessage);
                 Interlocked.Add(ref receivedBytes,message.Length);
-                if(result.MessageType==WebSocketMessageType.Binary){if(IsReady){var data=message.ToArray();if(data.Length>0&&data[0]!=4){LastFrame=Stopwatch.GetTimestamp();if(Interlocked.Increment(ref videoPackets)==1)Log("first-video-packet");}else Interlocked.Increment(ref audioPackets);Frame?.Invoke(data);}}
+                if(result.MessageType==WebSocketMessageType.Binary){if(IsReady){var data=message.ToArray();if(data.Length>0&&(data[0]&0x7f)!=4){LastFrame=Stopwatch.GetTimestamp();if(Interlocked.Increment(ref videoPackets)==1)Log("first-video-packet");}else Interlocked.Increment(ref audioPackets);Frame?.Invoke(data);}}
                 else
                 {
                     using var doc=JsonDocument.Parse(message.ToArray());var value=doc.RootElement.Clone();

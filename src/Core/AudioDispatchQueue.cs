@@ -9,25 +9,28 @@ public sealed class AudioDispatchQueue
     readonly Action<Action> schedule;
     readonly Action<byte[]> play;
     readonly Func<long> clock;
-    record Entry(byte[] Packet,long Received);
+    record Entry(byte[] Packet,long Received,long Generation);
+    long generation;
     int bytes;
     bool scheduled;
     public AudioDispatchQueue(Action<Action> schedule,Action<byte[]> play,Func<long>? clock=null)
     {this.schedule=schedule;this.play=play;this.clock=clock??(()=>Environment.TickCount64);}
     public int Count{get{lock(sync)return pending.Count;}}
+    public void Clear(){lock(sync){pending.Clear();bytes=0;generation++;}}
     public void Enqueue(byte[] packet)
     {
-        if(packet.Length<=9||packet.Length>MaximumBytes||packet[0]!=4)return;
+        if(!MediaPacket.TryRead(packet,out var media)||media.Kind!=4||packet.Length>MaximumBytes)return;
         bool dispatch=false;
         lock(sync)
         {
             long now=clock();Expire(now);
-            pending.Enqueue(new(packet,now));bytes+=packet.Length;
+            pending.Enqueue(new(packet,now,generation));bytes+=packet.Length;
             while(pending.Count>MaximumPackets||bytes>MaximumBytes)Drop();
             if(!scheduled){scheduled=true;dispatch=true;}
         }
         if(dispatch)schedule(Drain);
     }
+    bool IsCurrent(long value){lock(sync)return value==generation;}
     void Drop(){bytes-=pending.Dequeue().Packet.Length;}
     void Expire(long now)
     {while(pending.TryPeek(out var next)&&now-next.Received>MaximumAgeMilliseconds)Drop();}
@@ -43,7 +46,7 @@ public sealed class AudioDispatchQueue
         try
         {
             foreach(var next in batch)
-                if(clock()-next.Received<=MaximumAgeMilliseconds)play(next.Packet);
+                if(clock()-next.Received<=MaximumAgeMilliseconds&&IsCurrent(next.Generation))play(next.Packet);
         }
         finally
         {

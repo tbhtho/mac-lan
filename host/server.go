@@ -35,14 +35,15 @@ type window struct {
 	App   string `json:"app"`
 }
 type start struct {
-	Type    string `json:"type"`
-	Window  uint32 `json:"window"`
-	FPS     int    `json:"fps"`
-	Width   int    `json:"width"`
-	Quality int    `json:"quality"`
-	Codec   string `json:"codec"`
-	Bitrate int    `json:"bitrate"`
-	Audio   bool   `json:"audio"`
+	Type       string `json:"type"`
+	Window     uint32 `json:"window"`
+	FPS        int    `json:"fps"`
+	Width      int    `json:"width"`
+	Quality    int    `json:"quality"`
+	Codec      string `json:"codec"`
+	Bitrate    int    `json:"bitrate"`
+	Audio      bool   `json:"audio"`
+	MediaClock bool   `json:"mediaClock"`
 }
 
 func (s start) valid(windows []window) bool {
@@ -426,8 +427,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	frames := newVideoQueue()
-	// About half a second of Mac audio; when full the oldest chunk is dropped, never video.
-	audio := make(chan []byte, 24)
+	// Bound audio by count and local queue residence, independently of video.
+	audio := make(chan queuedAudioPacket, 24)
 	status := make(chan statusMessage, 4)
 	done := make(chan struct{})
 	var once sync.Once
@@ -514,7 +515,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	send := func(b []byte) {
-		if len(b) == 0 || len(b) > maxFrame {
+		if _, valid := mediaPacketKind(b); !valid || len(b) > maxFrame {
 			stop()
 			return
 		}
@@ -523,16 +524,17 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 		}
-		if len(b) >= 9 && b[0] == 4 {
+		if kind, _ := mediaPacketKind(b); kind == 4 {
+			packet := queuedAudioPacket{data: b, at: time.Now()}
 			select {
-			case audio <- b:
+			case audio <- packet:
 			default:
 				select {
 				case <-audio:
 				default:
 				}
 				select {
-				case audio <- b:
+				case audio <- packet:
 				default:
 				}
 			}

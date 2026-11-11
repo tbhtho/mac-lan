@@ -218,6 +218,9 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     // The newest captured image, so a keyframe request can be answered while the screen is still;
     // ScreenCaptureKit sends no frames for an unchanged screen.
     var lastImage: CVImageBuffer?
+    var lastImageTime = CMTime.invalid
+    var submittedCaptureTime = CMTime.invalid
+    var mediaClock = false
     var lastEncoded = CMTime.zero
 
     func start(id: CGWindowID, maxWidth: Int, fps: Int, quality: Int, codec: String, bitrate: Int) async throws {
@@ -326,10 +329,10 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard type == .screen, sampleBuffer.isValid, let image = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         stateLock.lock()
-        lastImage = image
+        lastImage = image; lastImageTime = time
         // Encoder timestamps must rise; a frame older than a re-sent keyframe is dropped.
         guard view, !inFlight, CMTimeCompare(time, lastEncoded) > 0 else { stateLock.unlock(); return }
-        inFlight = true; encodeStart = now()
+        inFlight = true; encodeStart = now(); submittedCaptureTime = time
         let force = forceKeyframe; forceKeyframe = false
         if mode == "h264" { lastEncoded = time }
         stateLock.unlock()
@@ -343,7 +346,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
                 let data = NSMutableData()
                 guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return }
                 CGImageDestinationAddImage(dest,cg,[kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
-                if CGImageDestinationFinalize(dest) { writePacket(kind:1,data:data as Data) }
+                if CGImageDestinationFinalize(dest) { writePacket(kind:1,data:data as Data,captureTime:time) }
             }
         }
     }
@@ -360,7 +363,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard mode == "h264", view, !inFlight, let image = lastImage else { forceKeyframe = true; stateLock.unlock(); return }
         let host = CMClockGetTime(CMClockGetHostTimeClock())
         let time = CMTimeCompare(host, lastEncoded) > 0 ? host : CMTimeAdd(lastEncoded, CMTime(value: 1, timescale: 600))
-        inFlight = true; encodeStart = now(); forceKeyframe = false; lastEncoded = time
+        inFlight = true; encodeStart = now(); forceKeyframe = false; lastEncoded = time; submittedCaptureTime = lastImageTime
         stateLock.unlock()
         encodeH264(image, time: time, force: true)
     }
@@ -394,16 +397,23 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             guard length>0,offset+length<=avcc.count else { return }
             data.append(contentsOf:[0,0,0,1]);data.append(avcc[offset..<offset+length]);offset += length
         }
-        writePacket(kind:key ? 2 : 3,data:data)
+        writePacket(kind:key ? 2 : 3,data:data,captureTime:submittedCaptureTime)
     }
-    func writePacket(kind:UInt8,data:Data) {
-        guard data.count+9 <= 4*1024*1024 else { shutdown("Encoded frame exceeds transport limit") }
+    func writePacket(kind:UInt8,data:Data,captureTime:CMTime) {
+        guard data.count+(mediaClock ? 17 : 9) <= 4*1024*1024 else { shutdown("Encoded frame exceeds transport limit") }
         outputLock.lock();defer { outputLock.unlock() }
         sequence &+= 1
-        var packet = Data([kind]);var seq = sequence.bigEndian
+        var packet = Data([kind | (mediaClock ? 0x80 : 0)]);var seq = sequence.bigEndian
         var elapsed = UInt32(min(4_000_000_000,max(0,(now()-encodeStart)*1_000_000))).bigEndian
-        withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&elapsed) { packet.append(contentsOf:$0) };packet.append(data)
+        withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&elapsed) { packet.append(contentsOf:$0) };appendCaptureTime(captureTime,to:&packet);packet.append(data)
         writeFramed(packet)
+    }
+    // Zero means unknown, never a fresh/live sample. Audio and video capture PTS
+    // share the CoreMedia host clock; encoder-only resend PTS is not capture time.
+    func appendCaptureTime(_ time:CMTime,to packet:inout Data) {
+        guard mediaClock else { return }
+        var micros = captureMicroseconds(time).bigEndian
+        withUnsafeBytes(of:&micros) { packet.append(contentsOf:$0) }
     }
     func writeFramed(_ packet:Data) {
         var length = UInt32(packet.count).bigEndian
@@ -419,7 +429,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         guard active, sampleBuffer.isValid, let format = CMSampleBufferGetFormatDescription(sampleBuffer),
               let description = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
               description.mFormatID == kAudioFormatLinearPCM, description.mFormatFlags & kAudioFormatFlagIsFloat != 0,
-              description.mBitsPerChannel == 32, description.mChannelsPerFrame > 0 else { return }
+              description.mSampleRate == 48_000, description.mBitsPerChannel == 32, description.mChannelsPerFrame > 0 else { return }
         let frames = CMSampleBufferGetNumSamples(sampleBuffer)
         guard frames > 0, frames <= 48_000 else { return }
         let channels = Int(description.mChannelsPerFrame)
@@ -443,8 +453,9 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         } catch { return }
         outputLock.lock();defer { outputLock.unlock() }
         audioSequence &+= 1
-        var packet = Data([4]);var seq = audioSequence.bigEndian;var zero = UInt32(0)
+        var packet = Data([UInt8(4 | (mediaClock ? 0x80 : 0))]);var seq = audioSequence.bigEndian;var zero = UInt32(0)
         withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&zero) { packet.append(contentsOf:$0) }
+        appendCaptureTime(CMSampleBufferGetPresentationTimeStamp(sampleBuffer),to:&packet)
         pcm.withUnsafeBytes { packet.append(contentsOf:$0) }
         writeFramed(packet)
     }
@@ -664,6 +675,14 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
 signal(SIGPIPE,SIG_IGN)
 atexit { restoreMacOutput() }
 signal(SIGTERM) { _ in restoreMacOutput(); exit(0) }
+func captureMicroseconds(_ time:CMTime) -> UInt64 {
+    guard time.isValid, time.isNumeric, time.epoch == 0 else { return 0 }
+    let value = CMTimeGetSeconds(time) * 1_000_000
+    // Keep integers exact for JavaScript clients; reject invalid or negative PTS.
+    guard value.isFinite, value > 0, value <= 9_007_199_254_740_991 else { return 0 }
+    return UInt64(value)
+}
+
 let args=CommandLine.arguments
 if args.contains("--release-safe") {
     // Parent supervisor provides only previously acknowledged held inputs; no capture/listener.
@@ -681,6 +700,18 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
+    precondition(captureMicroseconds(CMTime(value:1234567,timescale:1_000_000)) == 1234567)
+    for time in [CMTime.invalid, CMTime.indefinite, CMTime.positiveInfinity, CMTime.negativeInfinity, CMTime.zero, CMTime(value:-1,timescale:1)] {
+        precondition(captureMicroseconds(time) == 0)
+    }
+    let clockTest=Engine()
+    var clockBytes=Data([1,2,3])
+    clockTest.appendCaptureTime(CMTime(value:1,timescale:1),to:&clockBytes)
+    precondition(clockBytes == Data([1,2,3]))
+    clockTest.mediaClock=true
+    clockTest.appendCaptureTime(CMTime(value:1,timescale:1),to:&clockBytes)
+    precondition(clockBytes == Data([1,2,3,0,0,0,0,0,15,66,64]))
+
     var cursorCache=CursorEncodingCache(), encodes=0
     let raster=CursorRaster(pixels:Data([0,0,0,0]),width:1,height:1,bytesPerRow:4,size:CGSize(width:1,height:1),hotSpot:.zero)
     let encode:()->Data? = { encodes += 1; return Data([1,2,3]) }
@@ -803,10 +834,11 @@ if args.contains("--list") {
         catch { die("Window enumeration failed: \(error)") }
     }
     RunLoop.main.run()
-} else if (args.count==8 || args.count==9 && args[8]=="audio") && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
+} else if (8...10).contains(args.count) && args.dropFirst(8).allSatisfy({["audio","media-clock"].contains($0)}) && Set(args.dropFirst(8)).count == args.count-8 && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
           width>=640,width<=1920,validCaptureFPS(fps),quality>=35,quality<=85,bitrate>=2,bitrate<=20,["h264","jpeg"].contains(args[6]) {
     let engine=Engine()
-    engine.audio = args.count==9
+    engine.audio = args.dropFirst(8).contains("audio")
+    engine.mediaClock = args.dropFirst(8).contains("media-clock")
     Task { do { try await engine.start(id:id,maxWidth:width,fps:fps,quality:quality,codec:args[6],bitrate:bitrate) } catch { die("Capture setup failed: \(error)") } }
     RunLoop.main.run()
 } else { die("Usage: MacDowCapture --check | --list | --self-test | --stream WINDOW WIDTH FPS QUALITY h264|jpeg MBPS") }

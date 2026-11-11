@@ -12,6 +12,25 @@ const (
 	videoQueueMaxAge    = 250 * time.Millisecond
 )
 
+// Extended packets add eight capture-clock bytes after the legacy prefix.
+func mediaPacketKind(data []byte) (byte, bool) {
+	if len(data) < 10 {
+		return 0, false
+	}
+	kind := data[0] & 0x7f
+	if kind < 1 || kind > 4 || (data[0]&0x80 != 0 && len(data) < 18) {
+		return 0, false
+	}
+	return kind, true
+}
+
+const audioQueueMaxAge = 120 * time.Millisecond
+
+type queuedAudioPacket struct {
+	data []byte
+	at   time.Time
+}
+
 type queuedVideoFrame struct {
 	data []byte
 	at   time.Time
@@ -39,9 +58,13 @@ func newVideoQueue() *videoQueue {
 func (q *videoQueue) push(data []byte, now time.Time) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	kind, valid := mediaPacketKind(data)
+	if !valid || kind == 4 {
+		return
+	}
 	q.expire(now)
-	encoded := len(data) >= 10 && (data[0] == 2 || data[0] == 3)
-	key := encoded && data[0] == 2
+	encoded := kind == 2 || kind == 3
+	key := kind == 2
 	if !encoded {
 		q.clear()
 		q.h264 = false
@@ -130,14 +153,18 @@ type statusMessage struct {
 // The caller owns the only WebSocket writer and its per-message deadline. Check
 // control/status messages before each video write so a captured-frame backlog
 // cannot starve the pong used by the viewer's control lease.
-// Status lines go first, then Mac audio (small, latency-sensitive), then video.
-func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan statusMessage, audio <-chan []byte, write func(text bool, data []byte) error) {
+// Status goes first, then at most one fresh audio packet before a video frame.
+// Continuous audio must not starve video; stale audio is dropped after a stall.
+func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan statusMessage, audio <-chan queuedAudioPacket, write func(text bool, data []byte) error) {
 	writeStatus := func(v statusMessage) bool {
 		err := write(true, []byte(v.line))
 		if v.sent != nil {
 			close(v.sent)
 		}
 		return err == nil
+	}
+	writeAudio := func(a queuedAudioPacket) bool {
+		return time.Since(a.at) > audioQueueMaxAge || write(false, a.data) == nil
 	}
 	for {
 		select {
@@ -155,10 +182,9 @@ func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan st
 		}
 		select {
 		case a := <-audio:
-			if write(false, a) != nil {
+			if !writeAudio(a) {
 				return
 			}
-			continue
 		default:
 		}
 		if b, ok := frames.pop(time.Now()); ok {
@@ -176,7 +202,7 @@ func writeQueuedVideo(done <-chan struct{}, frames *videoQueue, status <-chan st
 				return
 			}
 		case a := <-audio:
-			if write(false, a) != nil {
+			if !writeAudio(a) {
 				return
 			}
 		}
