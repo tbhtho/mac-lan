@@ -222,10 +222,7 @@ internal sealed partial class MainWindow : Window
         try
         {
             var result=await UpdateProcess.Call("discover");
-            var found=new List<DiscoveredHost>();
-            if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("hosts",out var hosts)&&hosts.ValueKind==JsonValueKind.Array)
-                foreach(var h in hosts.EnumerateArray().Take(32))
-                    if(DiscoveredHost.TryCreate(h.GetProperty("name").GetString()??"",h.GetProperty("address").GetString()??"",h.GetProperty("port").GetInt32(),h.GetProperty("fingerprint").GetString()??"",out var valid))found.Add(valid!);
+            var found=DiscoveredHosts(result);
             if(paired||connecting)return;
             string? previous=(nearby.SelectedItem as DiscoveredHost)?.Fingerprint;
             nearby.ItemsSource=found;nearby.SelectedItem=found.FirstOrDefault(h=>h.Fingerprint==previous)??(found.Count==1?found[0]:null);
@@ -355,7 +352,11 @@ internal sealed partial class MainWindow : Window
     }
     void HandleEnded(Session s,string why)
     {
+        // The window is already closed during shutdown; showing a notice on it throws.
+        if(closing)return;
         string? code=s.EndCode;
+        // An unreachable address is searched for again before the next attempt.
+        if(code=="connect-failed")addressStale=true;
         bool first=!resuming&&!reconnectTimer.IsEnabled;
         // Only a connection that stayed up for a while earns a fresh set of attempts, so a
         // session that keeps failing right after it resumes cannot reconnect forever.
@@ -393,16 +394,48 @@ internal sealed partial class MainWindow : Window
     {
         var remembered=Remembered(lastHost);
         if(closing||quitting||session?.IsPaired==true||lastHost==null||resumeToken==null&&remembered==null){resuming=false;return;}
-        // The Mac may have moved to another address on the same network; prefer the latest discovery result.
-        var host=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??lastHost;
         if(session!=null){var old=session;session=null;_=old.DisposeAsync();}
         resuming=true;connecting=true;
+        // The Mac may have moved to another address on the same network; prefer the latest discovery result.
+        var host=nearby.Items.OfType<DiscoveredHost>().FirstOrDefault(h=>h.Fingerprint==lastHost.Fingerprint)??lastHost;
+        // A restarted Mac (an update, Stop/Start Sharing) listens on a new port. The periodic search
+        // does not run on the MacBook or Windows tab, so after an attempt that could not reach the
+        // Mac, search again here; otherwise every retry and the Reconnect button hit the old port.
+        if(addressStale)
+        {
+            addressStale=false;int attempt=++resumeGeneration;
+            var located=await Locate(lastHost.Fingerprint);
+            if(attempt!=resumeGeneration||closing||quitting||lastHost==null)
+            {
+                // Cancelled while searching (Disconnect, quit) or replaced by a newer attempt.
+                if(session==null&&!resuming){connecting=false;pairButton.IsEnabled=!paired&&nearby.SelectedItem is DiscoveredHost;nearby.IsEnabled=nearby.Items.Count>0;}
+                return;
+            }
+            if(located!=null){Telemetry.Report(located.Address==host.Address&&located.Port==host.Port?"resume-address-same":"resume-address-updated");host=located;lastHost=located;}
+            else Telemetry.Report("resume-address-missing");
+        }
         var s=CreateSession();Telemetry.Report("session-resume-start");
         trustedAttempt=resumeToken==null;
         try{if(resumeToken!=null)await s.ConnectResume(host,resumeToken);else await s.ConnectTrusted(host,remembered!.Device,remembered.Token);}
         catch(Exception e){s.Abort("Could not reach "+MacName+".","connect-failed",e);}
     }
-    void CancelReconnect(){reconnectTimer.Stop();resuming=false;reconnectAttempt=0;pendingAppWindow=null;}
+    void CancelReconnect(){reconnectTimer.Stop();resuming=false;reconnectAttempt=0;pendingAppWindow=null;resumeGeneration++;}
+    bool addressStale;
+    int resumeGeneration;
+    static List<DiscoveredHost> DiscoveredHosts(JsonElement result)
+    {
+        var found=new List<DiscoveredHost>();
+        if(result.GetProperty("ok").GetBoolean()&&result.TryGetProperty("hosts",out var hosts)&&hosts.ValueKind==JsonValueKind.Array)
+            foreach(var h in hosts.EnumerateArray().Take(32))
+                if(DiscoveredHost.TryCreate(h.GetProperty("name").GetString()??"",h.GetProperty("address").GetString()??"",h.GetProperty("port").GetInt32(),h.GetProperty("fingerprint").GetString()??"",out var valid))found.Add(valid!);
+        return found;
+    }
+    // Finds the current address and port of a Mac by its pinned identity; null when it is not advertising.
+    static async Task<DiscoveredHost?> Locate(string fingerprint)
+    {
+        try{return DiscoveredHosts(await UpdateProcess.Call("discover")).FirstOrDefault(h=>h.Fingerprint==fingerprint);}
+        catch(Exception e){Telemetry.Report("discovery-failed",e.GetType().Name);return null;}
+    }
     void ManualReconnect()
     {
         if((resumeToken!=null||Remembered(lastHost)!=null)&&lastHost!=null){CancelReconnect();autoConnectSuppressed=false;resumeWantsView=true;ShowReconnecting();_=TryResume();return;}

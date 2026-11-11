@@ -385,3 +385,29 @@ The Mac menu's local picker creates one offer bound to the existing approved pai
 Fresh Mac validation: full Go race suite and native AppKit/capture self-tests passed. `assessment/FileReceive.net8.csproj` links unchanged production transfer classes and `tests/Transfer.Tests/ReceiveChecks.cs`; 38 checks passed using synthetic files and loopback TLS, covering empty/16 MiB payloads, Unicode, unsafe names, corruption, no overwrite, lost acknowledgment, cancellation, and disconnect. This is isolated .NET 8 validation, not acceptance of the production .NET 10 Windows/WPF build. The same checks run from `dotnet run --project tests/Transfer.Tests` on Windows. Native builds are headless; real two-computer interaction remains untested.
 
 Reproduce the isolated check with the installed .NET 8 SDK: set `DOTNET_GENERATE_ASPNET_CERTIFICATE=false`, `DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1`, and workspace-local `DOTNET_CLI_HOME`, `NUGET_PACKAGES` and normalized `TMPDIR`, then run `dotnet run --project assessment/FileReceive.net8.csproj`. Production target frameworks are unchanged. On macOS, temporary test TLS certificates and loopback listeners need execution outside the restrictive sandbox; they are not trusted or installed as development certificates.
+
+## Reconnecting after the Mac restarts (unreleased)
+
+The Mac host listens on a new port each time it starts (an update, Stop/Start
+Sharing). Windows reconnect attempts and the **Reconnect** button reused the last
+known address, and the periodic search only runs while the Connection page is
+open, so on the MacBook or Windows tab every attempt was refused until the page
+was opened or mac-lan restarted. Windows diagnostics from alpha.46/47 show this
+as repeated `transport-failed` with `ConnectionRefused` after a `receive-failed`.
+After an attempt that cannot reach the Mac, Windows now searches for the pinned
+identity again before the next attempt and uses the address and port it finds
+(`resume-address-updated`, `resume-address-same` or `resume-address-missing` in
+the local log). The search adds up to five seconds to that retry only.
+
+A session that ends while mac-lan is quitting no longer tries to show the
+"Disconnected" notice on the closed window, which raised the "stopped safely"
+message (`fatal` / `ui-unhandled`, `Window.VerifyCanShow`).
+
+The Windows build and the headless suite pass with these changes. Neither has
+been run against a restarting Mac. Why the Mac host stopped listening during the
+alpha.46 and alpha.47 updates is not established from the Windows log alone.
+
+Go tests create fixtures under `TEMP`. In a shell whose `TEMP` is a folder the
+account cannot fully use (for example `C:\Windows\TEMP`), the updater and menu
+tests fail with "Access is denied"; point `TEMP` and `TMP` at a writable folder
+such as `.cache/test-tmp` first.
