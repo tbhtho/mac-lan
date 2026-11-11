@@ -361,6 +361,9 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 	if r.Audio {
 		arguments = append(arguments, "audio")
 	}
+	if r.Display != nil {
+		arguments = append(arguments, fmt.Sprintf("fit=%dx%d", r.Display.Width, r.Display.Height))
+	}
 	cmd := exec.Command(helper, arguments...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

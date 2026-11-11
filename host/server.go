@@ -44,6 +44,18 @@ type start struct {
 	Codec   string `json:"codec"`
 	Bitrate int    `json:"bitrate"`
 	Audio   bool   `json:"audio"`
+	// Display asks for a Mac desktop shaped like the Windows view (full desktop only).
+	Display *displaySize `json:"display,omitempty"`
+}
+
+// displaySize is a desktop size in points; see the capture helper's fit mode.
+type displaySize struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+func (d *displaySize) valid() bool {
+	return d.Width >= 1024 && d.Width <= 3840 && d.Height >= 600 && d.Height <= 2160 && d.Width%2 == 0 && d.Height%2 == 0
 }
 
 func (s start) valid(windows []window) bool {
@@ -51,6 +63,9 @@ func (s start) valid(windows []window) bool {
 		return false
 	}
 	if s.Codec != "" && s.Codec != "h264" && s.Codec != "jpeg" || s.Bitrate != 0 && (s.Bitrate < 2 || s.Bitrate > 20) {
+		return false
+	}
+	if s.Display != nil && (s.Window != 0 || !s.Display.valid()) {
 		return false
 	}
 	if s.Window == 0 {
@@ -361,7 +376,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if windows == nil {
 		windows = []window{}
 	}
-	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows, "keyframes": true}
+	// matchDisplay: this host can give the full desktop the shape Windows asks for in "display".
+	catalog := map[string]any{"type": "catalog", "maxFps": 60, "windows": windows, "keyframes": true, "matchDisplay": true}
 	if s.viewApproved(peer) {
 		if resume, er := s.issueResume(peer, time.Now()); er == nil {
 			catalog["resumeToken"] = resume

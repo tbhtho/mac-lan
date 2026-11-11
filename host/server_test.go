@@ -519,6 +519,34 @@ func TestStartBoundsAndClosedWindow(t *testing.T) {
 	}
 }
 
+func TestMatchingDisplayRequestIsBoundedAndDesktopOnly(t *testing.T) {
+	ws := []window{{ID: 42}}
+	base := start{Type: "start", FPS: 60, Width: 1920, Quality: 70, Codec: "h264"}
+	for _, d := range []displaySize{{1920, 1048}, {1024, 600}, {3840, 2160}, {2560, 1408}} {
+		s, size := base, d
+		s.Display = &size
+		if !s.valid(ws) {
+			t.Fatal("valid display refused", d)
+		}
+	}
+	for _, d := range []displaySize{{1921, 1048}, {1920, 1049}, {1022, 600}, {1024, 598}, {3842, 2160}, {3840, 2162}, {0, 0}, {-1920, 1080}} {
+		s, size := base, d
+		s.Display = &size
+		if s.valid(ws) {
+			t.Fatal("unsafe display accepted", d)
+		}
+	}
+	s, size := base, displaySize{1920, 1048}
+	s.Window, s.Display = 42, &size
+	if s.valid(ws) {
+		t.Fatal("a single window must not change the Mac's display")
+	}
+	var parsed start
+	if json.Unmarshal([]byte(`{"type":"start","fps":60,"width":1920,"quality":70,"display":{"width":1920,"height":1048}}`), &parsed) != nil || parsed.Display == nil || *parsed.Display != size || !parsed.valid(ws) {
+		t.Fatal("display did not parse from the wire form")
+	}
+}
+
 func TestSub60RequestsNeverAskConsentOrStartCapture(t *testing.T) {
 	for _, fps := range []int{0, 5, 10, 15, 30, 59} {
 		t.Run(strconv.Itoa(fps)+"-fps", func(t *testing.T) {

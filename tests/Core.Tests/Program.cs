@@ -2,6 +2,14 @@ using MacDow.Core;
 
 int count = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); count++; Console.WriteLine("PASS " + name); }
+{
+    Check(MacDisplayFit.For(1920,1080,32)==(1920,1048),"a 1080p display with the 32-pixel bar asks the Mac for 1920 x 1048");
+    Check(MacDisplayFit.For(1920,1080,2)==(1920,1078)&&MacDisplayFit.For(2560,1440,48)==(2560,1392)&&MacDisplayFit.For(3840,2160,0)==(3840,2160),"the hidden bar, scaled bars and 4K displays map to even sizes");
+    Check(MacDisplayFit.For(1921,1081,32)==(1920,1048),"odd sizes round down to even numbers");
+    Check(MacDisplayFit.For(800,600,32)==null&&MacDisplayFit.For(5120,1440,32)==null&&MacDisplayFit.For(1920,600,32)==null&&MacDisplayFit.For(1920,2400,0)==null,"displays outside the Mac host limits are not requested");
+    string plain=System.Text.Json.JsonSerializer.Serialize(StreamProfile.DefaultHardware.CreateStart(0)),fitted=System.Text.Json.JsonSerializer.Serialize(StreamProfile.DefaultHardware.CreateStart(0,display:(1920,1048))),window=System.Text.Json.JsonSerializer.Serialize(StreamProfile.DefaultHardware.CreateStart(42,display:(1920,1048)));
+    Check(!plain.Contains("display")&&fitted.Contains("\"display\":{\"width\":1920,\"height\":1048}")&&!window.Contains("display"),"only a full-desktop start carries the requested Mac display size");
+}
 var gate = new ControlGate();
 {
     var bar=new TabBarAutoHide();

@@ -32,7 +32,8 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 ## Features
 
 - **Two tabs, one bar.** A 32-pixel bar reserves its own space above maximized apps. It can auto-hide, and **Display** moves it and the Mac view between monitors. Windows apps on that display move aside while the Mac is shown and come back afterwards.
-- **Full desktop.** Hardware H.264 at up to 1920 pixels wide with a 60 fps target, keeping the Mac's proportions. The Mac's own display mode is not changed.
+- **Full desktop.** Hardware H.264 at up to 1920 pixels wide with a 60 fps target, keeping the Mac's proportions.
+- **Fit Mac to this display.** Turn on **Bar → Fit Mac to this display (no bars)** and, while you are viewing it, the Mac's desktop takes the exact shape of your Windows display, so the picture fills the screen with no bars and no stretching. The Mac's own screen shows the same desktop and returns to normal when you stop. Off by default; see Limits.
 - **App Priority.** Put one Mac window in its own resizable Windows window instead of the whole desktop.
 - **Control.** Selecting **MacBook** hands over keyboard and mouse. Ctrl and left Alt act as Command, the Windows key opens Spotlight, and Ctrl+Alt+Shift+Backspace always releases. Losing focus, switching tabs or a stale picture releases held keys.
 - **Sound.** Mac audio plays on Windows while you watch, and the Mac's speakers are muted until you stop.
@@ -74,7 +75,7 @@ A command that is running when the connection drops keeps going for two minutes 
 ## Limits
 
 - Apple Silicon Macs only; one PC controls a Mac at a time.
-- A Mac whose screen has a different shape from your monitor shows bars at the sides or top.
+- Without **Fit Mac to this display**, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on.
 - No image or file clipboard, microphone, IME, multi-touch or stylus. Keys are sent by physical position, so use the same keyboard layout on both.
 - The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network.
 - This is a preview. Releases are checked with headless tests and on the author's two computers, not on a range of hardware.

@@ -86,6 +86,8 @@ internal sealed class Session : IAsyncDisposable
     public bool CanTransfer => TransferTarget!=null;
     // Mac hosts with remote commands accept a second pinned connection at /remote with the transfer token.
     public bool SupportsRemote {get;private set;}
+    // Mac hosts that can give the full desktop the shape of the Windows view.
+    public bool SupportsMatchDisplay {get;private set;}
     public TransferTarget? TransferTarget {get {lock(lifecycle)return phase is Paired or Starting or Ready?transferTarget:null;}}
     public long NativeAlive {get;private set;}
     public long LastFrame {get;private set;}
@@ -258,6 +260,7 @@ internal sealed class Session : IAsyncDisposable
                                     TrustedDevice=(deviceId.GetString()!,deviceToken.GetString()!);
                                 if(value.TryGetProperty("resumeToken",out var resume)&&resume.ValueKind==JsonValueKind.String&&IsHexToken(resume.GetString()))ResumeToken=resume.GetString();
                                 SupportsRemote=transferTarget!=null&&value.TryGetProperty("remote",out var remoteLink)&&remoteLink.ValueKind==JsonValueKind.Number&&remoteLink.TryGetInt32(out int remoteVersion)&&remoteVersion>=1;
+                                SupportsMatchDisplay=value.TryGetProperty("matchDisplay",out var matchDisplay)&&matchDisplay.ValueKind==JsonValueKind.True;
                                 phase=Paired;
                             }
                             if(t.GetString()=="ready"){if(phase!=Starting)throw new InvalidDataException("Unexpected stream response.");phase=Ready;}

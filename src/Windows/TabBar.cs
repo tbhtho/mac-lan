@@ -25,7 +25,9 @@ internal sealed class TabBar : Window,IDisposable
     readonly TabBarAutoHide autoHide;
     readonly DispatcherTimer hideTimer=new(){Interval=TimeSpan.FromMilliseconds(100)};
     readonly ContextMenu barMenu=new();
-    readonly MenuItem autoHideToggle;
+    readonly MenuItem autoHideToggle,matchToggle;
+    public bool MatchDisplay{get;private set;}
+    public event Action? MatchDisplayChanged;
     readonly FrameworkElement barContent;
     readonly DisplaySelector displaySelector=new();
     Rect barBounds,screenBounds;
@@ -42,7 +44,7 @@ internal sealed class TabBar : Window,IDisposable
     HwndSource? source;
     public TabBar(Action windows,Action macbook,Action setup,Action updates,Action quit,Action<MonitorArea> selectMonitor,Button updateButton,Action? controlMac=null,Action? release=null,Action? disconnect=null,Func<bool>? canControl=null,Action? files=null,Action? terminal=null)
     {
-        autoHide=new(preferences.LoadAutoHide());
+        autoHide=new(preferences.LoadAutoHide());MatchDisplay=preferences.LoadMatchDisplay();
         Title="mac-lan Tabs";WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;Topmost=true;Height=TabBarLayout.Dip;
         Glass.Apply(this,rounded:false);FontSize=12;
         var ghost=(Style)FindResource("GhostButton");
@@ -57,7 +59,10 @@ internal sealed class TabBar : Window,IDisposable
         right.Children.Add(updateButton);
         autoHideToggle=new MenuItem{IsCheckable=true,IsChecked=AutoHide};UpdateAutoHideLabel();
         autoHideToggle.Click+=(_,_)=>SetAutoHide(autoHideToggle.IsChecked);
-        barMenu.Items.Add(autoHideToggle);ContextMenu=barMenu;
+        barMenu.Items.Add(autoHideToggle);
+        matchToggle=new MenuItem{IsCheckable=true,IsChecked=MatchDisplay,ToolTip="While you view it, your Mac's desktop takes the shape of this display, so the picture fills the screen with no bars and no stretching. The Mac's own screen shows the same desktop and returns to normal when you stop."};UpdateMatchLabel();
+        matchToggle.Click+=(_,_)=>SetMatchDisplay(matchToggle.IsChecked);
+        barMenu.Items.Add(matchToggle);ContextMenu=barMenu;
         Button? barOptions=null;barOptions=ActionButton("Bar",()=>{barMenu.PlacementTarget=barOptions;barMenu.IsOpen=true;});barOptions.ToolTip="Top bar settings";
         right.Children.Add(barOptions);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);
         var left=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(left,Dock.Left);
@@ -95,6 +100,14 @@ internal sealed class TabBar : Window,IDisposable
         connection.ToolTip=connection.Text;
     }
     BarData Data()=>new(){Size=(uint)Marshal.SizeOf<BarData>(),Window=new WindowInteropHelper(this).Handle,Callback=CallbackMessage,Edge=1};
+    void UpdateMatchLabel()=>matchToggle.Header=MatchDisplay?"✓ Fit Mac to this display (no bars)":"Fit Mac to this display (no bars)";
+    void SetMatchDisplay(bool enabled)
+    {
+        MatchDisplay=enabled;UpdateMatchLabel();
+        try{preferences.SaveMatchDisplay(enabled);}
+        catch(Exception error)when(error is IOException or UnauthorizedAccessException or System.Security.SecurityException){Telemetry.Log.Record("bar-preference-failed","save",error:error);}
+        MatchDisplayChanged?.Invoke();
+    }
     void UpdateAutoHideLabel()=>autoHideToggle.Header=AutoHide?"✓ Auto-hide top bar":"Auto-hide top bar";
     void SetAutoHide(bool enabled)
     {

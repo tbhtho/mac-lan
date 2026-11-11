@@ -105,6 +105,92 @@ func desktopCaptureDimensions(width: Int, sourceWidth: Double, sourceHeight: Dou
     let ratio = min(1.0, min(Double(min(1920, width)) / sourcePixelsWide, 2160 / sourcePixelsHigh))
     return (max(2, Int(sourcePixelsWide * ratio) / 2 * 2), max(2, Int(sourcePixelsHigh * ratio) / 2 * 2))
 }
+// Optional "fit" mode: Windows asks for a Mac desktop shaped like its own view, so the picture
+// fills the screen without bars. The helper creates a virtual display of that size and mirrors
+// the Mac's real displays to it, which gives the whole desktop that shape. The display belongs
+// to this process and disappears when it exits, restoring the Mac's own arrangement.
+// CGVirtualDisplay is not public API; it is reached only through the Objective-C runtime, and
+// when any part is missing or fails, capture continues on the Mac's normal display.
+func parseFit(_ argument: String) -> (width: Int, height: Int)? {
+    guard argument.hasPrefix("fit=") else { return nil }
+    let parts = argument.dropFirst(4).split(separator: "x", omittingEmptySubsequences: false)
+    guard parts.count == 2, let width = Int(parts[0]), let height = Int(parts[1]),
+          width >= 1024, width <= 3840, height >= 600, height <= 2160, width % 2 == 0, height % 2 == 0 else { return nil }
+    return (width, height)
+}
+func onlineDisplays() -> [CGDirectDisplayID] {
+    var count: UInt32 = 0
+    CGGetOnlineDisplayList(0, nil, &count)
+    var list = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    CGGetOnlineDisplayList(count, &list, &count)
+    return Array(list.prefix(Int(count)))
+}
+final class VirtualDisplay {
+    let id: CGDirectDisplayID
+    let width: Int, height: Int
+    private let display: NSObject // keeps the display alive
+    private init(id: CGDirectDisplayID, width: Int, height: Int, display: NSObject) { self.id = id; self.width = width; self.height = height; self.display = display }
+    static func create(width: Int, height: Int) -> VirtualDisplay? {
+        guard let descriptorClass = NSClassFromString("CGVirtualDisplayDescriptor") as? NSObject.Type,
+              let settingsClass = NSClassFromString("CGVirtualDisplaySettings") as? NSObject.Type,
+              let modeClass: AnyClass = NSClassFromString("CGVirtualDisplayMode"),
+              let displayClass: AnyClass = NSClassFromString("CGVirtualDisplay") else { return nil }
+        let initMode = NSSelectorFromString("initWithWidth:height:refreshRate:")
+        let initDisplay = NSSelectorFromString("initWithDescriptor:")
+        let apply = NSSelectorFromString("applySettings:")
+        guard class_respondsToSelector(modeClass, initMode), class_respondsToSelector(displayClass, initDisplay), class_respondsToSelector(displayClass, apply),
+              let modeInit = class_getMethodImplementation(modeClass, initMode),
+              let applyImplementation = class_getMethodImplementation(displayClass, apply) else { return nil }
+        // Retina rendering up to a 1920-point desktop; larger desktops use one pixel per point.
+        let scale = width <= 1920 ? 2 : 1
+        let descriptor = descriptorClass.init()
+        descriptor.setValue("mac-lan Display", forKey: "name")
+        descriptor.setValue(NSNumber(value: UInt32(width * scale)), forKey: "maxPixelsWide")
+        descriptor.setValue(NSNumber(value: UInt32(height * scale)), forKey: "maxPixelsHigh")
+        let diagonal = 609.6, ratio = Double(width) / Double(height) // a 24-inch panel of this shape
+        let millimetersHigh = diagonal / (1 + ratio * ratio).squareRoot()
+        descriptor.setValue(NSValue(size: NSSize(width: millimetersHigh * ratio, height: millimetersHigh)), forKey: "sizeInMillimeters")
+        descriptor.setValue(NSNumber(value: UInt32(0x4D4C)), forKey: "vendorID")
+        descriptor.setValue(NSNumber(value: UInt32(0x0001)), forKey: "productID")
+        descriptor.setValue(NSNumber(value: UInt32(1)), forKey: "serialNum")
+        descriptor.setValue(DispatchQueue.main, forKey: "queue")
+        typealias ModeInit = @convention(c) (AnyObject, Selector, UInt, UInt, Double) -> Unmanaged<AnyObject>?
+        typealias Apply = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
+        guard let allocatedMode = (modeClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
+              let mode = unsafeBitCast(modeInit, to: ModeInit.self)(allocatedMode, initMode, UInt(width), UInt(height), 60)?.takeRetainedValue() else { return nil }
+        let settings = settingsClass.init()
+        settings.setValue(NSNumber(value: UInt32(scale == 2 ? 1 : 0)), forKey: "hiDPI")
+        settings.setValue([mode], forKey: "modes")
+        guard let allocatedDisplay = (displayClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
+              let display = allocatedDisplay.perform(initDisplay, with: descriptor)?.takeRetainedValue() as? NSObject,
+              unsafeBitCast(applyImplementation, to: Apply.self)(display, apply, settings),
+              let id = (display.value(forKey: "displayID") as? NSNumber)?.uint32Value, id != 0 else { return nil }
+        return VirtualDisplay(id: id, width: width, height: height, display: display)
+    }
+    // Waits until macOS has brought the display online with the requested size and every other
+    // display mirrors it. False means the Mac did not take the shape; the caller then drops it.
+    func settle() async -> Bool {
+        var asked = false
+        for _ in 0..<40 {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            let all = onlineDisplays()
+            guard all.contains(id) else { continue }
+            let bounds = CGDisplayBounds(id)
+            let others = all.filter { $0 != id }
+            let mirrored = others.allSatisfy { CGDisplayMirrorsDisplay($0) == id }
+            if Int(bounds.width) == width, Int(bounds.height) == height, mirrored, CGDisplayIsMain(id) != 0 { return true }
+            if !mirrored, !asked {
+                asked = true
+                var configuration: CGDisplayConfigRef?
+                if CGBeginDisplayConfiguration(&configuration) == .success, let configuration {
+                    for other in others { CGConfigureDisplayMirrorOfDisplay(configuration, other, id) }
+                    CGCompleteDisplayConfiguration(configuration, .forSession)
+                }
+            }
+        }
+        return false
+    }
+}
 func existingPermissions() -> Bool {
     let screen = CGPreflightScreenCaptureAccess(), input = AXIsProcessTrusted()
     status("Existing permissions: Screen Recording \(screen ? "granted" : "missing"); Accessibility \(input ? "granted" : "missing - viewing only"). No permission request made.")
@@ -186,6 +272,9 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var windowID: CGWindowID = 0
     var frame = CGRect.zero
     var displayID: CGDirectDisplayID = CGMainDisplayID()
+    // Set when Windows asked for a desktop shaped like its view; see VirtualDisplay.
+    var fit: (width: Int, height: Int)?
+    var virtualDisplay: VirtualDisplay?
     var lease = Lease()
     var keys = Set<CGKeyCode>(), buttons = Set<Int>()
     var point = CGPoint.zero
@@ -222,7 +311,29 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func start(id: CGWindowID, maxWidth: Int, fps: Int, quality: Int, codec: String, bitrate: Int) async throws {
         self.windowID = id; self.fps = fps; self.quality = Double(quality)/100; self.mode = codec; self.bitrate = bitrate
-        let content = try await shareable()
+        if id == 0, let fit {
+            if let created = VirtualDisplay.create(width: fit.width, height: fit.height) {
+                virtualDisplay = created
+                if await created.settle() {
+                    displayID = created.id
+                    status("Mac desktop matched to the Windows display: \(fit.width) x \(fit.height)")
+                } else {
+                    // Releasing it removes the display again; give macOS a moment to restore.
+                    virtualDisplay = nil
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    displayID = CGMainDisplayID()
+                    status("The Mac could not take the Windows display's shape; showing its normal desktop")
+                }
+            } else {
+                status("This macOS cannot create a matching display; showing the normal desktop")
+            }
+        }
+        var content = try await shareable()
+        // A display that has just appeared can take a moment to be listed.
+        for _ in 0..<15 where id == 0 && !content.displays.contains(where: { $0.displayID == displayID }) {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            content = try await shareable()
+        }
         let filter: SCContentFilter
         if id == 0 {
             guard let display = content.displays.first(where: {$0.displayID == displayID}) else { shutdown("Main Mac display unavailable") }
@@ -681,6 +792,10 @@ if args.contains("--release-safe") {
     exit(0)
 }
 if args.contains("--self-test") {
+    precondition(parseFit("fit=1920x1048")! == (1920,1048) && parseFit("fit=3840x2160")! == (3840,2160) && parseFit("fit=1024x600")! == (1024,600))
+    for bad in ["fit=", "fit=1920", "fit=1920x", "fit=x1080", "fit=1921x1080", "fit=1920x1081", "fit=1022x600", "fit=1024x598", "fit=3842x2160", "fit=3840x2162", "fit=-1920x1080", "fit=1920x1080x2", "fit=1920X1080", "audio", "1920x1080", "fit= 1920x1080"] {
+        precondition(parseFit(bad) == nil, "unsafe fit argument accepted")
+    }
     var cursorCache=CursorEncodingCache(), encodes=0
     let raster=CursorRaster(pixels:Data([0,0,0,0]),width:1,height:1,bytesPerRow:4,size:CGSize(width:1,height:1),hotSpot:.zero)
     let encode:()->Data? = { encodes += 1; return Data([1,2,3]) }
@@ -803,10 +918,11 @@ if args.contains("--list") {
         catch { die("Window enumeration failed: \(error)") }
     }
     RunLoop.main.run()
-} else if (args.count==8 || args.count==9 && args[8]=="audio") && args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
+} else if args.count>=8, args.count<=10, Set(args.dropFirst(8)).count==args.count-8, args.dropFirst(8).allSatisfy({ $0=="audio" || parseFit($0) != nil }), args[1]=="--stream",let id=UInt32(args[2]),let width=Int(args[3]),let fps=Int(args[4]),let quality=Int(args[5]),let bitrate=Int(args[7]),
           width>=640,width<=1920,validCaptureFPS(fps),quality>=35,quality<=85,bitrate>=2,bitrate<=20,["h264","jpeg"].contains(args[6]) {
     let engine=Engine()
-    engine.audio = args.count==9
+    engine.audio = args.dropFirst(8).contains("audio")
+    engine.fit = args.dropFirst(8).compactMap(parseFit).first
     Task { do { try await engine.start(id:id,maxWidth:width,fps:fps,quality:quality,codec:args[6],bitrate:bitrate) } catch { die("Capture setup failed: \(error)") } }
     RunLoop.main.run()
-} else { die("Usage: MacDowCapture --check | --list | --self-test | --stream WINDOW WIDTH FPS QUALITY h264|jpeg MBPS") }
+} else { die("Usage: MacDowCapture --check | --list | --self-test | --stream WINDOW WIDTH FPS QUALITY h264|jpeg MBPS [audio] [fit=WIDTHxHEIGHT]") }

@@ -100,6 +100,11 @@ DesktopWindow Window(int handle,string monitor,int x=-1800,int y=100,int width=8
         Check(!store.LoadAutoHide(),"missing bar preferences keep the existing always-visible behavior");
         store.SaveAutoHide(true);
         Check(new BarPreferencesStore(path).LoadAutoHide(),"auto-hide remains enabled after recreating the preferences store");
+        Check(!store.LoadMatchDisplay(),"fitting the Mac to the display is off unless chosen");
+        store.SaveMatchDisplay(true);
+        Check(new BarPreferencesStore(path).LoadMatchDisplay()&&new BarPreferencesStore(path).LoadAutoHide(),"the display-fit choice persists without changing auto-hide");
+        store.SaveAutoHide(true);
+        Check(new BarPreferencesStore(path).LoadMatchDisplay(),"changing auto-hide keeps the display-fit choice");
         File.WriteAllText(neighbor,"preserve");store.SaveAutoHide(false);
         Check(!new BarPreferencesStore(path).LoadAutoHide()&&File.ReadAllText(neighbor)=="preserve","turning auto-hide off persists without changing neighboring settings");
         File.WriteAllText(path,"not json");Check(!store.LoadAutoHide(),"damaged bar preferences fall back to a visible recoverable bar");

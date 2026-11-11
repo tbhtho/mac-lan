@@ -89,6 +89,8 @@ internal sealed partial class MainWindow : Window
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,UserDisconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles,ShowTerminal);
         remoteAgent.Prompt+=request=>Dispatcher.BeginInvoke(()=>AnswerRemotePrompt(request));
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
+        // The Mac desktop's shape is chosen when a stream starts; restart the desktop stream to apply a change.
+        tabBar.MatchDisplayChanged+=()=>{if(session is {IsReady:true,SupportsMatchDisplay:true}&&appWindow==null&&(resumeToken!=null||Remembered(lastHost)!=null))session.Abort("Fitting the Mac to this display","display-refit");};
         tabBar.HiddenWhileActive+=()=>{if(remote&&appWindow==null&&!closing){Activate();TryAutomaticControl();}};
         monitors.SelectionChanged+=(_,_)=>{if(!synchronizingMonitors&&monitors.SelectedItem is MonitorArea m)SelectMonitor(m);};
         DockPanel.SetDock(status,Dock.Bottom);root.Children.Add(status);
@@ -355,7 +357,7 @@ internal sealed partial class MainWindow : Window
         }
         else{remote=true;gate.RequestAutomaticControl();ShowInTaskbar=false;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;body.Child=RemotePanel(desktop);Show();Position(false);tabBar.SetMode(false);Activate();}
         var profile=codec.SelectedItem as StreamProfile??StreamProfile.DefaultHardware;
-        session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem));
+        session.Send(profile.CreateStart(id,(int)resolution.SelectedItem,(int)fps.SelectedItem,(int)bitrate.SelectedItem,app?null:MacDisplaySize()));
         Telemetry.Report("stream-request");status.Text=pairingProgress.Text="Waiting for you to choose Allow on your Mac. Video starts after that approval.";
     }
     // Network drops, a sleeping Mac, view switches and closing App Priority resume with the
@@ -368,6 +370,16 @@ internal sealed partial class MainWindow : Window
         pairButton.IsEnabled=false;pairButton.Content="Connecting...";nearby.IsEnabled=false;
         status.Text=pairingProgress.Text="Connecting to "+host.Name+"...";
         _=TryResume();
+    }
+    // The Mac desktop size that exactly fills the Mac view on the chosen display, when the user
+    // asked for that and the Mac can do it.
+    (int Width,int Height)? MacDisplaySize()
+    {
+        if(!tabBar.MatchDisplay||session?.SupportsMatchDisplay!=true)return null;
+        var all=Native.Monitors();if(all.Count==0)return null;
+        var monitor=DisplayLayout.Select(all,preferred);
+        if(Native.ScreenBounds(monitor.Id) is not var (_,_,width,height))return null;
+        return MacDisplayFit.For(width,height,(int)Math.Round(tabBar.VideoTopInset*monitor.Dpi/96.0));
     }
     void UserDisconnect(){autoConnectSuppressed=true;Disconnect();}
     void ForgetRememberedMacs()
@@ -399,10 +411,10 @@ internal sealed partial class MainWindow : Window
         // itself, and a second one within a minute stops reconnecting so an error cannot loop.
         if(first&&resumable&&code=="host-error"){if(Environment.TickCount64-lastHostErrorResume<60000)resumable=false;else lastHostErrorResume=Environment.TickCount64;}
         lastEndReason=why;
-        if(first&&resumable){resumeWantsView=code is not ("view-switch" or "app-window-closed" or "host-error")&&remote&&appWindow==null;if(code!="view-switch")pendingAppWindow=null;}
+        if(first&&resumable){resumeWantsView=code is not ("view-switch" or "app-window-closed" or "host-error")&&remote&&appWindow==null||code=="display-refit";if(code!="view-switch")pendingAppWindow=null;}
         if(resumable&&reconnectAttempt<ReconnectDelays.Length)
         {
-            bool immediate=first&&code is "view-switch" or "app-window-closed";
+            bool immediate=first&&code is "view-switch" or "app-window-closed" or "display-refit";
             reconnectTimer.Interval=immediate?TimeSpan.Zero:ReconnectDelays[reconnectAttempt];if(!immediate)reconnectAttempt++;reconnectTimer.Start();
             status.Text=pairingProgress.Text=immediate?"Updating the connection to "+MacName+"…":"Reconnecting to "+MacName+"… ("+why+")";
             if(remote&&appWindow==null&&!immediate)ShowReconnecting();

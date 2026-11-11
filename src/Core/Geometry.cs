@@ -26,6 +26,16 @@ public static class TabBarLayout
     public const int Dip=32;
     public static int HeightPixels(uint dpi)=>(int)Math.Ceiling(Dip*Math.Max(96,dpi)/96.0);
 }
+// The Mac desktop size, in points, that exactly fills the Mac view on a Windows display:
+// the whole screen below the mac-lan bar. Null when the Mac host could not create it.
+public static class MacDisplayFit
+{
+    public static (int Width,int Height)? For(int screenWidth,int screenHeight,int barPixels)
+    {
+        int width=screenWidth/2*2,height=(screenHeight-Math.Max(0,barPixels))/2*2;
+        return width is >=1024 and <=3840&&height is >=600 and <=2160?(width,height):null;
+    }
+}
 public static class Viewport
 {
     public static (double X,double Y)? Map(double x,double y,double width,double height,double imageWidth,double imageHeight)
