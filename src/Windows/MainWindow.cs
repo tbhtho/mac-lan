@@ -155,8 +155,9 @@ internal sealed partial class MainWindow : Window
         if(closing)return;
         // Typing in the terminal must go to this PC, not to the Mac view.
         gate.Disarm("terminal-open");SendLease();
-        if(terminalWindow!=null){terminalWindow.Activate();return;}
-        var window=new TerminalWindow(remoteAgent);terminalWindow=window;
+        // The MacBook tab keeps the Mac picture topmost; an unowned window would open behind it.
+        if(terminalWindow!=null){if(IsVisible&&terminalWindow.Owner==null)terminalWindow.Owner=this;terminalWindow.Activate();return;}
+        var window=new TerminalWindow(remoteAgent);terminalWindow=window;if(IsVisible)window.Owner=this;
         window.Closed+=(_,_)=>{if(ReferenceEquals(terminalWindow,window))terminalWindow=null;};
         window.Show();window.Activate();
     }
