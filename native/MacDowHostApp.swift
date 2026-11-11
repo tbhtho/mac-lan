@@ -159,7 +159,6 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
         menu.addItem(withTitle:"Send File to Windows…",action:#selector(sendFileToWindows),keyEquivalent:"").image = symbol("doc.badge.arrow.up")
         menu.addItem(withTitle:"Cancel Outgoing File",action:#selector(cancelOutgoingFile),keyEquivalent:"")
         menu.addItem(withTitle:"Forget Remembered PCs",action:#selector(forgetRememberedPCs),keyEquivalent:"")
-        menu.addItem(withTitle:"Remote Commands…",action:#selector(remoteCommands),keyEquivalent:"").image = symbol("terminal")
         menu.addItem(withTitle:"Network…",action:#selector(chooseNetwork),keyEquivalent:"").image = symbol("network")
         menu.addItem(.separator())
         updateMenu = menu.addItem(withTitle:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:"")
@@ -220,11 +219,6 @@ final class HostApp: NSObject, NSApplicationDelegate, NetServiceDelegate, NSMenu
     @objc func forgetRememberedPCs() {
         guard process != nil else { statusText = "Start sharing, then choose Forget Remembered PCs."; return }
         send(["type":"forget-pcs"])
-    }
-    // The host shows the choices (remote terminal, the two access switches, agent setup) itself.
-    @objc func remoteCommands() {
-        guard process != nil else { statusText = "Start sharing, then choose Remote Commands."; return }
-        send(["type":"remote-menu"])
     }
     @objc func reopen() {
         NSApp.activate(ignoringOtherApps:true)

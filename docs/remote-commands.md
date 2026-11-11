@@ -12,8 +12,11 @@ folder later commands run in, **Stop** or Ctrl+C ends a running command, and **S
 here…** copies files from the PC into the Mac folder shown. Git and builds are ordinary
 commands, for example `cd ~/Projects/app` then `git pull && swift build`.
 
-**Mac → Windows.** Choose **Remote Commands… → Open Remote Terminal on Windows** in the Mac
-menu. Terminal opens with a line-based shell on the PC (cmd.exe; `:help` lists file transfer).
+**Mac → Windows.** In Terminal on the Mac, run
+`/Applications/mac-lan.app/Contents/Helpers/MacDowHost --remote-shell` for a line-based shell
+on the PC (cmd.exe; `:help` lists file transfer), or add a command to run just that. It
+needs the Mac's second switch below. A **Remote Commands…** menu item that opens this shell
+and shows both switches is written but [not in the build yet](#pending-mac-menu-item).
 
 **Switches.** Two switches exist on each computer and both start off:
 
@@ -22,8 +25,12 @@ menu. Terminal opens with a line-based shell on the PC (cmd.exe; `:help` lists f
 | Let the other computer run commands here | Terminal → Access → *Let my Mac run commands on this PC* | Remote Commands… → *Let the paired PC run commands on this Mac* |
 | Let local tools and AI agents use the link | Terminal → Access → *Let AI agents and local tools…* | Remote Commands… → *Let local tools and AI agents use the link* |
 
-A Mac run from Terminal without the menu-bar app uses `MacDowHost --remote-commands on|off`
-and `--remote-agents on|off` before starting sharing.
+Until the menu item ships, set the Mac's switches in Terminal, then stop and start sharing:
+
+```
+/Applications/mac-lan.app/Contents/Helpers/MacDowHost --remote-commands on
+/Applications/mac-lan.app/Contents/Helpers/MacDowHost --remote-agents on
+```
 
 **AI agents.** mac-lan is a stdio MCP server when started with `--mcp`:
 
@@ -32,8 +39,8 @@ claude mcp add mac-lan -- "C:\path\to\mac-lan.exe" --mcp          (Windows)
 claude mcp add mac-lan -- "/Applications/mac-lan.app/Contents/Helpers/MacDowHost" --mcp   (Mac)
 ```
 
-**Copy MCP setup command** (Windows Terminal window, Mac Remote Commands menu) puts the right
-line for that computer on the clipboard. Codex and other agents that start stdio MCP servers
+**Copy MCP setup command** in the Windows Terminal window puts the right line for that PC on
+the clipboard. Codex and other agents that start stdio MCP servers
 use the same program and argument. Hosted assistants that need a public HTTPS MCP endpoint
 cannot connect: mac-lan has no cloud relay.
 
@@ -42,6 +49,23 @@ Tools: `list_devices`, `execute_command`, `get_execution_status`, `cancel_execut
 replacing what is there, then optionally run a command in the destination). The tools act on
 the other computer, never the one the agent runs on. mac-lan itself is still updated only
 through its signed feed.
+
+## Pending Mac menu item
+
+The menu-bar app is compiled from Swift on the Mac at first launch, and a Swift error would
+stop it opening. This change has not been compiled, so it is kept out of the source until it
+passes `swiftc -typecheck` on a Mac. The host side (`remote-menu` in `host/main.go`,
+`remoteHost.menu` in `host/remote_host.go`) is already present and does the work.
+
+```swift
+// in makeMenu(), after "Forget Remembered PCs"
+menu.addItem(withTitle:"Remote Commands…",action:#selector(remoteCommands),keyEquivalent:"").image = symbol("terminal")
+
+@objc func remoteCommands() {
+    guard process != nil else { statusText = "Start sharing, then choose Remote Commands."; return }
+    send(["type":"remote-menu"])
+}
+```
 
 ## Safety model
 
@@ -106,8 +130,7 @@ refusal to overwrite, deployment, the loopback endpoint's separation of agents f
 window, and the MCP protocol. `mac-lan.exe --mcp` was run over pipes against a real build.
 The Mac host cross-compiles for Apple Silicon.
 
-Not checked: anything on a Mac, including zsh execution, the Remote Commands menu and its
-dialogs, the Terminal `.command` launcher, process-group termination, and the one new Swift
-menu item, which has not been compiled. The Windows Terminal window and approval prompt
+Not checked: anything on a Mac, including zsh execution, the approval dialog, the host's
+Remote Commands choices and its Terminal `.command` launcher, and process-group termination. The Windows Terminal window and approval prompt
 compile but have not been opened. The Go race detector could not run here (no C toolchain).
 No two-computer run has happened.

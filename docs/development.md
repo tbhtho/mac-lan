@@ -419,8 +419,8 @@ the link protocol, file transfer, the loopback endpoint for local tools, a stdio
 and a line-based shell. The Mac host serves the link at `/remote` on its existing listener
 (`host/remote_host.go`). On Windows the bundled helper runs in `remote-agent` mode for the
 life of mac-lan.exe (`src/Windows/RemoteAgent.cs`), and `TerminalWindow.cs` is its window.
-`mac-lan.exe --mcp` and `MacDowHost --mcp` are thin clients of the running app. The Mac menu
-gains one item, **Remote Commands…**, which only sends `remote-menu` to the host; the host
-shows the choices with `osascript`, so the Swift change is one menu item and one action.
+`mac-lan.exe --mcp` and `MacDowHost --mcp` are thin clients of the running app. A Mac menu
+item, **Remote Commands…**, is designed to send only `remote-menu` to the host, which shows
+the choices with `osascript`. That one Swift item is held back until it is compiled on a Mac.
 Behavior, safety rules and what has and has not been checked are in
 [remote-commands.md](remote-commands.md).
