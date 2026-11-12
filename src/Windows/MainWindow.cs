@@ -102,8 +102,10 @@ internal sealed partial class MainWindow : Window
         // A PC that already knows a Mac starts as just the bar and connects by itself; the
         // connection page opens on first use, from More, or from a second launch.
         bool quietStart=trustedMacs.Any();
-        if(quietStart){ShowActivated=false;ShowInTaskbar=false;WindowState=WindowState.Minimized;}
-        Loaded+=(_,_)=>{RefreshMonitors();if(quietStart){ShowDesktop();WindowState=WindowState.Normal;ShowActivated=true;}else ShowSetup();_=FindMac();discoveryTimer.Start();remoteAgent.Start();};
+        // The window must not start minimized: the video view would then believe it is hidden and
+        // never draw. It opens once, off screen and without focus, and is hidden straight away.
+        if(quietStart){ShowActivated=false;ShowInTaskbar=false;WindowStartupLocation=WindowStartupLocation.Manual;Left=-32000;Top=-32000;}
+        Loaded+=(_,_)=>{RefreshMonitors();if(quietStart){ShowDesktop();ShowActivated=true;}else ShowSetup();_=FindMac();discoveryTimer.Start();remoteAgent.Start();};
         // Keep looking in the background for a remembered Mac, not only while the page is open.
         discoveryTimer.Tick+=async(_,_)=>{if(!remote&&(IsVisible||!paired&&!autoConnectSuppressed&&trustedMacs.Any()))await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);Native.AddClipboardFormatListener(source.Handle);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
