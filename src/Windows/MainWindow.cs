@@ -588,7 +588,9 @@ internal sealed partial class MainWindow : Window
             case "ready":controlIssue=null;break;
             case "accessibility-missing":controlIssue="Allow Accessibility on your Mac to control";gate.Disarm("mac-permission");status.Text=remote?"Allow mac-lan under Accessibility on your Mac. Control starts automatically on the MacBook tab once permission and video are ready.":"On your Mac, open System Settings > Privacy & Security > Accessibility and allow mac-lan. Then click the Mac desktop again.";break;
             case "scope-blocked":controlIssue="Control paused: refocus the selected Mac window";gate.Disarm("mac-scope");break;
-            case "lease-expired":case "stale-input":case "generation-revoked":controlIssue=remote?"Control recovering automatically":"Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
+            case "lease-expired":case "stale-input":case "generation-revoked":
+                if(ControlReports.AboutEarlierSession(m.TryGetProperty("generation",out var reported)&&reported.ValueKind==JsonValueKind.Number&&reported.TryGetUInt64(out ulong earlier)?earlier:null,controlGeneration)){LogDiagnostic("control-report-stale",code.GetString()!,UiHealth());return;}
+                controlIssue=remote?"Control recovering automatically":"Control paused: click Mac to control";gate.Disarm("mac-watchdog");break;
             case "input-overflow":controlIssue="Control paused: Mac input was too fast";gate.Disarm("mac-input-pressure");status.Text=remote?"Mac input was faster than it could be applied. Control recovers automatically on the MacBook tab; video keeps playing.":"Mac input was faster than it could be applied. Click the Mac view again to resume control; video keeps playing.";break;
         }
         TryAutomaticControl();UpdateControl();

@@ -141,12 +141,14 @@ final class VirtualDisplay {
         guard class_respondsToSelector(modeClass, initMode), class_respondsToSelector(displayClass, initDisplay), class_respondsToSelector(displayClass, apply),
               let modeInit = class_getMethodImplementation(modeClass, initMode),
               let applyImplementation = class_getMethodImplementation(displayClass, apply) else { return nil }
-        // Retina rendering up to a 1920-point desktop; larger desktops use one pixel per point.
-        let scale = width <= 1920 ? 2 : 1
+        // One pixel per point. The picture is streamed at this size, so drawing the desktop at
+        // twice it made the Mac render four times the pixels (and scale them for its own screen
+        // and again for the stream) for nothing the viewer could show: measured on an M3, frames
+        // took 13-19 ms to encode in that mode against 10-12 ms without it.
         let descriptor = descriptorClass.init()
         descriptor.setValue("mac-lan Display", forKey: "name")
-        descriptor.setValue(NSNumber(value: UInt32(width * scale)), forKey: "maxPixelsWide")
-        descriptor.setValue(NSNumber(value: UInt32(height * scale)), forKey: "maxPixelsHigh")
+        descriptor.setValue(NSNumber(value: UInt32(width)), forKey: "maxPixelsWide")
+        descriptor.setValue(NSNumber(value: UInt32(height)), forKey: "maxPixelsHigh")
         let diagonal = 609.6, ratio = Double(width) / Double(height) // a 24-inch panel of this shape
         let millimetersHigh = diagonal / (1 + ratio * ratio).squareRoot()
         descriptor.setValue(NSValue(size: NSSize(width: millimetersHigh * ratio, height: millimetersHigh)), forKey: "sizeInMillimeters")
@@ -159,7 +161,7 @@ final class VirtualDisplay {
         guard let allocatedMode = (modeClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
               let mode = unsafeBitCast(modeInit, to: ModeInit.self)(allocatedMode, initMode, UInt(width), UInt(height), 60)?.takeRetainedValue() else { return nil }
         let settings = settingsClass.init()
-        settings.setValue(NSNumber(value: UInt32(scale == 2 ? 1 : 0)), forKey: "hiDPI")
+        settings.setValue(NSNumber(value: UInt32(0)), forKey: "hiDPI")
         settings.setValue([mode], forKey: "modes")
         guard let allocatedDisplay = (displayClass as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue(),
               let display = allocatedDisplay.perform(initDisplay, with: descriptor)?.takeRetainedValue() as? NSObject,
@@ -290,14 +292,17 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     var lastAlive:TimeInterval = 0
     let stateLock = NSLock()
     var view = false
-    var inFlight = false
+    // Frames handed to the encoder and not yet written out. Two may overlap: with only one, any
+    // frame that took longer than a sixtieth of a second to encode cost the next captured frame.
+    var inFlight = 0
+    var encodeStarts: [Int: TimeInterval] = [:]
+    var encodeToken = 0
     var encoder: VTCompressionSession?
     var sequence: UInt32 = 0
     var outputLock = NSLock()
     var ci = CIContext(options: [.cacheIntermediates: false])
     var mode = "h264"
     var quality = 0.7
-    var encodeStart: TimeInterval = 0
     var width = 0, height = 0, fps = 60, bitrate = 8
     var forceKeyframe = false
     // Caps Lock is a lock state, not a held key: a synthetic key 57 press does not toggle it,
@@ -384,12 +389,14 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     func setupEncoder() {
         let spec: [CFString:Any] = [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: kCFBooleanTrue!,
                                   kVTVideoEncoderSpecification_EnableLowLatencyRateControl: kCFBooleanTrue!]
-        let result = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264, encoderSpecification: spec as CFDictionary, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { ref, _, result, flags, sample in
+        let result = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264, encoderSpecification: spec as CFDictionary, imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: { ref, source, result, flags, sample in
             guard let ref else { return }
             let engine = Unmanaged<Engine>.fromOpaque(ref).takeUnretainedValue()
-            defer { engine.stateLock.lock(); engine.inFlight = false; engine.stateLock.unlock() }
+            engine.stateLock.lock(); let started = engine.encodeStarts.removeValue(forKey: Int(bitPattern: source)) ?? now(); engine.stateLock.unlock()
+            // Counted until the packet is written, so a slow pipe still holds new frames back.
+            defer { engine.stateLock.lock(); engine.inFlight = max(0, engine.inFlight - 1); engine.stateLock.unlock() }
             guard result == noErr, !flags.contains(.frameDropped), let sample else { return }
-            engine.encoded(sample)
+            engine.encoded(sample, started: started)
         }, refcon: Unmanaged.passUnretained(self).toOpaque(), compressionSessionOut: &encoder)
         guard result == noErr, let encoder else { shutdown("Hardware H.264 unavailable (\(result)). Reconnect with JPEG diagnostic; no silent software fallback.") }
         let properties: [CFString:Any] = [
@@ -401,8 +408,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             // because each one is a burst many times a normal frame.
             kVTCompressionPropertyKey_MaxKeyFrameInterval: max(1,fps*2),
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 2.0,
-            kVTCompressionPropertyKey_AverageBitRate: bitrate*1_000_000,
-            kVTCompressionPropertyKey_MaxFrameDelayCount: 1
+            kVTCompressionPropertyKey_AverageBitRate: bitrate*1_000_000
         ]
         for (key,value) in properties {
             let code = VTSessionSetProperty(encoder, key: key, value: value as CFTypeRef)
@@ -439,43 +445,53 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         stateLock.lock()
         lastImage = image
         // Encoder timestamps must rise; a frame older than a re-sent keyframe is dropped.
-        guard view, !inFlight, CMTimeCompare(time, lastEncoded) > 0 else { stateLock.unlock(); return }
-        inFlight = true; encodeStart = now()
+        guard view, inFlight < (mode == "h264" ? 2 : 1), CMTimeCompare(time, lastEncoded) > 0 else { stateLock.unlock(); return }
+        let started = now(), token = beginEncode(started)
         let force = forceKeyframe; forceKeyframe = false
         if mode == "h264" { lastEncoded = time }
         stateLock.unlock()
         if mode == "h264" {
-            encodeH264(image, time: time, force: force)
+            encodeH264(image, time: time, force: force, token: token)
         } else {
-            defer { stateLock.lock(); inFlight = false; stateLock.unlock() }
+            defer { abandonEncode(token) }
             autoreleasepool {
                 let ciImage = CIImage(cvPixelBuffer: image)
                 guard let cg = ci.createCGImage(ciImage, from: ciImage.extent) else { return }
                 let data = NSMutableData()
                 guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return }
                 CGImageDestinationAddImage(dest,cg,[kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
-                if CGImageDestinationFinalize(dest) { writePacket(kind:1,data:data as Data) }
+                if CGImageDestinationFinalize(dest) { writePacket(kind:1,data:data as Data,started:started) }
             }
         }
     }
-    func encodeH264(_ image: CVImageBuffer, time: CMTime, force: Bool) {
-        guard let encoder else { stateLock.lock(); inFlight=false; stateLock.unlock(); return }
+    // Both are called with or without stateLock as noted; a token names one frame in the encoder.
+    func beginEncode(_ started: TimeInterval) -> Int { // stateLock held
+        inFlight += 1
+        encodeToken = encodeToken >= 1_000_000_000 ? 1 : encodeToken + 1
+        encodeStarts[encodeToken] = started
+        return encodeToken
+    }
+    func abandonEncode(_ token: Int) { // stateLock not held
+        stateLock.lock(); encodeStarts.removeValue(forKey: token); inFlight = max(0, inFlight - 1); stateLock.unlock()
+    }
+    func encodeH264(_ image: CVImageBuffer, time: CMTime, force: Bool, token: Int) {
+        guard let encoder else { abandonEncode(token); return }
         let options: CFDictionary? = force ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue!] as CFDictionary : nil
-        let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: time, duration: .invalid, frameProperties: options, sourceFrameRefcon: nil, infoFlagsOut: nil)
-        if result != noErr { stateLock.lock(); inFlight=false; stateLock.unlock(); status("Video encode failed: \(result)",paused:true) }
+        let result = VTCompressionSessionEncodeFrame(encoder, imageBuffer: image, presentationTimeStamp: time, duration: .invalid, frameProperties: options, sourceFrameRefcon: UnsafeMutableRawPointer(bitPattern: token), infoFlagsOut: nil)
+        if result != noErr { abandonEncode(token); status("Video encode failed: \(result)",paused:true) }
     }
     // Answer a keyframe request now by re-encoding the newest image; if a frame is already
     // being encoded, the next captured frame becomes the keyframe instead.
     func resendKeyframe() {
         stateLock.lock()
-        guard mode == "h264", view, !inFlight, let image = lastImage else { forceKeyframe = true; stateLock.unlock(); return }
+        guard mode == "h264", view, inFlight == 0, let image = lastImage else { forceKeyframe = true; stateLock.unlock(); return }
         let host = CMClockGetTime(CMClockGetHostTimeClock())
         let time = CMTimeCompare(host, lastEncoded) > 0 ? host : CMTimeAdd(lastEncoded, CMTime(value: 1, timescale: 600))
-        inFlight = true; encodeStart = now(); forceKeyframe = false; lastEncoded = time
+        let token = beginEncode(now()); forceKeyframe = false; lastEncoded = time
         stateLock.unlock()
-        encodeH264(image, time: time, force: true)
+        encodeH264(image, time: time, force: true, token: token)
     }
-    func encoded(_ sample: CMSampleBuffer) {
+    func encoded(_ sample: CMSampleBuffer, started: TimeInterval) {
         guard let format = CMSampleBufferGetFormatDescription(sample), let block = CMSampleBufferGetDataBuffer(sample) else { return }
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString:Any]]
         let key = !(attachments?.first?[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
@@ -505,14 +521,14 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             guard length>0,offset+length<=avcc.count else { return }
             data.append(contentsOf:[0,0,0,1]);data.append(avcc[offset..<offset+length]);offset += length
         }
-        writePacket(kind:key ? 2 : 3,data:data)
+        writePacket(kind:key ? 2 : 3,data:data,started:started)
     }
-    func writePacket(kind:UInt8,data:Data) {
+    func writePacket(kind:UInt8,data:Data,started:TimeInterval) {
         guard data.count+9 <= 4*1024*1024 else { shutdown("Encoded frame exceeds transport limit") }
         outputLock.lock();defer { outputLock.unlock() }
         sequence &+= 1
         var packet = Data([kind]);var seq = sequence.bigEndian
-        var elapsed = UInt32(min(4_000_000_000,max(0,(now()-encodeStart)*1_000_000))).bigEndian
+        var elapsed = UInt32(min(4_000_000_000,max(0,(now()-started)*1_000_000))).bigEndian
         withUnsafeBytes(of:&seq) { packet.append(contentsOf:$0) };withUnsafeBytes(of:&elapsed) { packet.append(contentsOf:$0) };packet.append(data)
         writeFramed(packet)
     }
@@ -610,7 +626,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
     @objc func tick() {
         if now()-lastAlive>0.5 {lastAlive=now();jsonStatus(["type":"captureAlive"])}
         reportCursor()
-        if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll();reportControl("lease-expired",permission:AXIsProcessTrusted()) }
+        if lease.active && !lease.valid(now:now()) { revokedGeneration=currentGeneration;releaseAll();reportControl("lease-expired",permission:AXIsProcessTrusted(),generation:currentGeneration) }
         if now()-watchdogGrace>15 {
             // Tolerate brief Wi-Fi/driver stalls without ending video; control is still
             // released after the 850 ms lease. Stop only after a long viewer outage,
@@ -668,8 +684,11 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         return false
     }
     func revoke(_ message:String) { revokedGeneration=currentGeneration;releaseAll();if !paused{status(message,paused:true);paused=true} }
-    func reportControl(_ code:String,permission:Bool,active:Bool=false) {
-        let state="\(code):\(permission):\(active)"
+    // generation names the control session a release refers to. After a network stall the queued
+    // messages of a session that already ended arrive late; Windows uses this to tell a report
+    // about that old session from one about the session it has since started.
+    func reportControl(_ code:String,permission:Bool,active:Bool=false,generation:UInt64?=nil) {
+        let state="\(code):\(permission):\(active):\(generation ?? 0)"
         guard state != lastControlState else { return }
         lastControlState=state
         let message:String
@@ -680,7 +699,9 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         case "view-only": message="Click the Mac desktop to control it."
         default: message="Control released. Click the Mac desktop again to resume."
         }
-        jsonStatus(["type":"controlStatus","code":code,"controlPermission":permission,"active":active,"message":message])
+        var report:[String:Any]=["type":"controlStatus","code":code,"controlPermission":permission,"active":active,"message":message]
+        if let generation { report["generation"]=generation }
+        jsonStatus(report)
     }
     func input(_ m:[String:Any],received:TimeInterval) {
         guard let type=m["type"] as? String else { return }
@@ -693,8 +714,8 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
             let generation=(m["generation"] as? UInt64) ?? 0
             let permission=AXIsProcessTrusted()
             if !requested { revokedGeneration=currentGeneration;releaseAll();reportControl("view-only",permission:permission);return }
-            guard generation>0,generation != revokedGeneration else { releaseAll();reportControl("generation-revoked",permission:permission);return }
-            guard received+0.85>now() else { releaseAll();reportControl("stale-input",permission:permission);return }
+            guard generation>0,generation != revokedGeneration else { releaseAll();reportControl("generation-revoked",permission:permission,generation:generation);return }
+            guard received+0.85>now() else { releaseAll();reportControl("stale-input",permission:permission,generation:generation);return }
             if generation != currentGeneration {
                 clicks.reset()
                 currentGeneration=generation
@@ -709,7 +730,7 @@ final class Engine: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         let permission=AXIsProcessTrusted()
         let reason = !permission ? "accessibility-missing" : received+0.85<=now() ? "stale-input" : !lease.valid(now:now()) ? "lease-expired" : !scopeAllowsInput() ? "scope-blocked" : ""
-        guard reason.isEmpty else { revokedGeneration=currentGeneration;releaseAll();reportControl(reason,permission:permission);return }
+        guard reason.isEmpty else { revokedGeneration=currentGeneration;releaseAll();reportControl(reason,permission:permission,generation:currentGeneration);return }
         switch type {
         case "key":
             guard let c=m["code"] as? Int,c>=0,c<=126 else { return };let code=CGKeyCode(c),down=(m["down"] as? Bool)==true

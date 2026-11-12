@@ -60,6 +60,9 @@ automaticGate.Disarm("video-stale");
 Check(!automaticGate.TryAutomaticArm(true,false)&&automaticGate.TryAutomaticArm(true,true),"automatic control resumes only after stale video recovers");
 automaticGate.Disarm("mac-watchdog");
 Check(automaticGate.TryAutomaticArm(true,true),"the selected Mac tab resumes control after a native watchdog pause");
+// A late report about a control session that has already been replaced does not end the new one.
+Check(ControlReports.AboutEarlierSession(4,5)&&!ControlReports.AboutEarlierSession(5,5)&&!ControlReports.AboutEarlierSession(6,5),"only a report about an earlier control session is ignored");
+Check(!ControlReports.AboutEarlierSession(null,5)&&!ControlReports.AboutEarlierSession(0,5),"a report without a session number, from an older Mac app, is taken at face value");
 automaticGate.Disarm("manual");
 Check(!automaticGate.TryAutomaticArm(true,true),"manual Stop control remains stopped across readiness ticks");
 automaticGate.RequestAutomaticControl();Check(automaticGate.TryAutomaticArm(true,true),"selecting Mac again explicitly restores automatic control after Stop");

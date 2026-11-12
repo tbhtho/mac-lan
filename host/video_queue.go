@@ -10,6 +10,10 @@ const (
 	videoQueueMaxFrames = 64
 	videoQueueMaxBytes  = 8 << 20
 	videoQueueMaxAge    = 250 * time.Millisecond
+	// A message larger than the socket write buffer goes out as several fragments, each its own
+	// write and TLS record. Video frames are tens of kilobytes, so a 4 KiB buffer meant ten or
+	// more writes per frame; this size sends an ordinary frame in one.
+	videoWriteBuffer = 64 << 10
 )
 
 type queuedVideoFrame struct {

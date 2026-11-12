@@ -85,7 +85,7 @@ A command that is running when the connection drops keeps going for two minutes 
 ## Limits
 
 - Apple Silicon Macs only; one PC controls a Mac at a time.
-- With **Fit Mac to this display** turned off, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on.
+- With **Fit Mac to this display** turned off, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on. From alpha.56 the Mac draws that desktop at the size it is streamed, not at double density, which keeps the picture smooth; the Mac's own screen therefore looks softer than usual until you stop viewing.
 - No image or file clipboard, microphone, IME, multi-touch or stylus. Keys are sent by physical position, so use the same keyboard layout on both.
 - The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network.
 - This is a preview. Releases are checked with headless tests and on the author's two computers, not on a range of hardware.

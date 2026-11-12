@@ -263,7 +263,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "one controller at a time", 409)
 		return
 	}
-	up := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" }}
+	up := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: videoWriteBuffer, HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" }}
 	c, err := up.Upgrade(w, r, nil)
 	if err != nil {
 		if held {
