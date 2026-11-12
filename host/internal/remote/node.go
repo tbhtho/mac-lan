@@ -2,6 +2,7 @@ package remote
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -138,7 +139,22 @@ type ConfirmRequest struct {
 	Reason string `json:"reason"`
 	Origin string `json:"origin"`
 	Target string `json:"target"`
+	// Remember, when not empty, is the wording of a third choice that also
+	// stops this kind of request from asking again (see Answer).
+	Remember string `json:"remember,omitempty"`
+	// Withdrawn closes when the request no longer needs an answer.
+	Withdrawn <-chan struct{} `json:"-"`
 }
+
+// Answer is a person's reply to a ConfirmRequest.
+type Answer int
+
+const (
+	Deny Answer = iota
+	AllowOnce
+	// AllowAlways is offered only when the request carries Remember.
+	AllowAlways
+)
 
 // Device is one end of the link as shown to tools.
 type Device struct {
@@ -147,6 +163,10 @@ type Device struct {
 	Platform        string `json:"platform"`
 	Version         string `json:"version,omitempty"`
 	ThisDevice      bool   `json:"this_device"`
+	OS              string `json:"os,omitempty"`
+	Arch            string `json:"arch,omitempty"`
+	User            string `json:"user,omitempty"`
+	Home            string `json:"home_folder,omitempty"`
 	Connected       bool   `json:"connected"`
 	CommandsEnabled bool   `json:"accepts_commands"`
 	DefaultShell    string `json:"default_shell,omitempty"`
@@ -157,6 +177,7 @@ type Device struct {
 type Node struct {
 	name     string
 	version  string
+	dir      string
 	settings *settingsStore
 	log      *audit
 	procs    *procTable
@@ -165,14 +186,16 @@ type Node struct {
 	link     *link
 	jobs     map[string]*Job
 	order    []string
-	confirm  func(ConfirmRequest) bool
+	confirm  func(ConfirmRequest) Answer
 	onChange func()
+	// Commands a person chose not to be asked about again, until mac-lan restarts.
+	remembered map[string]bool
 }
 
 // New creates the node. dir is the private settings folder ("" keeps settings
 // in memory, for tests).
 func New(dir, name, version string) *Node {
-	n := &Node{name: name, version: version, settings: loadSettings(dir), procs: newProcTable(), jobs: map[string]*Job{}}
+	n := &Node{name: name, version: version, dir: dir, settings: loadSettings(dir), procs: newProcTable(), jobs: map[string]*Job{}, remembered: map[string]bool{}}
 	if dir != "" {
 		n.log = &audit{path: filepath.Join(dir, "remote-audit.log")}
 	}
@@ -181,7 +204,7 @@ func New(dir, name, version string) *Node {
 
 // SetConfirm installs the function that asks a person to approve an action.
 // Without one, every action that needs approval is refused.
-func (n *Node) SetConfirm(ask func(ConfirmRequest) bool) {
+func (n *Node) SetConfirm(ask func(ConfirmRequest) Answer) {
 	n.mu.Lock()
 	n.confirm = ask
 	n.mu.Unlock()
@@ -205,12 +228,15 @@ func (n *Node) changed() {
 
 func (n *Node) Settings() Settings { return n.settings.get() }
 
-// SetSettings saves the two opt-in switches and tells the paired computer.
+// SetSettings saves the opt-in switches and tells the paired computer.
 func (n *Node) SetSettings(next Settings) error {
+	if len(next.Trusted) > maxTrusted {
+		return errors.New("too many folders")
+	}
 	if err := n.settings.set(next); err != nil {
 		return err
 	}
-	n.log.record("settings", "user", "accept="+boolText(next.Accept)+" agents="+boolText(next.Agents), "saved")
+	n.log.record("settings", "user", "accept="+boolText(next.Accept)+" agents="+boolText(next.Agents)+" trusted="+strings.Join(next.Trusted, " | "), "saved")
 	if l := n.current(); l != nil {
 		_ = l.send(n.hello())
 	}
@@ -264,13 +290,17 @@ func platformID(goos string) string {
 }
 
 func (n *Node) hello() msg {
-	return msg{T: "hello", Name: n.name, Platform: runtime.GOOS, Version: n.version, Accept: n.settings.get().Accept, Shell: defaultShellName()}
+	home, _ := os.UserHomeDir()
+	return msg{T: "hello", Name: n.name, Platform: runtime.GOOS, Version: n.version, Accept: n.settings.get().Accept, Shell: defaultShellName(),
+		Home: home, User: userName(), OS: systemName(), Arch: runtime.GOARCH}
 }
 
 // Devices lists this computer and the paired one.
 func (n *Node) Devices() []Device {
 	settings := n.settings.get()
+	home, _ := os.UserHomeDir()
 	local := Device{ID: platformID(runtime.GOOS), Name: n.name, Platform: runtime.GOOS, Version: n.version, ThisDevice: true, Connected: true, CommandsEnabled: settings.Accept, DefaultShell: defaultShellName(),
+		OS: systemName(), Arch: runtime.GOARCH, User: userName(), Home: home,
 		Note: "The computer this tool runs on. Tools act on the other device."}
 	l := n.current()
 	if l == nil {
@@ -280,7 +310,8 @@ func (n *Node) Devices() []Device {
 	if !known {
 		return []Device{local, {ID: "remote", Name: "Paired computer", Connected: true, Note: "Connected; waiting for the other computer to introduce itself."}}
 	}
-	other := Device{ID: platformID(peer.Platform), Name: peer.Name, Platform: peer.Platform, Version: peer.Version, Connected: true, CommandsEnabled: peer.Accept, DefaultShell: peer.Shell}
+	other := Device{ID: platformID(peer.Platform), Name: peer.Name, Platform: peer.Platform, Version: peer.Version, Connected: true, CommandsEnabled: peer.Accept, DefaultShell: peer.Shell,
+		OS: peer.OS, Arch: peer.Arch, User: peer.User, Home: peer.Home}
 	if !peer.Accept {
 		other.Note = "Remote commands are switched off on that computer. Its user must turn on \"Allow the paired computer to run commands here\" in mac-lan."
 	}
@@ -329,31 +360,39 @@ func (n *Node) job(id string) *Job {
 	return n.jobs[id]
 }
 
-// approve asks a person; it is false when nobody can be asked or they decline.
-func (n *Node) approve(j *Job, request ConfirmRequest) bool {
+// approve asks a person. It returns Deny when nobody can be asked or they
+// decline, and AllowAlways only for a request that offered it.
+func (n *Node) approve(j *Job, request ConfirmRequest) Answer {
 	n.mu.Lock()
 	ask := n.confirm
 	n.mu.Unlock()
 	if ask == nil {
 		j.finish("denied", "This needs approval in the mac-lan window, and no mac-lan window is available to ask. Nothing was sent.")
-		return false
+		return Deny
 	}
-	answer := make(chan bool, 1)
+	withdrawn := make(chan struct{})
+	defer close(withdrawn) // closes a prompt that is still open when this returns
+	request.Withdrawn = withdrawn
+	answer := make(chan Answer, 1)
 	go func() { answer <- ask(request) }()
 	timer := time.NewTimer(confirmTimeout)
 	defer timer.Stop()
 	select {
-	case ok := <-answer:
-		if !ok {
-			j.finish("denied", "Not approved in mac-lan. Nothing was sent.")
+	case reply := <-answer:
+		if reply == AllowAlways && request.Remember == "" {
+			reply = AllowOnce
 		}
-		return ok
+		if reply != AllowOnce && reply != AllowAlways {
+			j.finish("denied", "Not approved in mac-lan. Nothing was sent.")
+			return Deny
+		}
+		return reply
 	case <-j.cancel:
 		j.finish("cancelled", "Cancelled before it was approved.")
 	case <-timer.C:
 		j.finish("denied", "Nobody approved this in mac-lan within a minute. Nothing was sent.")
 	}
-	return false
+	return Deny
 }
 
 // ExecRequest asks the paired computer to run a shell command.
@@ -378,16 +417,36 @@ func (n *Node) Exec(r ExecRequest) (*Job, error) {
 	}
 	peer, _ := l.peerInfo()
 	reason := NeedsConfirmation(r.Command)
+	// A person may have chosen not to be asked again about this exact command
+	// in this folder; that lasts until mac-lan restarts.
+	memory := peer.Platform + "\x00" + r.Shell + "\x00" + r.Cwd + "\x00" + r.Command
+	n.mu.Lock()
+	ask := reason != "" && !n.remembered[memory]
+	n.mu.Unlock()
 	state := "starting"
-	if reason != "" {
+	if ask {
 		state = "awaiting-confirmation"
 	}
 	j := n.newJob("exec", r.Command, r.Cwd, r.Origin, state)
 	go func() {
 		defer n.changed()
-		if reason != "" {
-			if !n.approve(j, ConfirmRequest{Title: "Run this on " + peer.Name + "?", Detail: r.Command, Reason: "This command " + reason + ".", Origin: r.Origin, Target: peer.Name}) {
+		if ask {
+			detail := r.Command
+			if r.Cwd != "" {
+				detail += "\n\nin " + r.Cwd
+			}
+			reply := n.approve(j, ConfirmRequest{Title: "Run this on " + peer.Name + "?", Detail: detail, Reason: "This command " + reason + ".", Origin: r.Origin, Target: peer.Name,
+				Remember: "Don't ask again for this exact command in this folder until mac-lan restarts"})
+			if reply == Deny {
 				return
+			}
+			if reply == AllowAlways {
+				n.mu.Lock()
+				if len(n.remembered) < 200 {
+					n.remembered[memory] = true
+				}
+				n.mu.Unlock()
+				n.log.record("remember", r.Origin, r.Command, "not asked again until restart")
 			}
 			j.mu.Lock()
 			j.state = "starting"

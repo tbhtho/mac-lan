@@ -60,12 +60,22 @@ type msg struct {
 	Accept      bool    `json:"accept,omitempty"`
 	Dir         bool    `json:"dir,omitempty"`
 	X           bool    `json:"x,omitempty"` // the file is executable
+	Home        string  `json:"home,omitempty"`
+	User        string  `json:"user,omitempty"`
+	OS          string  `json:"os,omitempty"`
+	Arch        string  `json:"arch,omitempty"`
+	Width       int     `json:"width,omitempty"`
+	Height      int     `json:"height,omitempty"`
+	More        bool    `json:"more,omitempty"` // the listing was cut short
+	Keep        bool    `json:"keep,omitempty"` // a replaced file keeps its permissions
 	Entries     []entry `json:"entries,omitempty"`
 }
 
 type entry struct {
 	Rel  string `json:"rel"`
 	Size int64  `json:"size"`
+	Dir  bool   `json:"dir,omitempty"`
+	Mod  int64  `json:"mod,omitempty"` // modification time, Unix seconds
 }
 
 func newID() string {
@@ -227,7 +237,12 @@ type Settings struct {
 	// Agents lets local programs (an MCP server, the command-line shell) use the
 	// connection to the paired computer.
 	Agents bool `json:"agents"`
+	// Trusted lists folders on the paired computer in which files may be
+	// replaced without asking each time. Only the mac-lan window can change it.
+	Trusted []string `json:"trusted,omitempty"`
 }
+
+const maxTrusted = 32
 
 type settingsStore struct {
 	mu   sync.Mutex
@@ -241,7 +256,7 @@ func loadSettings(dir string) *settingsStore {
 		s.path = ""
 		return s
 	}
-	if info, err := os.Lstat(s.path); err == nil && info.Mode().IsRegular() && info.Size() < 4096 {
+	if info, err := os.Lstat(s.path); err == nil && info.Mode().IsRegular() && info.Size() < 64<<10 {
 		if data, err := os.ReadFile(s.path); err == nil {
 			_ = json.Unmarshal(data, &s.now)
 		}
@@ -252,7 +267,9 @@ func loadSettings(dir string) *settingsStore {
 func (s *settingsStore) get() Settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.now
+	now := s.now
+	now.Trusted = append([]string(nil), now.Trusted...)
+	return now
 }
 
 func (s *settingsStore) set(next Settings) error {

@@ -46,6 +46,7 @@ type upload struct {
 	size, got int64
 	hash      hash.Hash
 	exec      bool
+	mode      os.FileMode // permissions to keep; zero chooses by exec
 	failed    string
 }
 type download struct {
@@ -243,6 +244,10 @@ func (l *link) handle(m msg) {
 		l.reply(m, msg{OK: true, Path: path})
 	case "list":
 		l.handleList(m)
+	case "dir":
+		l.handleDir(m)
+	case "shot":
+		l.handleShot(m)
 	case "put":
 		l.handlePut(m)
 	case "get":
@@ -357,7 +362,7 @@ func walkFiles(root string) ([]entry, error) {
 		if len(out) >= maxTransferFiles || names > 1<<20 {
 			return errors.New("this folder has too many files for one transfer; send a smaller folder or an archive")
 		}
-		out = append(out, entry{rel, info.Size()})
+		out = append(out, entry{Rel: rel, Size: info.Size()})
 		return nil
 	})
 	return out, err
@@ -388,10 +393,14 @@ func (l *link) handlePut(m msg) {
 		}
 		path = filepath.Join(path, name)
 	}
+	var keep os.FileMode
 	if info, err := os.Lstat(path); err == nil {
 		if info.IsDir() {
 			fail("", "the destination is a folder: "+path)
 			return
+		}
+		if m.Keep && info.Mode().IsRegular() {
+			keep = info.Mode().Perm()
 		}
 		if !m.Overwrite {
 			fail("exists", path+" already exists. Nothing was changed; ask for it to be replaced if that is intended (needs approval).")
@@ -408,7 +417,7 @@ func (l *link) handlePut(m msg) {
 		return
 	}
 	l.pmu.Lock()
-	l.uploads[m.RID] = &upload{file: file, temp: file.Name(), path: path, size: m.Size, hash: sha256.New(), exec: m.X}
+	l.uploads[m.RID] = &upload{file: file, temp: file.Name(), path: path, size: m.Size, hash: sha256.New(), exec: m.X, mode: keep}
 	l.pmu.Unlock()
 	l.reply(m, msg{OK: true, Path: path})
 }
@@ -480,6 +489,9 @@ func (l *link) handleEnd(m msg) {
 			if u.exec {
 				mode = 0o755
 			}
+			if u.mode != 0 {
+				mode = u.mode
+			}
 			if runtime.GOOS != "windows" {
 				_ = os.Chmod(u.temp, mode)
 			}
@@ -516,6 +528,10 @@ func (l *link) handleGet(m msg) {
 	var info os.FileInfo
 	if err == nil {
 		info, err = os.Lstat(path)
+	}
+	if err == nil && info.IsDir() {
+		l.reply(m, msg{Err: "that is a folder, not a file: " + path})
+		return
 	}
 	if err != nil || !info.Mode().IsRegular() {
 		l.reply(m, msg{Err: "no such file: " + m.Path})

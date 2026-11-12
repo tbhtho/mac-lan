@@ -42,7 +42,8 @@ func joinRemote(root, rel string) string {
 }
 
 // putFile sends one local file and returns where the other computer saved it.
-func putFile(l *link, j *Job, local, remote, name string, overwrite bool) (string, error) {
+// With keep, a file that is replaced keeps the permissions it had.
+func putFile(l *link, j *Job, local, remote, name string, overwrite, keep bool) (string, error) {
 	file, err := os.Open(local)
 	if err != nil {
 		return "", errors.New("cannot read " + local + ": " + err.Error())
@@ -53,7 +54,7 @@ func putFile(l *link, j *Job, local, remote, name string, overwrite bool) (strin
 		return "", errors.New("not a regular file: " + local)
 	}
 	rid := newID()
-	first, err := l.call(msg{T: "put", RID: rid, Path: remote, Name: name, Size: info.Size(), Overwrite: overwrite, Confirmed: overwrite, Origin: j.origin,
+	first, err := l.call(msg{T: "put", RID: rid, Path: remote, Name: name, Size: info.Size(), Overwrite: overwrite, Confirmed: overwrite, Keep: keep, Origin: j.origin,
 		X: runtime.GOOS != "windows" && info.Mode()&0o111 != 0}, 30*time.Second)
 	if err != nil {
 		return "", err
@@ -97,7 +98,8 @@ func putFile(l *link, j *Job, local, remote, name string, overwrite bool) (strin
 }
 
 // getFile fetches one remote file into local, verified before it is published.
-func getFile(l *link, j *Job, remote, local string, overwrite bool) error {
+// A limit above zero refuses a larger file before any of it is saved.
+func getFile(l *link, j *Job, remote, local string, overwrite bool, limit int64) error {
 	if _, err := os.Lstat(local); err == nil && !overwrite {
 		return errors.New(local + " already exists. Nothing was changed; ask for it to be replaced if that is intended (needs approval).")
 	}
@@ -124,6 +126,10 @@ func getFile(l *link, j *Job, remote, local string, overwrite bool) error {
 	reply, err := l.call(msg{T: "get", RID: rid, Path: remote, Origin: j.origin}, 30*time.Second)
 	if err == nil && !reply.OK {
 		err = errors.New(reply.Err)
+	}
+	if err == nil && limit > 0 && reply.Size > limit {
+		_ = l.send(msg{T: "abort", RID: rid})
+		err = errors.New("that file is " + sizeText(reply.Size) + ", too large to read in one step. Read part of it with a command (head, tail, sed -n, Select-String) or copy it with transfer_file")
 	}
 	if err != nil {
 		forget()
@@ -175,7 +181,7 @@ func push(l *link, j *Job, local, remote string, overwrite bool) (string, bool, 
 		j.mu.Lock()
 		j.total = info.Size()
 		j.mu.Unlock()
-		saved, err := putFile(l, j, source, remote, filepath.Base(source), overwrite)
+		saved, err := putFile(l, j, source, remote, filepath.Base(source), overwrite, false)
 		return saved, false, 1, err
 	}
 	if !info.IsDir() {
@@ -193,7 +199,7 @@ func push(l *link, j *Job, local, remote string, overwrite bool) (string, bool, 
 	j.total = total
 	j.mu.Unlock()
 	for _, e := range entries {
-		if _, err = putFile(l, j, filepath.Join(source, filepath.FromSlash(e.Rel)), joinRemote(remote, e.Rel), "", overwrite); err != nil {
+		if _, err = putFile(l, j, filepath.Join(source, filepath.FromSlash(e.Rel)), joinRemote(remote, e.Rel), "", overwrite, false); err != nil {
 			return "", true, 0, fmt.Errorf("%s: %w", e.Rel, err)
 		}
 	}
@@ -223,7 +229,7 @@ func pull(l *link, j *Job, remote, local string, overwrite bool) (string, int, e
 		j.mu.Lock()
 		j.total = listing.Size
 		j.mu.Unlock()
-		return destination, 1, getFile(l, j, listing.Path, destination, overwrite)
+		return destination, 1, getFile(l, j, listing.Path, destination, overwrite, 0)
 	}
 	var total int64
 	for _, e := range listing.Entries {
@@ -238,7 +244,7 @@ func pull(l *link, j *Job, remote, local string, overwrite bool) (string, int, e
 	j.total = total
 	j.mu.Unlock()
 	for _, e := range listing.Entries {
-		if err = getFile(l, j, joinRemote(listing.Path, e.Rel), filepath.Join(destination, filepath.FromSlash(e.Rel)), overwrite); err != nil {
+		if err = getFile(l, j, joinRemote(listing.Path, e.Rel), filepath.Join(destination, filepath.FromSlash(e.Rel)), overwrite, 0); err != nil {
 			return "", 0, fmt.Errorf("%s: %w", e.Rel, err)
 		}
 	}
@@ -274,19 +280,29 @@ func (n *Node) Transfer(r TransferRequest) (*Job, error) {
 	if r.Direction == "pull" {
 		summary = peer.Name + ":" + r.Remote + "  ->  " + r.Local
 	}
+	// Replacing files asks a person, except on the other computer inside a
+	// folder they chose to trust.
+	folder := ""
+	if r.Direction == "push" {
+		folder = r.Remote
+		if info, err := os.Stat(r.Local); err == nil && info.Mode().IsRegular() && strings.EqualFold(baseName(r.Remote), filepath.Base(r.Local)) {
+			folder = parentPath(r.Remote)
+		}
+	}
+	ask := r.Overwrite && !(r.Direction == "push" && n.trusts(peer, r.Remote))
 	state := "running"
-	if r.Overwrite {
+	if ask {
 		state = "awaiting-confirmation"
 	}
 	j := n.newJob("transfer", r.Direction+" "+summary, "", r.Origin, state)
 	go func() {
 		defer n.changed()
-		if r.Overwrite {
+		if ask {
 			where := peer.Name
 			if r.Direction == "pull" {
 				where = "this computer"
 			}
-			if !n.approve(j, ConfirmRequest{Title: "Replace existing files on " + where + "?", Detail: summary, Reason: "Files that already exist at the destination will be replaced.", Origin: r.Origin, Target: peer.Name}) {
+			if !n.approveReplace(j, peer, ConfirmRequest{Title: "Replace existing files on " + where + "?", Detail: summary, Reason: "Files that already exist at the destination will be replaced.", Origin: r.Origin, Target: peer.Name}, folder) {
 				return
 			}
 			j.mu.Lock()
@@ -336,7 +352,7 @@ func (n *Node) Deploy(r DeployRequest) (*Job, error) {
 	j := n.newJob("deploy", detail, r.Destination, r.Origin, "awaiting-confirmation")
 	go func() {
 		defer n.changed()
-		if !n.approve(j, ConfirmRequest{Title: "Deploy this update to " + peer.Name + "?", Detail: detail, Reason: "Existing files at the destination are replaced" + map[bool]string{true: ", then the command runs there.", false: "."}[r.Command != ""], Origin: r.Origin, Target: peer.Name}) {
+		if Deny == n.approve(j, ConfirmRequest{Title: "Deploy this update to " + peer.Name + "?", Detail: detail, Reason: "Existing files at the destination are replaced" + map[bool]string{true: ", then the command runs there.", false: "."}[r.Command != ""], Origin: r.Origin, Target: peer.Name}) {
 			return
 		}
 		j.mu.Lock()

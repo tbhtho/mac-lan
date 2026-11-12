@@ -26,6 +26,7 @@ internal sealed class TerminalWindow : Window
     readonly Button run,send;
     readonly CheckBox accept=new(){Content="Let my Mac run commands on this PC",Foreground=Glass.Ink,Margin=new Thickness(0,0,0,8)};
     readonly CheckBox agents=new(){Content="Let AI agents and local tools on this PC use the link (MCP)",Foreground=Glass.Ink,Margin=new Thickness(0,0,0,8)};
+    readonly StackPanel trusted=new(){Margin=new Thickness(0,2,0,8)};
     readonly List<string> history=[];
     int historyIndex;
     string cwd="";
@@ -56,16 +57,18 @@ internal sealed class TerminalWindow : Window
         Grid.SetRow(entry,2);layout.Children.Add(entry);
 
         var access=new StackPanel{Margin=new Thickness(0,10,0,0)};
-        access.Children.Add(new TextBlock{Text="Both are off until you turn them on. Commands run with your Windows account's rights. Deleting, system and administrator commands, replacing files and deployments always ask you first.",Foreground=Glass.Muted,FontSize=12,Margin=new Thickness(0,0,0,10)});
+        access.Children.Add(new TextBlock{Text="Both are off until you turn them on. Commands run with your Windows account's rights. Deleting, system and administrator commands, replacing files and deployments ask you first.",Foreground=Glass.Muted,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
         access.Children.Add(accept);access.Children.Add(agents);
+        access.Children.Add(new TextBlock{Text="Mac folders where files may be replaced without asking each time (for a project an agent is working on):",Foreground=Glass.Muted,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,4)});
+        access.Children.Add(trusted);
         var copy=new Button{Content="Copy MCP setup command",HorizontalAlignment=HorizontalAlignment.Left,Padding=new Thickness(12,6,12,6),ToolTip="Registers mac-lan as an MCP server in Claude Code. Other agents use the same program with --mcp."};
         copy.Click+=(_,_)=>CopySetup();access.Children.Add(copy);
         var options=new Expander{Header="Access for the Mac and AI agents",Content=access,Margin=new Thickness(0,12,0,0),Foreground=Glass.Ink};
         Grid.SetRow(options,3);layout.Children.Add(options);
         Content=layout;
 
-        accept.Click+=async(_,_)=>{if(applying)return;bool on=accept.IsChecked==true;if(on&&!RemotePrompt.Ask(this,"Let your Mac run commands on this PC?","From its mac-lan menu, or from AI agents you allowed on the Mac, your paired Mac can then run commands and read or write files here with your Windows account's rights.","Destructive commands are confirmed on the Mac first. Every request is recorded in mac-lan's remote-audit.log on this PC.","This PC","Turn on")){ShowState();return;}await agent.Set(accept:on);ShowState();};
-        agents.Click+=async(_,_)=>{if(applying)return;bool on=agents.IsChecked==true;if(on&&!RemotePrompt.Ask(this,"Let AI agents on this PC use the link?","Programs running as you on this PC, such as an AI coding agent connected through mac-lan's MCP server, can then run commands and transfer files on your Mac if the Mac allows commands.","Destructive commands, replacing files and deployments still ask you here first.","This PC","Turn on")){ShowState();return;}await agent.Set(agents:on);ShowState();};
+        accept.Click+=async(_,_)=>{if(applying)return;bool on=accept.IsChecked==true;if(on&&!RemotePrompt.Ask(this,"Let your Mac run commands on this PC?","From its mac-lan menu, or from AI agents you allowed on the Mac, your paired Mac can then run commands, read or write files and take pictures of this PC's screen with your Windows account's rights.","Destructive commands are confirmed on the Mac first. Every request is recorded in mac-lan's remote-audit.log on this PC.","This PC","Turn on")){ShowState();return;}await agent.Set(accept:on);ShowState();};
+        agents.Click+=async(_,_)=>{if(applying)return;bool on=agents.IsChecked==true;if(on&&!RemotePrompt.Ask(this,"Let AI agents on this PC use the link?","Programs running as you on this PC, such as an AI coding agent connected through mac-lan's MCP server, can then run commands, read and change files and take pictures of the screen on your Mac if the Mac allows commands.","Destructive commands, replacing files and deployments still ask you here first, unless you chose a folder where files may be replaced.","This PC","Turn on")){ShowState();return;}await agent.Set(agents:on);ShowState();};
         command.PreviewKeyDown+=async(_,e)=>
         {
             if(e.Key==Key.Enter){e.Handled=true;if(running==null)await Submit();}
@@ -83,6 +86,7 @@ internal sealed class TerminalWindow : Window
     {
         var state=agent.State;
         applying=true;accept.IsChecked=state.Accept;agents.IsChecked=state.Agents;applying=false;
+        ShowTrusted(state);
         bool ready=state.Connected&&state.PeerAccepts;
         link.Text=!agent.Available?"Remote commands are unavailable in this build of mac-lan."
             :!state.Connected?"Not connected. Connect to your Mac in mac-lan; this window reconnects by itself."
@@ -93,6 +97,38 @@ internal sealed class TerminalWindow : Window
         run.IsEnabled=ready||running!=null;run.Content=running!=null?"Stop":"Run";
         folder.Text=cwd.Length>0?cwd:ready?"…":"";
         Title=ready?"mac-lan · Terminal · "+state.PeerName:"mac-lan · Terminal";
+    }
+    string trustedShown="\0";
+    // One row per trusted Mac folder with Remove, then a box to add one.
+    void ShowTrusted(RemoteState state)
+    {
+        string key=string.Join("\n",state.Trusted)+"|"+state.Connected;
+        if(key==trustedShown)return;
+        trustedShown=key;trusted.Children.Clear();
+        foreach(string path in state.Trusted)
+        {
+            var row=new DockPanel{Margin=new Thickness(0,0,0,4)};
+            var remove=new Button{Content="Remove",Padding=new Thickness(10,3,10,3),Margin=new Thickness(8,0,0,0)};
+            remove.Click+=async(_,_)=>{try{await agent.Trust(path,false);}catch(IOException e){Print("\n"+e.Message+"\n");}ShowState();};
+            DockPanel.SetDock(remove,Dock.Right);row.Children.Add(remove);
+            row.Children.Add(new TextBlock{Text=path,FontFamily=new FontFamily("Cascadia Mono, Consolas"),FontSize=12,VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis});
+            trusted.Children.Add(row);
+        }
+        var entry=new DockPanel();
+        var add=new Button{Content="Add folder",Padding=new Thickness(10,3,10,3),Margin=new Thickness(8,0,0,0),IsEnabled=state.Connected};
+        var box=new TextBox{FontFamily=new FontFamily("Cascadia Mono, Consolas"),FontSize=12,Padding=new Thickness(6,3,6,3),IsEnabled=state.Connected,ToolTip="A folder on your Mac, for example ~/Projects/app. Use the folder shown above the command box with \"Use current folder\"."};
+        async Task Add(string path)
+        {
+            if(path.Trim().Length==0)return;
+            try{await agent.Trust(path.Trim(),true);box.Clear();}catch(IOException e){Print("\n"+e.Message+"\n");}
+            ShowState();
+        }
+        add.Click+=async(_,_)=>await Add(box.Text.Length>0?box.Text:cwd);
+        box.KeyDown+=async(_,e)=>{if(e.Key==Key.Enter){e.Handled=true;await Add(box.Text);}};
+        box.TextChanged+=(_,_)=>add.Content=box.Text.Trim().Length>0?"Add folder":"Use current folder";
+        add.Content="Use current folder";
+        DockPanel.SetDock(add,Dock.Right);entry.Children.Add(add);entry.Children.Add(box);
+        trusted.Children.Add(entry);
     }
     void Print(string text)
     {
@@ -186,7 +222,9 @@ internal sealed class TerminalWindow : Window
 /// </summary>
 internal sealed class RemotePrompt : Window
 {
-    RemotePrompt(Window? owner,string title,string detail,string reason,string origin,string action)
+    static readonly Dictionary<string,RemotePrompt> open=[];
+    int answer;
+    RemotePrompt(Window? owner,string title,string detail,string reason,string origin,string action,string remember="")
     {
         WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;SizeToContent=SizeToContent.WidthAndHeight;ShowInTaskbar=owner==null;Topmost=true;Title="mac-lan";
         if(owner is {IsVisible:true}){Owner=owner;WindowStartupLocation=WindowStartupLocation.CenterOwner;}else WindowStartupLocation=WindowStartupLocation.CenterScreen;
@@ -200,12 +238,30 @@ internal sealed class RemotePrompt : Window
         var buttons=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};
         var deny=new Button{Content="Deny",IsCancel=true,IsDefault=true,MinWidth=96,Margin=new Thickness(0,0,10,0)};
         var allow=new Button{Content=action,MinWidth=96,Style=(Style)FindResource("PrimaryButton")};
-        allow.Click+=(_,_)=>DialogResult=true;
-        buttons.Children.Add(deny);buttons.Children.Add(allow);panel.Children.Add(buttons);Content=panel;
+        allow.Click+=(_,_)=>{answer=1;DialogResult=true;};
+        buttons.Children.Add(deny);
+        if(remember.Length>0)
+        {
+            var always=new Button{Content="Always allow",MinWidth=96,Margin=new Thickness(0,0,10,0),ToolTip=remember};
+            always.Click+=(_,_)=>{answer=2;DialogResult=true;};
+            buttons.Children.Add(always);
+            panel.Children.Insert(panel.Children.Count,new TextBlock{Text="Always allow: "+remember+".",Foreground=Glass.Muted,FontSize=12,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,-10,0,18)});
+        }
+        buttons.Children.Add(allow);panel.Children.Add(buttons);Content=panel;
         MouseLeftButtonDown+=(_,e)=>{if(e.ButtonState==MouseButtonState.Pressed)DragMove();};
         var expiry=new DispatcherTimer{Interval=TimeSpan.FromSeconds(55)};
         expiry.Tick+=(_,_)=>{expiry.Stop();if(IsVisible)DialogResult=false;};
         Loaded+=(_,_)=>{expiry.Start();Activate();deny.Focus();};Closed+=(_,_)=>expiry.Stop();
     }
     public static bool Ask(Window? owner,string title,string detail,string reason,string origin,string action="Allow")=>new RemotePrompt(owner,title,detail,reason,origin,action).ShowDialog()==true;
+    /// <summary>Asks about a request from the link: 0 deny, 1 allow once, 2 allow and do not ask again.</summary>
+    public static int AskRequest(Window? owner,RemotePromptRequest request,string origin)
+    {
+        var prompt=new RemotePrompt(owner,request.Title,request.Detail,request.Reason,origin,"Allow",request.Remember);
+        open[request.Id]=prompt;
+        try{return prompt.ShowDialog()==true?prompt.answer:0;}
+        finally{open.Remove(request.Id);}
+    }
+    /// <summary>Closes the prompt for a request that was cancelled or expired.</summary>
+    public static void Withdraw(string id){if(open.TryGetValue(id,out var prompt)&&prompt.IsVisible)try{prompt.DialogResult=false;}catch(InvalidOperationException){}}
 }

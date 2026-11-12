@@ -44,27 +44,35 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 
 ## Terminal and AI agents
 
-From alpha.48 either computer can run commands on the other. It is off until you switch it on.
+Either computer can run commands on the other. It is off until you switch it on. The file, screenshot and folder tools need alpha.51 on both computers.
 
 - **Windows → Mac:** **Terminal** in the top bar. Each line runs on the Mac in zsh with live output; `cd` changes folder, **Stop** ends a command, **Send files here…** copies files into the current Mac folder.
 - **Mac → Windows:** **Remote Commands… → Open Remote Terminal on Windows** in the Mac menu.
-- **AI agents:** mac-lan is a stdio [MCP](https://modelcontextprotocol.io) server, so a coding agent on one computer can build, test and deploy on the other:
+- **AI agents:** mac-lan is a stdio [MCP](https://modelcontextprotocol.io) server, so a coding agent on one computer can read and edit a project, build, test and look at the screen on the other:
 
   ```
   claude mcp add mac-lan -- "C:\path\to\mac-lan.exe" --mcp
   claude mcp add mac-lan -- "/Applications/mac-lan.app/Contents/Helpers/MacDowHost" --mcp
   ```
 
-  **Copy MCP setup command** in the Terminal window or the Remote Commands menu gives the exact line. Tools: `list_devices`, `execute_command`, `get_execution_status`, `cancel_execution`, `transfer_file`, `deploy_update`. Agents that need a public HTTPS endpoint cannot connect; there is no relay.
+  **Copy MCP setup command** in the Terminal window or the Remote Commands menu gives the exact line; other agents register the same program with `--mcp` as a stdio server. Agents that need a public HTTPS endpoint cannot connect; there is no relay.
+
+| Tool | What it does on the other computer |
+|---|---|
+| `list_devices` | Names it: operating system, user, home folder, shell, whether it accepts commands |
+| `execute_command`, `get_execution_status`, `cancel_execution`, `send_input` | Runs a shell command with live output and exit code; long commands are polled, stopped, or answered on standard input |
+| `read_file`, `write_file`, `edit_file`, `list_directory` | Reads, creates and changes text files and lists folders without shell quoting |
+| `take_screenshot` | Returns a picture of its main display |
+| `transfer_file`, `deploy_update` | Copies files or folders either way; pushes an update and runs an install or build step |
 
 | Switch (each computer has both, both start off) | What it allows |
 |---|---|
-| Let the other computer run commands here | Commands and file reads or writes on this computer, with your account's rights |
+| Let the other computer run commands here | Commands, file reads or writes and pictures of the screen on this computer, with your account's rights |
 | Let AI agents and local tools use the link | Programs on this computer may use the link to the other one |
 
-Commands that delete files, discard Git work, change system settings, need administrator rights, end programs or download and run scripts, any replacement of existing files, and every deployment are shown in a mac-lan prompt and run only if you approve. Agents cannot flip a switch or answer a prompt. Each computer keeps a `remote-audit.log` of what it was asked to do. The prompt list is a safety net, not a sandbox: an approved or ordinary command has your full rights.
+Commands that delete files, discard Git work, change system settings, need administrator rights, end programs or download and run scripts, any replacement of existing files, and every deployment are shown in a mac-lan prompt and run only if you approve. So that an agent can work on a project without a prompt for every edit, the prompt for replacing a file offers **Always allow** for that folder, and the list of such folders is in the Terminal window's access section (Windows) or the Remote Commands menu (Mac); the home folder or a whole disk cannot be added. A command prompt offers the same for that exact command until mac-lan restarts. Agents cannot flip a switch, add a folder or answer a prompt. Each computer keeps a `remote-audit.log` of what it was asked to do. The prompt list is a safety net, not a sandbox: an approved or ordinary command has your full rights.
 
-A command that is running when the connection drops keeps going for two minutes and its output resumes on reconnect. It is a command runner, not a terminal emulator: no full-screen programs, password prompts or colors.
+A command that is running when the connection drops keeps going for two minutes and its output resumes on reconnect. It is a command runner, not a terminal emulator: no full-screen programs, password prompts or colors. Agents can see the other screen but cannot click or type in its apps.
 
 ## Privacy and security
 

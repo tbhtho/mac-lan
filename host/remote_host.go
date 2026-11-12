@@ -60,15 +60,96 @@ func startRemoteHost() *remoteHost {
 	h.server = remote.NewServer(h.node)
 	// Approval prompts for actions started on this Mac (its shell or an agent)
 	// use the same native dialog as pairing in Terminal mode.
-	h.node.SetConfirm(func(r remote.ConfirmRequest) bool {
-		who := "You"
-		if r.Origin == "agent" {
-			who = "A local tool or AI agent"
-		}
-		return nativeConsent(fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s asked for this through mac-lan.", r.Title, clip(r.Detail, 600), r.Reason, who))
-	})
+	h.node.SetConfirm(remoteConsent)
 	_ = h.server.Listen(dir)
 	return h
+}
+
+const remoteConsentScript = `on run argv
+ if (count of argv) > 1 then
+  set answer to display dialog (item 1 of argv) with title "mac-lan" buttons {"Deny", "Always Allow", "Allow"} default button "Deny" cancel button "Deny" giving up after 50
+ else
+  set answer to display dialog (item 1 of argv) with title "mac-lan" buttons {"Deny", "Allow"} default button "Deny" cancel button "Deny" giving up after 50
+ end if
+ if gave up of answer then return "Deny"
+ return button returned of answer
+end run`
+
+// remoteConsent asks the person at this Mac to approve an action started here.
+// The dialog closes by itself when the request is withdrawn.
+func remoteConsent(r remote.ConfirmRequest) remote.Answer {
+	who := "You"
+	if r.Origin == "agent" {
+		who = "A local tool or AI agent"
+	}
+	text := fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s asked for this through mac-lan.", r.Title, clip(r.Detail, 600), r.Reason, who)
+	args := []string{"-e", remoteConsentScript, "--", text}
+	if r.Remember != "" {
+		args[3] = text + "\n\nAlways Allow: " + r.Remember + "."
+		args = append(args, "remember")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	defer cancel()
+	if r.Withdrawn != nil {
+		go func() {
+			select {
+			case <-r.Withdrawn:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", args...).Output()
+	if err != nil || len(out) > 32 {
+		return remote.Deny
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "Allow":
+		return remote.AllowOnce
+	case "Always Allow":
+		if r.Remember != "" {
+			return remote.AllowAlways
+		}
+	}
+	return remote.Deny
+}
+
+const remoteInputScript = `on run argv
+ set answer to display dialog (item 1 of argv) with title "mac-lan" default answer "" buttons {"Cancel", "Add"} default button "Add" cancel button "Cancel" giving up after 110
+ if gave up of answer then return ""
+ return text returned of answer
+end run`
+
+// folders shows the folders on the PC in which files may be replaced without asking.
+func (h *remoteHost) folders(emit func(string)) {
+	const add = "Add a folder…"
+	trusted := h.node.Settings().Trusted
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	args := append([]string{"-e", remoteMenuScript, "--",
+		"Folders on your Windows PC where files may be replaced without asking each time. Choose a folder to remove it from the list.", add}, trusted...)
+	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", args...).Output()
+	if err != nil {
+		return
+	}
+	picked := strings.TrimSpace(string(out))
+	switch {
+	case picked == "":
+	case picked == add:
+		typed, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", remoteInputScript, "--",
+			"Folder on your Windows PC, for example C:\\Projects\\app or ~\\source\\app. Files in it and in its subfolders can then be replaced from this Mac without asking.").Output()
+		if folder := strings.TrimSpace(string(typed)); err == nil && folder != "" {
+			if err := h.node.Trust(folder); err != nil {
+				remoteNote("That folder was not added: " + err.Error() + ".")
+				return
+			}
+			emit("Files in " + folder + " on the PC can now be replaced without asking.")
+		}
+	default:
+		if h.node.Untrust(picked) == nil {
+			emit("Replacing files in " + picked + " on the PC asks again.")
+		}
+	}
 }
 
 func clip(text string, limit int) string {
@@ -121,12 +202,13 @@ func (h *remoteHost) menu(emit func(string)) {
 	}
 	settings := h.node.Settings()
 	const terminal, setup = "Open Remote Terminal on Windows", "Copy setup command for AI agents (MCP)"
+	folders := fmt.Sprintf("Folders on the PC that can be changed without asking (%d)…", len(settings.Trusted))
 	accept := "Let the paired PC run commands on this Mac: " + onOff(settings.Accept)
 	agents := "Let local tools and AI agents use the link: " + onOff(settings.Agents)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", remoteMenuScript, "--",
-		"Remote commands between this Mac and your Windows PC. Both switches are off until you turn them on.", terminal, accept, agents, setup).Output()
+		"Remote commands between this Mac and your Windows PC. Both switches are off until you turn them on.", terminal, accept, agents, folders, setup).Output()
 	if err != nil {
 		return
 	}
@@ -135,14 +217,16 @@ func (h *remoteHost) menu(emit func(string)) {
 		if err := h.openTerminal(); err != nil {
 			remoteNote("Could not open the remote terminal: " + err.Error())
 		}
+	case folders:
+		h.folders(emit)
 	case accept:
-		if !settings.Accept && !nativeConsent("Let the paired Windows PC run commands on this Mac?\n\nThe PC you approved can then run shell commands and read or write files here with your account's rights, from its mac-lan Terminal window or from AI agents you allowed on that PC. Destructive commands are confirmed on the PC first. Every request is recorded in mac-lan's remote-audit.log.\n\nTurn this off again from the same menu.") {
+		if !settings.Accept && !nativeConsent("Let the paired Windows PC run commands on this Mac?\n\nThe PC you approved can then run shell commands, read or write files and take pictures of this Mac's screen with your account's rights, from its mac-lan Terminal window or from AI agents you allowed on that PC. Destructive commands are confirmed on the PC first. Every request is recorded in mac-lan's remote-audit.log.\n\nTurn this off again from the same menu.") {
 			return
 		}
 		settings.Accept = !settings.Accept
 		h.save(settings, emit, "Commands from the paired PC are now "+strings.ToLower(onOff(settings.Accept))+".")
 	case agents:
-		if !settings.Agents && !nativeConsent("Let local tools and AI agents on this Mac use the link?\n\nPrograms running as you on this Mac, such as an AI coding agent connected through mac-lan's MCP server, can then run commands and transfer files on the paired Windows PC if that PC allows commands. Destructive actions still ask you here first.") {
+		if !settings.Agents && !nativeConsent("Let local tools and AI agents on this Mac use the link?\n\nPrograms running as you on this Mac, such as an AI coding agent connected through mac-lan's MCP server, can then run commands, read and change files and take pictures of the screen on the paired Windows PC if that PC allows commands. Destructive actions still ask you here first.") {
 			return
 		}
 		settings.Agents = !settings.Agents

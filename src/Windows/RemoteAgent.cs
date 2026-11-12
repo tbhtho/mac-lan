@@ -7,13 +7,14 @@ using System.Text.Json;
 namespace MacDow.Windows;
 
 /// <summary>What the remote-command link looks like right now.</summary>
-internal sealed record RemoteState(bool Connected,string PeerName,bool PeerAccepts,string PeerNote,bool Accept,bool Agents,bool Busy)
+internal sealed record RemoteState(bool Connected,string PeerName,bool PeerAccepts,string PeerNote,bool Accept,bool Agents,bool Busy,IReadOnlyList<string> Trusted)
 {
-    public static readonly RemoteState None=new(false,"your Mac",false,"",false,false,false);
+    public static readonly RemoteState None=new(false,"your Mac",false,"",false,false,false,[]);
 }
 
 /// <summary>An action that needs the user's approval before it is sent to the Mac.</summary>
-internal sealed record RemotePromptRequest(string Id,string Title,string Detail,string Reason,string Origin);
+/// <summary>Remember, when not empty, words a third choice that also stops this request asking again.</summary>
+internal sealed record RemotePromptRequest(string Id,string Title,string Detail,string Reason,string Origin,string Remember);
 
 /// <summary>
 /// Owns the bundled helper in remote-agent mode for the life of mac-lan. The helper holds the
@@ -35,6 +36,8 @@ internal sealed class RemoteAgent : IDisposable
     public event Action? StateChanged;
     /// <summary>Raised on a background thread; answer with <see cref="Answer"/>.</summary>
     public event Action<RemotePromptRequest>? Prompt;
+    /// <summary>Raised on a background thread when a prompt no longer needs an answer (cancelled or expired).</summary>
+    public event Action<string>? PromptWithdrawn;
     public bool Available {get {lock(gate)return process is {HasExited:false};}}
 
     /// <summary>Starts the helper. False when this build has no bundled helper.</summary>
@@ -81,7 +84,8 @@ internal sealed class RemoteAgent : IDisposable
                 switch(kind.GetString())
                 {
                     case "state":Apply(message);break;
-                    case "confirm":Prompt?.Invoke(new(Text(message,"id"),Text(message,"title"),Text(message,"detail"),Text(message,"reason"),Text(message,"origin")));break;
+                    case "confirm":Prompt?.Invoke(new(Text(message,"id"),Text(message,"title"),Text(message,"detail"),Text(message,"reason"),Text(message,"origin"),Text(message,"remember")));break;
+                    case "confirm-expired":PromptWithdrawn?.Invoke(Text(message,"id"));break;
                 }
             }
         }
@@ -102,7 +106,10 @@ internal sealed class RemoteAgent : IDisposable
                 connected=Flag(device,"connected")&&Text(device,"platform").Length>0;accepts=Flag(device,"accepts_commands");note=Text(device,"note");
                 if(Text(device,"platform").Length>0&&Text(device,"name") is {Length:>0} peer)name=peer;
             }
-        State=new(connected,name,accepts,note,Flag(message,"accept"),Flag(message,"agents"),Flag(message,"busy"));
+        var trusted=new List<string>();
+        if(message.TryGetProperty("trusted",out var folders)&&folders.ValueKind==JsonValueKind.Array)
+            foreach(var folder in folders.EnumerateArray())if(folder.ValueKind==JsonValueKind.String&&folder.GetString() is {Length:>0} path)trusted.Add(path);
+        State=new(connected,name,accepts,note,Flag(message,"accept"),Flag(message,"agents"),Flag(message,"busy"),trusted);
         StateChanged?.Invoke();
     }
     /// <summary>Sends one request; throws IOException with the helper's explanation when refused.</summary>
@@ -134,7 +141,9 @@ internal sealed class RemoteAgent : IDisposable
         _=Send(new(){["op"]="link",["address"]=target.Endpoint.Host,["port"]=target.Endpoint.Port,["fingerprint"]=target.Fingerprint,["token"]=target.Token});
     }
     public void Unlink(){if(Available)_=Send(new(){["op"]="unlink"});}
-    public void Answer(string id,bool allow)=>_=Send(new(){["op"]="confirm",["id"]=id,["allow"]=allow});
+    public void Answer(string id,bool allow,bool always=false)=>_=Send(new(){["op"]="confirm",["id"]=id,["allow"]=allow,["always"]=allow&&always});
+    /// <summary>Adds or removes a Mac folder in which files may be replaced without asking. Throws IOException with the reason when refused.</summary>
+    public async Task Trust(string folder,bool trust){Apply(await Call(new(){["op"]=trust?"trust":"untrust",["path"]=folder}));}
     public Task Set(bool? accept=null,bool? agents=null)
     {
         var request=new Dictionary<string,object?>{["op"]="set"};

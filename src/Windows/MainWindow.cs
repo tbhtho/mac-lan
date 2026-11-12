@@ -88,6 +88,7 @@ internal sealed partial class MainWindow : Window
         updatesButton.Click+=(_,_)=>ShowUpdates();
         tabBar=new TabBar(ShowDesktop,ShowRemote,ShowConnection,ShowUpdates,Quit,m=>SelectMonitor(m),updatesButton,RequestControl,Escape,UserDisconnect,()=>session?.IsReady==true&&CanControlVideo(),ShowFiles,ShowTerminal);
         remoteAgent.Prompt+=request=>Dispatcher.BeginInvoke(()=>AnswerRemotePrompt(request));
+        remoteAgent.PromptWithdrawn+=id=>Dispatcher.BeginInvoke(()=>RemotePrompt.Withdraw(id));
         tabBar.AutoHideChanged+=()=>{if(remote)Position(false);};
         // The Mac desktop's shape is chosen when a stream starts; restart the desktop stream to apply a change.
         tabBar.MatchDisplayChanged+=()=>{if(session is {IsReady:true,SupportsMatchDisplay:true}&&appWindow==null&&(resumeToken!=null||Remembered(lastHost)!=null))session.Abort("Fitting the Mac to this display","display-refit");};
@@ -169,9 +170,9 @@ internal sealed partial class MainWindow : Window
         if(closing){remoteAgent.Answer(request.Id,false);return;}
         gate.Disarm("remote-prompt");SendLease();
         string origin=request.Origin=="agent"?"REQUEST FROM AN AI AGENT OR LOCAL TOOL":"YOUR COMMAND";
-        bool allow=RemotePrompt.Ask(terminalWindow is {IsVisible:true}?terminalWindow:null,request.Title,request.Detail,request.Reason,origin);
-        Telemetry.Report(allow?"remote-prompt-allowed":"remote-prompt-denied");
-        remoteAgent.Answer(request.Id,allow);
+        int answer=RemotePrompt.AskRequest(terminalWindow is {IsVisible:true}?terminalWindow:null,request,origin);
+        Telemetry.Report(answer==2?"remote-prompt-always":answer==1?"remote-prompt-allowed":"remote-prompt-denied");
+        remoteAgent.Answer(request.Id,answer>0,answer==2);
     }
     // On the MacBook tab, Connection opens over the Mac view instead of leaving it.
     Window? connectionWindow;

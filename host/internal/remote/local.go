@@ -2,11 +2,13 @@ package remote
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +20,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -60,6 +63,12 @@ type request struct {
 	Fingerprint string          `json:"fingerprint"`
 	Token       string          `json:"token"`
 	Ticket      string          `json:"ticket"`
+	Content     string          `json:"content"`
+	Old         string          `json:"old"`
+	New         string          `json:"new"`
+	All         bool            `json:"all"`
+	Width       int             `json:"width"`
+	Always      bool            `json:"always"`
 }
 
 // Server exposes a Node to local clients.
@@ -68,7 +77,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	ui       func(map[string]any) // event writer of mac-lan's own window
-	prompts  map[string]chan bool
+	prompts  map[string]chan Answer
 	tickets  map[string]time.Time
 	token    string
 	listener net.Listener
@@ -76,13 +85,17 @@ type Server struct {
 }
 
 func NewServer(n *Node) *Server {
-	return &Server{node: n, prompts: map[string]chan bool{}, tickets: map[string]time.Time{}}
+	return &Server{node: n, prompts: map[string]chan Answer{}, tickets: map[string]time.Time{}}
 }
 
 // State is what mac-lan's window shows about the link.
 func (s *Server) State() map[string]any {
 	settings := s.node.Settings()
-	return map[string]any{"devices": s.node.Devices(), "busy": s.node.Busy(), "accept": settings.Accept, "agents": settings.Agents}
+	trusted := settings.Trusted
+	if trusted == nil {
+		trusted = []string{}
+	}
+	return map[string]any{"devices": s.node.Devices(), "busy": s.node.Busy(), "accept": settings.Accept, "agents": settings.Agents, "trusted": trusted}
 }
 
 // ServeUI serves mac-lan's own window over its private pipe until it closes.
@@ -108,11 +121,11 @@ func (s *Server) ServeUI(r io.Reader, w io.Writer) {
 	s.node.OnChange(nil)
 }
 
-func (s *Server) askUI(r ConfirmRequest) bool {
+func (s *Server) askUI(r ConfirmRequest) Answer {
 	s.mu.Lock()
 	write := s.ui
 	id := newID()
-	answer := make(chan bool, 1)
+	answer := make(chan Answer, 1)
 	s.prompts[id] = answer
 	s.mu.Unlock()
 	defer func() {
@@ -121,21 +134,22 @@ func (s *Server) askUI(r ConfirmRequest) bool {
 		s.mu.Unlock()
 	}()
 	if write == nil {
-		return false
+		return Deny
 	}
-	write(map[string]any{"ev": "confirm", "id": id, "title": r.Title, "detail": r.Detail, "reason": r.Reason, "origin": r.Origin, "target": r.Target})
+	write(map[string]any{"ev": "confirm", "id": id, "title": r.Title, "detail": r.Detail, "reason": r.Reason, "origin": r.Origin, "target": r.Target, "remember": r.Remember})
 	select {
-	case ok := <-answer:
-		return ok
-	case <-time.After(confirmTimeout):
-		write(map[string]any{"ev": "confirm-expired", "id": id})
-		return false
+	case reply := <-answer:
+		return reply
+	case <-r.Withdrawn: // cancelled or timed out: the window closes its prompt
+	case <-time.After(confirmTimeout + 5*time.Second):
 	}
+	write(map[string]any{"ev": "confirm-expired", "id": id})
+	return Deny
 }
 
 func (s *Server) serve(r io.Reader, write func(map[string]any), privileged bool, origin string) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64<<10), 256<<10)
+	scanner.Buffer(make([]byte, 64<<10), 12<<20) // a write request carries a whole file
 	var running sync.WaitGroup
 	for scanner.Scan() {
 		var q request
@@ -215,6 +229,56 @@ func (s *Server) dispatch(q request, privileged bool, origin string, out map[str
 			return err
 		}
 		out["path"] = path
+	case "read":
+		data, err := s.node.ReadFile(q.Device, q.Path, origin)
+		if err != nil {
+			return err
+		}
+		if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+			return errors.New("that is not a text file (" + sizeText(int64(len(data))) + "). Copy it with transfer_file instead")
+		}
+		out["content"], out["size"] = string(data), len(data)
+	case "write":
+		j, err := s.node.WriteFile(q.Device, q.Path, []byte(q.Content), q.Overwrite, origin, "")
+		if err != nil {
+			return err
+		}
+		return s.result(j, wait, out)
+	case "edit":
+		j, count, err := s.node.EditFile(q.Device, q.Path, q.Old, q.New, q.All, origin)
+		if err != nil {
+			return err
+		}
+		out["replaced"] = count
+		return s.result(j, wait, out)
+	case "dir":
+		path, entries, more, err := s.node.ListDir(q.Device, q.Path, origin)
+		if err != nil {
+			return err
+		}
+		out["path"], out["entries"], out["more"] = path, entries, more
+	case "shot":
+		data, width, height, err := s.node.Screenshot(q.Device, q.Width, origin)
+		if err != nil {
+			return err
+		}
+		out["image"], out["width"], out["height"] = base64.StdEncoding.EncodeToString(data), width, height
+	case "trust", "untrust":
+		if !privileged {
+			return errPrivileged
+		}
+		var err error
+		if q.Op == "trust" {
+			err = s.node.Trust(q.Path)
+		} else {
+			err = s.node.Untrust(q.Path)
+		}
+		if err != nil {
+			return err
+		}
+		for k, v := range s.State() {
+			out[k] = v
+		}
 	case "jobs":
 		out["jobs"] = s.node.Jobs(50)
 	case "state":
@@ -246,8 +310,15 @@ func (s *Server) dispatch(q request, privileged bool, origin string, out map[str
 		answer := s.prompts[q.ID]
 		s.mu.Unlock()
 		if answer != nil {
+			reply := Deny
+			if q.Allow {
+				reply = AllowOnce
+				if q.Always {
+					reply = AllowAlways
+				}
+			}
 			select {
-			case answer <- q.Allow:
+			case answer <- reply:
 			default:
 			}
 		}
