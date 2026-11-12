@@ -328,7 +328,7 @@ func TestMCPFileAndScreenTools(t *testing.T) {
 		t.Helper()
 		data, _ := json.Marshal(request)
 		var output bytes.Buffer
-		if err := ServeMCP(bytes.NewReader(append(data, '\n')), &output, dir, "test"); err != nil {
+		if err := ServeMCP(bytes.NewReader(append(data, '\n')), &output, dir, "test", nil); err != nil {
 			t.Fatal(err)
 		}
 		var answer map[string]any
@@ -409,5 +409,31 @@ func TestMCPFileAndScreenTools(t *testing.T) {
 	}
 	if config, err := jpeg.DecodeConfig(bytes.NewReader(raw)); err != nil || config.Width > 480 {
 		t.Fatalf("take_screenshot picture: %v %v", config, err)
+	}
+}
+
+func TestMacStaysAwakeWhileACommandRuns(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only a Mac needs to be kept awake")
+	}
+	p := newPair(t)
+	allow(t, p.target)
+	p.link(t)
+	j, err := p.origin.Exec(ExecRequest{Command: "echo $$; sleep 4", Origin: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, _ := p.origin.Status(j.id, 0, 5*time.Second)
+	pid := strings.TrimSpace(view.Output)
+	time.Sleep(300 * time.Millisecond)
+	k, _ := p.origin.Exec(ExecRequest{Command: "pgrep -fl 'caffeinate -i -w " + pid + "$' || echo none", Origin: "agent"})
+	if found := finish(t, p.origin, k, 10*time.Second); pid == "" || !strings.Contains(found.Output, "caffeinate") {
+		t.Fatalf("no sleep guard for command %q: %s", pid, found.Output)
+	}
+	finish(t, p.origin, j, 15*time.Second)
+	time.Sleep(500 * time.Millisecond)
+	k, _ = p.origin.Exec(ExecRequest{Command: "pgrep -fl 'caffeinate -i -w " + pid + "$' || echo none", Origin: "agent"})
+	if left := finish(t, p.origin, k, 10*time.Second); !strings.Contains(left.Output, "none") {
+		t.Fatalf("the sleep guard must end with the command: %s", left.Output)
 	}
 }

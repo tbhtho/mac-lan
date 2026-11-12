@@ -141,6 +141,8 @@ internal sealed class RemoteAgent : IDisposable
         _=Send(new(){["op"]="link",["address"]=target.Endpoint.Host,["port"]=target.Endpoint.Port,["fingerprint"]=target.Fingerprint,["token"]=target.Token});
     }
     public void Unlink(){if(Available)_=Send(new(){["op"]="unlink"});}
+    /// <summary>Drops what this PC remembers about the Mac's standby link, when the Mac is forgotten.</summary>
+    public void ForgetStandby(){if(Available)_=Send(new(){["op"]="forget-standby"});}
     public void Answer(string id,bool allow,bool always=false)=>_=Send(new(){["op"]="confirm",["id"]=id,["allow"]=allow,["always"]=allow&&always});
     /// <summary>Adds or removes a Mac folder in which files may be replaced without asking. Throws IOException with the reason when refused.</summary>
     public async Task Trust(string folder,bool trust){Apply(await Call(new(){["op"]=trust?"trust":"untrust",["path"]=folder}));}

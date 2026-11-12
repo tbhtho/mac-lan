@@ -134,12 +134,18 @@ type rpcRequest struct {
 type mcpServer struct {
 	dir     string
 	version string
+	// rescue, when set, starts a background mac-lan link on this computer if
+	// the app is not running, so the Mac's standby link can still be used.
+	rescue func() bool
 }
 
 // call sends one request to mac-lan over its own short-lived connection, so a
 // long wait in one tool call never delays another (a cancel, for example).
 func (m *mcpServer) call(v map[string]any) (map[string]any, error) {
 	client, err := Dial(m.dir, "")
+	if err == ErrNotRunning && m.rescue != nil && m.rescue() {
+		client, err = Dial(m.dir, "")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -375,9 +381,10 @@ func folderText(reply map[string]any) string {
 
 var mcpVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 
-// ServeMCP serves until in closes. dir is mac-lan's private folder.
-func ServeMCP(in io.Reader, out io.Writer, dir, version string) error {
-	server := &mcpServer{dir: dir, version: version}
+// ServeMCP serves until in closes. dir is mac-lan's private folder. rescue may
+// be nil; see mcpServer.
+func ServeMCP(in io.Reader, out io.Writer, dir, version string, rescue func() bool) error {
+	server := &mcpServer{dir: dir, version: version, rescue: rescue}
 	reader := bufio.NewReaderSize(in, 1<<20)
 	encode := func(v any) {
 		// Plain JSON without HTML escaping, so < > & in output stay readable.

@@ -248,6 +248,25 @@ type settingsStore struct {
 	mu   sync.Mutex
 	path string
 	now  Settings
+	mod  time.Time // the file's time when it was last read or written
+}
+
+// refresh picks up a change made by another mac-lan process on this computer
+// (the app and its standby service share the switches).
+func (s *settingsStore) refresh() {
+	if s.path == "" {
+		return
+	}
+	info, err := os.Lstat(s.path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() >= 64<<10 || info.ModTime().Equal(s.mod) {
+		return
+	}
+	if data, err := os.ReadFile(s.path); err == nil {
+		var next Settings
+		if json.Unmarshal(data, &next) == nil {
+			s.now, s.mod = next, info.ModTime()
+		}
+	}
 }
 
 func loadSettings(dir string) *settingsStore {
@@ -256,17 +275,14 @@ func loadSettings(dir string) *settingsStore {
 		s.path = ""
 		return s
 	}
-	if info, err := os.Lstat(s.path); err == nil && info.Mode().IsRegular() && info.Size() < 64<<10 {
-		if data, err := os.ReadFile(s.path); err == nil {
-			_ = json.Unmarshal(data, &s.now)
-		}
-	}
+	s.refresh()
 	return s
 }
 
 func (s *settingsStore) get() Settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.refresh()
 	now := s.now
 	now.Trusted = append([]string(nil), now.Trusted...)
 	return now
@@ -279,6 +295,9 @@ func (s *settingsStore) set(next Settings) error {
 		data, _ := json.Marshal(next)
 		if err := writePrivate(s.path, data); err != nil {
 			return err
+		}
+		if info, err := os.Lstat(s.path); err == nil {
+			s.mod = info.ModTime()
 		}
 	}
 	s.now = next

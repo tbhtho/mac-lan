@@ -199,6 +199,7 @@ func (t *procTable) start(id, command, cwd, shell string, timeout time.Duration,
 	t.mu.Lock()
 	t.procs[id] = p
 	t.mu.Unlock()
+	keepAwake(cmd.Process.Pid)
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}

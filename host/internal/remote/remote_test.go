@@ -613,7 +613,7 @@ func TestMCPServerSpeaksTheProtocol(t *testing.T) {
 		input.Write(append(data, '\n'))
 	}
 	var output bytes.Buffer
-	if err := ServeMCP(&input, &output, dir, "test"); err != nil {
+	if err := ServeMCP(&input, &output, dir, "test", nil); err != nil {
 		t.Fatal(err)
 	}
 	answers := map[float64]map[string]any{}

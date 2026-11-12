@@ -115,6 +115,19 @@ func captureScreen(width int) ([]byte, int, int, error) {
 	return data, w, h, nil
 }
 
+// keepAwake stops a Mac from going to sleep for being idle while the command
+// with this process id runs, so a long build is not cut off. The helper ends by
+// itself when the command does. Closing the lid still sleeps the Mac.
+func keepAwake(pid int) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	awake := exec.Command("/usr/bin/caffeinate", "-i", "-w", strconv.Itoa(pid))
+	if awake.Start() == nil {
+		go func() { _ = awake.Wait() }()
+	}
+}
+
 func defaultShellName() string {
 	if runtime.GOOS == "darwin" {
 		return "zsh"

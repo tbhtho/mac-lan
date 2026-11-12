@@ -386,6 +386,7 @@ internal sealed partial class MainWindow : Window
     void ForgetRememberedMacs()
     {
         int count=trustedMacs.ForgetAll();
+        remoteAgent.ForgetStandby();
         status.Text=pairingProgress.Text=count<0?"Could not update the remembered Mac list on this PC. Try again.":count==0?"No Macs are remembered on this PC.":$"Forgot {count} remembered Mac(s). The next connection asks for approval on the Mac.";
     }
     void HandleEnded(Session s,string why)

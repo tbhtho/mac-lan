@@ -190,12 +190,14 @@ type Node struct {
 	onChange func()
 	// Commands a person chose not to be asked about again, until mac-lan restarts.
 	remembered map[string]bool
+	// learns makes this node remember the Mac's standby service (the PC's side).
+	learns bool
 }
 
 // New creates the node. dir is the private settings folder ("" keeps settings
 // in memory, for tests).
 func New(dir, name, version string) *Node {
-	n := &Node{name: name, version: version, dir: dir, settings: loadSettings(dir), procs: newProcTable(), jobs: map[string]*Job{}, remembered: map[string]bool{}}
+	n := &Node{name: name, version: version, dir: dir, settings: loadSettings(dir), procs: newProcTable(), jobs: map[string]*Job{}, remembered: map[string]bool{}, learns: runtime.GOOS == "windows"}
 	if dir != "" {
 		n.log = &audit{path: filepath.Join(dir, "remote-audit.log")}
 	}
@@ -314,6 +316,8 @@ func (n *Node) Devices() []Device {
 		OS: peer.OS, Arch: peer.Arch, User: peer.User, Home: peer.Home}
 	if !peer.Accept {
 		other.Note = "Remote commands are switched off on that computer. Its user must turn on \"Allow the paired computer to run commands here\" in mac-lan."
+	} else if l.standby {
+		other.Note = "Connected through the Mac's standby link: mac-lan on the Mac is restarting, updating or not sharing. Commands and files work; a screenshot may be refused."
 	}
 	return []Device{local, other}
 }
@@ -702,7 +706,9 @@ func (n *Node) reattach(l *link) {
 
 // Attach runs the link on an established, already authenticated WebSocket until
 // it closes. A newer connection replaces an older one.
-func (n *Node) Attach(c *websocket.Conn) {
+func (n *Node) Attach(c *websocket.Conn) { n.attach(c, false) }
+
+func (n *Node) attach(c *websocket.Conn, standby bool) {
 	if old := n.current(); old != nil {
 		// Finish the old connection completely first, so commands that were
 		// attached to it are picked up again by the new one.
@@ -710,6 +716,7 @@ func (n *Node) Attach(c *websocket.Conn) {
 		n.dropped(old)
 	}
 	l := newLink(n, c)
+	l.standby = standby
 	n.mu.Lock()
 	n.link = l
 	n.mu.Unlock()

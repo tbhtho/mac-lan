@@ -44,7 +44,7 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 
 ## Terminal and AI agents
 
-Either computer can run commands on the other. It is off until you switch it on. The file, screenshot and folder tools need alpha.51 on both computers.
+Either computer can run commands on the other. It is off until you switch it on. The file, screenshot and folder tools need alpha.51 on both computers, the standby link alpha.52.
 
 - **Windows → Mac:** **Terminal** in the top bar. Each line runs on the Mac in zsh with live output; `cd` changes folder, **Stop** ends a command, **Send files here…** copies files into the current Mac folder.
 - **Mac → Windows:** **Remote Commands… → Open Remote Terminal on Windows** in the Mac menu.
@@ -72,7 +72,9 @@ Either computer can run commands on the other. It is off until you switch it on.
 
 Commands that delete files, discard Git work, change system settings, need administrator rights, end programs or download and run scripts, any replacement of existing files, and every deployment are shown in a mac-lan prompt and run only if you approve. So that an agent can work on a project without a prompt for every edit, the prompt for replacing a file offers **Always allow** for that folder, and the list of such folders is in the Terminal window's access section (Windows) or the Remote Commands menu (Mac); the home folder or a whole disk cannot be added. A command prompt offers the same for that exact command until mac-lan restarts. Agents cannot flip a switch, add a folder or answer a prompt. Each computer keeps a `remote-audit.log` of what it was asked to do. The prompt list is a safety net, not a sandbox: an approved or ordinary command has your full rights.
 
-A command that is running when the connection drops keeps going for two minutes and its output resumes on reconnect. It is a command runner, not a terminal emulator: no full-screen programs, password prompts or colors. Agents can see the other screen but cannot click or type in its apps.
+**Standby link (optional, Mac).** Turn on **Remote Commands… → Standby link** on the Mac (or run `MacDowHost --standby on`) and a small mac-lan service starts at login and stays in the background. The PC learns it the next time the two connect, and from then on commands, files and agents keep working while the mac-lan app on the Mac is restarting, updating, closed, or failing to open, which is what lets the PC repair or update mac-lan on the Mac. It also works when mac-lan is not open on Windows: the MCP server then reaches the Mac through the standby link by itself, without approval prompts, so anything that needs approval is refused until mac-lan is open. The standby link serves only the paired PC on your local network, obeys the "run commands here" switch, and is removed by turning it off. **Forget remembered Macs** on Windows drops it there too.
+
+A command that is running when the connection drops keeps going for two minutes and its output resumes on reconnect. A Mac does not go to sleep for being idle while a command runs on it. It is a command runner, not a terminal emulator: no full-screen programs, password prompts or colors. Agents can see the other screen but cannot click or type in its apps.
 
 ## Privacy and security
 

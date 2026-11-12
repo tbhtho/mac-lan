@@ -32,6 +32,8 @@ type link struct {
 	sending   map[string]chan struct{}
 	peer      msg
 	known     bool
+	standby   bool // connected through the Mac's standby service
+	learnOnce sync.Once
 
 	closed    chan struct{}
 	closeOnce sync.Once
@@ -197,6 +199,9 @@ func (l *link) handle(m msg) {
 		l.peer, l.known = m, true
 		l.pmu.Unlock()
 		l.node.changed()
+		if l.node.learns && m.Home != "" {
+			l.learnOnce.Do(func() { go l.learnStandby() })
+		}
 	case "reply":
 		l.pmu.Lock()
 		waiter := l.pending[m.RID]
@@ -248,6 +253,8 @@ func (l *link) handle(m msg) {
 		l.handleDir(m)
 	case "shot":
 		l.handleShot(m)
+	case "standby":
+		l.handleStandby(m)
 	case "put":
 		l.handlePut(m)
 	case "get":

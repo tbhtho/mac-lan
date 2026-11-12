@@ -62,6 +62,7 @@ func startRemoteHost() *remoteHost {
 	// use the same native dialog as pairing in Terminal mode.
 	h.node.SetConfirm(remoteConsent)
 	_ = h.server.Listen(dir)
+	go refreshStandby(dir)
 	return h
 }
 
@@ -202,13 +203,14 @@ func (h *remoteHost) menu(emit func(string)) {
 	}
 	settings := h.node.Settings()
 	const terminal, setup = "Open Remote Terminal on Windows", "Copy setup command for AI agents (MCP)"
+	standby := "Standby link, keeps commands working while mac-lan restarts or updates: " + onOff(standbyInstalled(h.dir))
 	folders := fmt.Sprintf("Folders on the PC that can be changed without asking (%d)…", len(settings.Trusted))
 	accept := "Let the paired PC run commands on this Mac: " + onOff(settings.Accept)
 	agents := "Let local tools and AI agents use the link: " + onOff(settings.Agents)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", remoteMenuScript, "--",
-		"Remote commands between this Mac and your Windows PC. Both switches are off until you turn them on.", terminal, accept, agents, folders, setup).Output()
+		"Remote commands between this Mac and your Windows PC. Both switches are off until you turn them on.", terminal, accept, agents, standby, folders, setup).Output()
 	if err != nil {
 		return
 	}
@@ -219,6 +221,16 @@ func (h *remoteHost) menu(emit func(string)) {
 		}
 	case folders:
 		h.folders(emit)
+	case standby:
+		on := !standbyInstalled(h.dir)
+		if on && !nativeConsent("Keep a standby link running on this Mac?\n\nA small mac-lan service then starts when you log in and stays running in the background. It lets the paired Windows PC keep running commands here while the mac-lan app is restarting, updating or closed, so the PC can also repair mac-lan on this Mac. It listens on your local network for that PC only and obeys the switch \"Let the paired PC run commands on this Mac\".\n\nmacOS may ask once whether MacDowHost may accept incoming connections. Turn the standby link off again from the same menu.") {
+			return
+		}
+		if err := setStandby(h.dir, on); err != nil {
+			remoteNote("The standby link could not be changed: " + err.Error())
+			return
+		}
+		emit("The standby link is now " + strings.ToLower(onOff(on)) + ".")
 	case accept:
 		if !settings.Accept && !nativeConsent("Let the paired Windows PC run commands on this Mac?\n\nThe PC you approved can then run shell commands, read or write files and take pictures of this Mac's screen with your account's rights, from its mac-lan Terminal window or from AI agents you allowed on that PC. Destructive commands are confirmed on the PC first. Every request is recorded in mac-lan's remote-audit.log.\n\nTurn this off again from the same menu.") {
 			return
@@ -281,11 +293,18 @@ func remoteCommandLine(args []string) (int, bool) {
 		return 1, true
 	}
 	switch args[0] {
+	case "--link-service":
+		return runLinkService(), true
+	case "--standby":
+		if err != nil {
+			return fail()
+		}
+		return standbyCommand(dir, args[1:]), true
 	case "--mcp":
 		if err != nil {
 			return fail()
 		}
-		if err = remote.ServeMCP(os.Stdin, os.Stdout, dir, updater.BuildConfig().Version); err != nil {
+		if err = remote.ServeMCP(os.Stdin, os.Stdout, dir, updater.BuildConfig().Version, nil); err != nil {
 			return 1, true
 		}
 		return 0, true

@@ -4,25 +4,19 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/gorilla/websocket"
 )
 
 // The local protocol is one JSON object per line. A request carries "rid" and
@@ -82,10 +76,28 @@ type Server struct {
 	token    string
 	listener net.Listener
 	dialStop context.CancelFunc
+	standby  context.CancelFunc
+	touched  time.Time
+	dir      string
+}
+
+// Idle is how long ago a local client last asked for anything.
+func (s *Server) Idle() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.touched)
+}
+
+// Current reports whether dir's endpoint file still names this process; a
+// newer mac-lan on this computer replaces it.
+func (s *Server) Current(dir string) bool {
+	data, err := os.ReadFile(endpointPath(dir))
+	var e endpoint
+	return err == nil && json.Unmarshal(data, &e) == nil && e.PID == os.Getpid()
 }
 
 func NewServer(n *Node) *Server {
-	return &Server{node: n, prompts: map[string]chan Answer{}, tickets: map[string]time.Time{}}
+	return &Server{node: n, prompts: map[string]chan Answer{}, tickets: map[string]time.Time{}, touched: time.Now()}
 }
 
 // State is what mac-lan's window shows about the link.
@@ -179,6 +191,9 @@ func (s *Server) dispatch(q request, privileged bool, origin string, out map[str
 	if !privileged && origin == "agent" && !s.node.Settings().Agents {
 		return errors.New("access for local tools and AI agents is switched off in mac-lan on this computer. The user can turn it on in mac-lan's Terminal window (Windows) or Remote Commands menu (Mac)")
 	}
+	s.mu.Lock()
+	s.touched = time.Now()
+	s.mu.Unlock()
 	wait := time.Duration(q.Wait) * time.Second
 	if wait < 0 {
 		wait = 0
@@ -332,6 +347,18 @@ func (s *Server) dispatch(q request, privileged bool, origin string, out map[str
 			return errPrivileged
 		}
 		s.Unlink()
+	case "forget-standby":
+		// The Mac was forgotten on this computer: drop its standby details too.
+		if !privileged {
+			return errPrivileged
+		}
+		s.mu.Lock()
+		dir := s.dir
+		s.mu.Unlock()
+		ForgetStandby(dir)
+		if l := s.node.current(); l != nil && l.standby {
+			l.close()
+		}
 	case "ticket":
 		if !privileged {
 			return errPrivileged
@@ -398,9 +425,11 @@ func (s *Server) Listen(dir string) error {
 		_ = listener.Close()
 		return err
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
-	s.token, s.listener = token, listener
+	s.token, s.listener, s.standby, s.dir = token, listener, cancel, dir
 	s.mu.Unlock()
+	go s.standbyLoop(ctx, dir)
 	go func() {
 		for {
 			conn, err := listener.Accept()
@@ -417,12 +446,18 @@ func (s *Server) Listen(dir string) error {
 func (s *Server) Close(dir string) {
 	s.Unlink()
 	s.mu.Lock()
-	listener := s.listener
-	s.listener = nil
+	listener, standby := s.listener, s.standby
+	s.listener, s.standby = nil, nil
 	s.mu.Unlock()
+	if standby != nil {
+		standby()
+	}
+	if l := s.node.current(); l != nil {
+		l.close()
+	}
 	if listener != nil {
 		_ = listener.Close()
-		if dir != "" {
+		if dir != "" && s.Current(dir) {
 			_ = os.Remove(endpointPath(dir))
 		}
 	}
@@ -483,25 +518,15 @@ func (s *Server) Link(address string, port int, fingerprint, token string) error
 	if previous != nil {
 		previous()
 	}
-	dialer := websocket.Dialer{HandshakeTimeout: 8 * time.Second, Proxy: nil, ReadBufferSize: 64 << 10, WriteBufferSize: 64 << 10,
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: true, // the pinned fingerprint below is the check
-			VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-				if len(raw) == 0 {
-					return errors.New("no certificate")
-				}
-				sum := sha256.Sum256(raw[0])
-				if subtle.ConstantTimeCompare(sum[:], pin) != 1 {
-					return errors.New("this is not the paired Mac")
-				}
-				return nil
-			}}}
-	url := "wss://" + net.JoinHostPort(address, strconv.Itoa(port)) + "/remote"
-	header := http.Header{"Authorization": {"Bearer " + token}}
 	go func() {
 		delay := time.Second
 		for ctx.Err() == nil {
-			conn, _, err := dialer.DialContext(ctx, url, header)
-			if err == nil {
+			conn, err := dialRemote(ctx, address, port, pin, token, 8*time.Second)
+			if err == nil && s.node.standbyBusy() {
+				// Work is in progress over the standby link; take over when it is done.
+				_ = conn.Close()
+				delay = 4 * time.Second
+			} else if err == nil {
 				stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 				s.node.Attach(conn)
 				stop()

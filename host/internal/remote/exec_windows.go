@@ -60,6 +60,9 @@ func killTree(cmd *exec.Cmd) {
 
 func defaultShellName() string { return "cmd" }
 
+// keepAwake is only needed on a Mac, which sleeps when idle by default.
+func keepAwake(int) {}
+
 // systemName is the operating system as a person would name it.
 func systemName() string {
 	version := windows.RtlGetVersion()

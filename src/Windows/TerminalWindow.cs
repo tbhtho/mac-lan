@@ -91,6 +91,7 @@ internal sealed class TerminalWindow : Window
         link.Text=!agent.Available?"Remote commands are unavailable in this build of mac-lan."
             :!state.Connected?"Not connected. Connect to your Mac in mac-lan; this window reconnects by itself."
             :!state.PeerAccepts?$"Connected to {state.PeerName}, but it does not accept commands yet. On the Mac, open the mac-lan menu → Remote Commands… and turn on \"Let the paired PC run commands on this Mac\"."
+            :state.PeerNote.Contains("standby",StringComparison.OrdinalIgnoreCase)?$"Connected to {state.PeerName} through its standby link (mac-lan on the Mac is restarting, updating or not sharing). Commands and files work."
             :$"Connected to {state.PeerName}. Commands run there in zsh with your Mac account's rights.";
         link.Foreground=ready?Glass.Muted:Glass.Warn;
         command.IsEnabled=ready&&running==null;send.IsEnabled=ready&&running==null&&cwd.Length>0;
