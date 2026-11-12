@@ -199,7 +199,10 @@ canvas.addEventListener('pointerup',e=>{
 function releaseControl(reason){const notify=armed||activationPointer!==null||controlRequested;activationPointer=null;controlRequested=false;armed=false;heldPointerButtons=0;clearMove();if(notify)input({type:'blur',reason});}
 canvas.addEventListener('pointercancel',e=>{if(activationPointer===e.pointerId||armed||controlRequested)releaseControl('pointer-cancel');if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);});
 canvas.addEventListener('lostpointercapture',e=>{if(activationPointer===e.pointerId)releaseControl('pointer-cancel');});
-canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();sendMove();input({type:'scroll',delta:Math.max(-2400,Math.min(2400,Math.round(-e.deltaY)))});}},{passive:false});
+// A wheel notch arrives as 100. Sent whole it moved the Mac further than a Mac's own wheel
+// does, so the distance is scaled down; the remainder carries over so fine scrolling still adds up.
+const WHEEL_SCALE=.6;let wheelCarry=0;
+canvas.addEventListener('wheel',e=>{if(armed&&activationPointer===null&&coords(e)){e.preventDefault();wheelCarry+=-(Number(e.deltaY)||0)*WHEEL_SCALE;const whole=Math.trunc(wheelCarry),delta=Math.max(-2400,Math.min(2400,whole));wheelCarry=whole===delta?wheelCarry-delta:0;if(delta){sendMove();input({type:'scroll',delta});}}},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 post({type:'loaded'});
 window.addEventListener('blur',()=>releaseControl('viewer-blur'));

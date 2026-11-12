@@ -278,6 +278,11 @@ for(const recoverDuringChord of [false,true]){
  h.state.messages.length=0;h.pointer('pointermove',{clientX:20,clientY:20});h.pointer('wheel');
  assert.deepEqual(h.state.messages.map(m=>m.type),['move','scroll'],'scroll flushes the pending position first');
  assert.equal(h.state.messages[0].x,20/640,'the flushed position is the newest one');
+ // A notch of 100 is sent as 60, and movements too small to send on their own add up instead of being lost.
+ h.state.messages.length=0;h.pointer('wheel',{deltaY:100});assert.equal(h.state.messages.at(-1).delta,-60,'a wheel notch is scaled down');
+ h.state.messages.length=0;h.pointer('wheel',{deltaY:1});assert.equal(h.state.messages.length,0,'a movement under one unit waits');h.pointer('wheel',{deltaY:1});assert.equal(h.state.messages.at(-1).delta,-1,'fine scrolling accumulates');
+ h.state.messages.length=0;h.pointer('wheel',{deltaY:-100000});assert.equal(h.state.messages.at(-1).delta,2400,'a huge movement stays within the limit');
+ h.state.messages.length=0;h.pointer('wheel',{deltaY:100});assert.equal(h.state.messages.at(-1).delta,-60,'what a huge movement could not send is dropped, not replayed');
  h.state.messages.length=0;h.pointer('pointermove',{clientX:30,clientY:30});await h.send({type:'clear'});h.state.messages.length=0;
  h.paint();assert.equal(h.state.messages.length,0,'a stream reset discards a pending position from the old picture');
  console.log('PASS a high-polling pointer coalesces per animation frame and flushes before clicks, scrolls and stream resets');
