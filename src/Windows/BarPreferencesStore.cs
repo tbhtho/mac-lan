@@ -6,7 +6,9 @@ namespace MacDow.Windows;
 internal sealed class BarPreferencesStore(string path)
 {
     public static BarPreferencesStore CurrentUser()=>new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"MAC-DOW","bar-preferences.json"));
-    sealed record Preferences(bool AutoHide,bool MatchDisplay=false);
+    // Fitting the Mac to this display is on unless the user turned it off; a Mac that cannot do
+    // it shows its normal desktop.
+    sealed record Preferences(bool AutoHide,bool MatchDisplay=true);
     Preferences Load()
     {
         try{return JsonSerializer.Deserialize<Preferences>(File.ReadAllText(path))??new(false);}

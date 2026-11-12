@@ -23,7 +23,7 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 
 1. **Windows 10/11 x64:** download and run **mac-lan-setup.exe**. It installs for your account without administrator access. The single portable **mac-lan.exe** works too. Both include .NET; the [Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) must be present, as it is on current Windows.
 2. **Apple Silicon Mac, macOS 14 or later:** open **mac-lan-macos-arm64.dmg**, drag **mac-lan** to **Applications** and open it. It lives in the menu bar. The app is signed with its own certificate, not an Apple Developer ID, so the first time choose **Open Anyway** in System Settings → Privacy & Security. The first launch compiles its native parts with Apple's command-line tools, which must already be installed (`xcode-select --install`).
-3. **Connect:** put both computers on the same network. On Windows the Mac appears as a card; choose **Connect**, check that the Mac ID matches the one in the Mac's menu, and approve the pairing number on the Mac once. After that they remember each other and connect by themselves.
+3. **Connect:** put both computers on the same network. On Windows the Mac appears as a card; choose **Connect**, check that the Mac ID matches the one in the Mac's menu, and approve the pairing number on the Mac once. After that they remember each other and connect by themselves: mac-lan on Windows then opens as just its top bar, with no window to dismiss.
 4. **Allow access on the Mac:** use the menu's **Allow Screen Recording…** for video and **Allow Keyboard & Mouse…** for control, then restart sharing. Files and the clipboard work before either is granted.
 
 > [!NOTE]
@@ -31,16 +31,16 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 
 ## Features
 
-- **Two tabs, one bar.** A 32-pixel bar reserves its own space above maximized apps. It can auto-hide, and **Display** moves it and the Mac view between monitors. Windows apps on that display move aside while the Mac is shown and come back afterwards.
+- **Two tabs, one bar.** A 32-pixel bar reserves its own space above maximized apps: the two tabs, a connection light, **Files**, **Terminal** and a **More** menu for the connection page, updates, display fit, auto-hide and Quit. With more than one monitor, **Display** moves the bar and the Mac view between them. Windows apps on that display move aside while the Mac is shown and come back afterwards.
 - **Full desktop.** Hardware H.264 at up to 1920 pixels wide with a 60 fps target, keeping the Mac's proportions.
-- **Fit Mac to this display.** Turn on **Bar → Fit Mac to this display (no bars)** and, while you are viewing it, the Mac's desktop takes the exact shape of your Windows display, so the picture fills the screen with no bars and no stretching. The Mac's own screen shows the same desktop and returns to normal when you stop. Off by default; see Limits.
+- **Fit Mac to this display.** While you are viewing it, the Mac's desktop takes the exact shape of your Windows display, so the picture fills the screen with no bars and no stretching. The Mac's own screen shows the same desktop and returns to normal when you stop. On by default from alpha.53; turn it off under **More → Fit Mac to this display (no bars)**. See Limits.
 - **App Priority.** Put one Mac window in its own resizable Windows window instead of the whole desktop.
 - **Control.** Selecting **MacBook** hands over keyboard and mouse. Ctrl and left Alt act as Command, the Windows key opens Spotlight, and Ctrl+Alt+Shift+Backspace always releases. Losing focus, switching tabs or a stale picture releases held keys.
 - **Sound.** Mac audio plays on Windows while you watch, and the Mac's speakers are muted until you stop.
 - **Clipboard.** Text copied on one computer pastes on the other (up to 256 KB).
 - **Files.** Drag files or folders to the Mac; they arrive in **Downloads/mac-lan**. **Send File to Windows…** in the Mac menu goes the other way. Transfers are verified with SHA-256 and never overwrite.
 - **Reconnects by itself.** After a drop, a sleep or an update, Windows finds the Mac again and resumes without a new approval.
-- **Signed automatic updates.** Both apps update from this repository's releases through a signed feed, waiting until you are not viewing, controlling or transferring.
+- **Signed automatic updates.** Both apps update from this repository's releases through a signed feed. An update waits while you are viewing or controlling the Mac, transferring files, running a remote command or using a mac-lan window; a connection that is only sitting behind the Windows tab does not hold it back, and mac-lan reconnects by itself afterwards.
 
 ## Terminal and AI agents
 
@@ -85,7 +85,7 @@ A command that is running when the connection drops keeps going for two minutes 
 ## Limits
 
 - Apple Silicon Macs only; one PC controls a Mac at a time.
-- Without **Fit Mac to this display**, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on.
+- With **Fit Mac to this display** turned off, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on.
 - No image or file clipboard, microphone, IME, multi-touch or stylus. Keys are sent by physical position, so use the same keyboard layout on both.
 - The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network.
 - This is a preview. Releases are checked with headless tests and on the author's two computers, not on a range of hardware.

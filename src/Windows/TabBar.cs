@@ -38,6 +38,10 @@ internal sealed class TabBar : Window,IDisposable
     public double VideoTopInset=>AutoHide?2*96.0/currentDpi:TabBarLayout.Dip;
     public event Action? AutoHideChanged;
     public event Action? HiddenWhileActive;
+    readonly System.Windows.Shapes.Ellipse connectionDot=new(){Width=7,Height=7,Fill=Glass.Muted,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,7,0)};
+    readonly TextBlock displayLabel=new(){Text="Display",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,6,0)};
+    static readonly Brush ConnectedDot=Dot(0xFF34C759),ControllingDot=Dot(0xFF0A84FF);
+    static SolidColorBrush Dot(uint argb){var b=new SolidColorBrush(Color.FromArgb((byte)(argb>>24),(byte)(argb>>16),(byte)(argb>>8),(byte)argb));b.Freeze();return b;}
     readonly TextBlock connection=new(){Foreground=Glass.Muted,VerticalAlignment=VerticalAlignment.Center,FontSize=12,Text="Mac disconnected",TextWrapping=TextWrapping.NoWrap,TextTrimming=TextTrimming.CharacterEllipsis};
     bool registered,positioning,queued,disposed;
     string? monitor;
@@ -51,20 +55,28 @@ internal sealed class TabBar : Window,IDisposable
         var grid=new DockPanel{LastChildFill=true,Margin=new Thickness(10,3,6,3)};
         var right=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right};DockPanel.SetDock(right,Dock.Right);
         Button ActionButton(string label,Action action){var b=new Button{Content=label,Style=ghost,Margin=new Thickness(2,0,0,0),MinHeight=24,Padding=new Thickness(10,2,10,2)};b.Click+=(_,_)=>action();return b;}
-        var connectionButton=ActionButton("Connection",setup);
-        if(files!=null)right.Children.Add(ActionButton("Files",files));
+        // Everyday tools stay on the bar; settings and Quit live in one More menu.
+        if(files!=null){var filesButton=ActionButton("Files",files);filesButton.ToolTip="Send files to your Mac";right.Children.Add(filesButton);}
         if(terminal!=null){var terminalButton=ActionButton("Terminal",terminal);terminalButton.ToolTip="Run commands on your Mac";right.Children.Add(terminalButton);}
-        right.Children.Add(connectionButton);
         updateButton.Style=ghost;updateButton.Margin=new Thickness(2,0,0,0);updateButton.MinHeight=24;updateButton.Padding=new Thickness(10,2,10,2);
         right.Children.Add(updateButton);
+        // The update button appears only when it has news ("Update ready", "Updating…").
+        void ShowUpdateNews()=>updateButton.Visibility=updateButton.Content as string is null or "Updates"?Visibility.Collapsed:Visibility.Visible;
+        System.ComponentModel.DependencyPropertyDescriptor.FromProperty(ContentControl.ContentProperty,typeof(Button)).AddValueChanged(updateButton,(_,_)=>ShowUpdateNews());ShowUpdateNews();
+        MenuItem MenuAction(string header,Action action){var item=new MenuItem{Header=header};item.Click+=(_,_)=>action();return item;}
+        barMenu.Items.Add(MenuAction("Connection…",setup));
+        barMenu.Items.Add(MenuAction("Updates…",updates));
+        barMenu.Items.Add(new Separator());
         autoHideToggle=new MenuItem{IsCheckable=true,IsChecked=AutoHide};UpdateAutoHideLabel();
         autoHideToggle.Click+=(_,_)=>SetAutoHide(autoHideToggle.IsChecked);
-        barMenu.Items.Add(autoHideToggle);
         matchToggle=new MenuItem{IsCheckable=true,IsChecked=MatchDisplay,ToolTip="While you view it, your Mac's desktop takes the shape of this display, so the picture fills the screen with no bars and no stretching. The Mac's own screen shows the same desktop and returns to normal when you stop."};UpdateMatchLabel();
         matchToggle.Click+=(_,_)=>SetMatchDisplay(matchToggle.IsChecked);
-        barMenu.Items.Add(matchToggle);ContextMenu=barMenu;
-        Button? barOptions=null;barOptions=ActionButton("Bar",()=>{barMenu.PlacementTarget=barOptions;barMenu.IsOpen=true;});barOptions.ToolTip="Top bar settings";
-        right.Children.Add(barOptions);right.Children.Add(ActionButton("Quit",quit));grid.Children.Add(right);
+        barMenu.Items.Add(matchToggle);barMenu.Items.Add(autoHideToggle);
+        barMenu.Items.Add(new Separator());
+        barMenu.Items.Add(MenuAction("Quit mac-lan",quit));ContextMenu=barMenu;
+        Button? more=null;more=ActionButton("More",()=>{barMenu.PlacementTarget=more;barMenu.Placement=PlacementMode.Bottom;barMenu.IsOpen=true;});more.ToolTip="Connection, updates, display fit, auto-hide and Quit";
+        System.Windows.Automation.AutomationProperties.SetName(more,"More");
+        right.Children.Add(more);grid.Children.Add(right);
         var left=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(left,Dock.Left);
         left.Children.Add(new TextBlock{Text="mac-lan",FontWeight=FontWeights.SemiBold,FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(2,0,14,0)});
         // Segmented control: one pill highlights the visible desktop.
@@ -72,10 +84,10 @@ internal sealed class TabBar : Window,IDisposable
         local=Segment("Windows",windows);mac=Segment("MacBook",macbook);
         var segments=new StackPanel{Orientation=Orientation.Horizontal};segments.Children.Add(local);segments.Children.Add(mac);
         left.Children.Add(new Border{Background=Glass.Fill,BorderBrush=Glass.Line,BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(7),Padding=new Thickness(1),VerticalAlignment=VerticalAlignment.Center,Child=segments});
-        left.Children.Add(new TextBlock{Text="Display",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(12,0,6,0)});
+        left.Children.Add(displayLabel);
         displaySelector.MonitorSelected+=selectMonitor;left.Children.Add(displaySelector);
         grid.Children.Add(left);
-        var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(16,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connection);
+        var status=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(16,0,12,0),VerticalAlignment=VerticalAlignment.Center};status.Children.Add(connectionDot);status.Children.Add(connection);
         grid.Children.Add(status);
         barContent=grid;Content=grid;SetMode(true);
         hideTimer.Tick+=(_,_)=>PollAutoHide();
@@ -93,11 +105,13 @@ internal sealed class TabBar : Window,IDisposable
         local.FontWeight=windows?FontWeights.SemiBold:FontWeights.Normal;
         mac.FontWeight=windows?FontWeights.Normal:FontWeights.SemiBold;
     }
-    public void SetMonitors(IReadOnlyList<MonitorArea> all,string? selected)=>displaySelector.Update(all,selected);
+    // With one display there is nothing to choose, so the selector stays off the bar.
+    public void SetMonitors(IReadOnlyList<MonitorArea> all,string? selected){displaySelector.Update(all,selected);displayLabel.Visibility=displaySelector.Visibility=all.Count>1?Visibility.Visible:Visibility.Collapsed;}
     public void SetConnection(bool connected,bool controlling,string? detail=null)
     {
         connection.Text=!string.IsNullOrWhiteSpace(detail)?detail:controlling?"Controlling Mac":connected?"Mac connected":"Mac disconnected";
         connection.ToolTip=connection.Text;
+        connectionDot.Fill=controlling?ControllingDot:connected?ConnectedDot:Glass.Muted;
     }
     BarData Data()=>new(){Size=(uint)Marshal.SizeOf<BarData>(),Window=new WindowInteropHelper(this).Handle,Callback=CallbackMessage,Edge=1};
     void UpdateMatchLabel()=>matchToggle.Header=MatchDisplay?"✓ Fit Mac to this display (no bars)":"Fit Mac to this display (no bars)";

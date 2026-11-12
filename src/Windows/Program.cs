@@ -47,7 +47,7 @@ internal static class Program
         }
         // One mac-lan per Windows account: a second launch (Start menu, shortcut) asks the
         // running copy to open its Connection page instead of creating a second top bar.
-        bool layoutSmoke=args.Length==2&&args[0]=="--layout-smoke";
+        bool layoutSmoke=args.Length==2&&args[0] is "--layout-smoke" or "--bar-preview";
         using var instance=new Mutex(true,@"Local\mac-lan-single-instance",out bool firstInstance);
         using var activate=new EventWaitHandle(false,EventResetMode.AutoReset,@"Local\mac-lan-activate");
         if(!firstInstance&&!layoutSmoke)
@@ -59,6 +59,7 @@ internal static class Program
         var app=new Application { ShutdownMode=ShutdownMode.OnMainWindowClose };
         app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/mac-lan;component/Theme.xaml",UriKind.Relative)});
         if(args.Length==2&&args[0]=="--layout-smoke"){LayoutSmoke.Start(app,args[1]);app.Run();return;}
+        if(args.Length==2&&args[0]=="--bar-preview"){LayoutSmoke.Preview(app,args[1]);app.Run();return;}
         Telemetry.Report("startup");
         Telemetry.Log.Record("environment",state:new{os=Environment.OSVersion.VersionString,dotnet=Environment.Version.ToString(),arch=System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),buildId=typeof(Program).Assembly.ManifestModule.ModuleVersionId});
         AppDomain.CurrentDomain.UnhandledException+=(_,e)=>{Telemetry.Log.Record("fatal","process-unhandled",error:e.ExceptionObject as Exception);Telemetry.Flush().Wait(TimeSpan.FromSeconds(2));};

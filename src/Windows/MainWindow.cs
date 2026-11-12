@@ -99,8 +99,13 @@ internal sealed partial class MainWindow : Window
         keyboard=new KeyboardHook((code,down)=>session?.Send(new{type="key",code,down}),Escape);keyboard.InputLost+=()=>gate.Disarm("foreground-lost");
         gate.Released+=reason=>{if(reason!=null)LogDiagnostic("control-released",reason,UiHealth());keyboard.Release();if(reason!=null)session?.Send(new{type="release",reason});else session?.Send(new{type="release"});UpdateControl();};
         control.Click+=(_,_)=>{if(gate.CanRoute)gate.Disarm("manual");else Arm();};
-        Loaded+=(_,_)=>{RefreshMonitors();ShowSetup();_=FindMac();discoveryTimer.Start();remoteAgent.Start();};
-        discoveryTimer.Tick+=async(_,_)=>{if(IsVisible&&!remote)await FindMac();};
+        // A PC that already knows a Mac starts as just the bar and connects by itself; the
+        // connection page opens on first use, from More, or from a second launch.
+        bool quietStart=trustedMacs.Any();
+        if(quietStart){ShowActivated=false;ShowInTaskbar=false;WindowState=WindowState.Minimized;}
+        Loaded+=(_,_)=>{RefreshMonitors();if(quietStart){ShowDesktop();WindowState=WindowState.Normal;ShowActivated=true;}else ShowSetup();_=FindMac();discoveryTimer.Start();remoteAgent.Start();};
+        // Keep looking in the background for a remembered Mac, not only while the page is open.
+        discoveryTimer.Tick+=async(_,_)=>{if(!remote&&(IsVisible||!paired&&!autoConnectSuppressed&&trustedMacs.Any()))await FindMac();};
         SourceInitialized+=(_,_)=>{source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(WndProc);Native.AddClipboardFormatListener(source.Handle);if(!Native.RegisterHotKey(source.Handle,901,0x4000|1|2|4,8))status.Text="Escape shortcut unavailable; close button and focus loss still release control.";};
         // On the MacBook tab mac-lan stays out of the taskbar and, while focused, above it.
         Deactivated+=(_,_)=>
@@ -647,10 +652,15 @@ internal sealed partial class MainWindow : Window
             if(quitting&&!closing)Close();
         }
     }
-    // Automatic updates wait while Windows is connecting, connected, controlling or transferring files.
-    // An idle connection (files and clipboard only) reconnects by itself after an update, so only
-    // viewing, control, transfers or an attempt in progress hold an automatic update back.
-    bool UpdateSessionActive()=>remoteAgent.State.Busy||connecting||Reconnecting||openingFiles||session?.IsReady==true||session?.IsStarting==true||gate.CanRoute||filesWindow?.IsBusy==true;
+    // Automatic updates wait while the Mac is being viewed or controlled, a mac-lan window is in
+    // use, files are transferring, a remote command is running, or a connection is being made.
+    // A connection that is only sitting behind the Windows tab does not hold an update back:
+    // mac-lan restarts as just the bar and reconnects to the remembered Mac by itself.
+    bool UpdateSessionActive()
+    {
+        bool inUse=IsVisible||appWindow!=null||connectionWindow!=null||terminalWindow is {IsVisible:true}||filesWindow is {IsVisible:true};
+        return remoteAgent.State.Busy||connecting||Reconnecting||openingFiles||gate.CanRoute||filesWindow?.IsBusy==true||inUse&&(session?.IsReady==true||session?.IsStarting==true);
+    }
     async Task CheckUpdates()
     {
         automaticUpdater.Observe();

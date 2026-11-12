@@ -46,6 +46,8 @@ internal sealed class TrustedMacs(string path,Func<byte[],byte[]> protect,Func<b
     }
     public void Forget(string fingerprint)=>_=Save(Load().Where(m=>m.Fingerprint!=fingerprint).ToList());
     public int ForgetAll(){int count=Load().Count;return Save([])?count:-1;}
+    /// <summary>True when at least one Mac was approved before; mac-lan then connects by itself.</summary>
+    public bool Any()=>Load().Count>0;
     // A locked or full disk must not stop mac-lan; the change simply is not saved.
     bool Save(List<TrustedMac> all)
     {
