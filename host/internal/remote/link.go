@@ -200,7 +200,20 @@ func (l *link) handle(m msg) {
 		l.pmu.Unlock()
 		l.node.changed()
 		if l.node.learns && m.Home != "" {
-			l.learnOnce.Do(func() { go l.learnStandby() })
+			// Now, and again from time to time, so a standby link switched on
+			// during a long connection is still learned.
+			l.learnOnce.Do(func() {
+				go func() {
+					for {
+						l.learnStandby()
+						select {
+						case <-l.closed:
+							return
+						case <-time.After(10 * time.Minute):
+						}
+					}
+				}()
+			})
 		}
 	case "reply":
 		l.pmu.Lock()

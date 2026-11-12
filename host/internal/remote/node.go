@@ -562,9 +562,31 @@ func (n *Node) Cancel(id string) error {
 // Input sends text to the standard input of an interactive command.
 func (n *Node) Input(id, data string) error {
 	j := n.job(id)
-	l := n.current()
-	if j == nil || l == nil || !validText(data, 64<<10) {
+	if j == nil || !validText(data, 64<<10) {
 		return errors.New("that command is not running")
+	}
+	// Input sent right after the command was requested must not overtake it.
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	for {
+		j.mu.Lock()
+		state, changed := j.state, j.changed
+		j.mu.Unlock()
+		if state == "running" {
+			break
+		}
+		if finished(state) {
+			return errors.New("that command is not running")
+		}
+		select {
+		case <-changed:
+		case <-deadline.C:
+			return errors.New("that command has not started yet")
+		}
+	}
+	l := n.current()
+	if l == nil {
+		return errors.New("the other computer is not connected")
 	}
 	return l.send(msg{T: "stdin", ID: id, D: data})
 }
