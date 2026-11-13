@@ -40,6 +40,7 @@ It is two apps: a Windows viewer and a menu-bar app on the Mac.
 - **Clipboard.** Text copied on one computer pastes on the other (up to 256 KB).
 - **Files.** Drag files or folders to the Mac; they arrive in **Downloads/mac-lan**. **Send File to Windows…** in the Mac menu goes the other way. Transfers are verified with SHA-256 and never overwrite.
 - **Reconnects by itself.** After a drop, a sleep or an update, Windows finds the Mac again and resumes without a new approval.
+- **Says when Wi-Fi is the problem.** While you view the Mac, the bar shows **Weak Wi-Fi on this PC** when the PC's signal is at half strength or less, the usual reason for a stuttering picture. From alpha.57 a short network hiccup also costs only its own length: the picture resumes as soon as data flows again instead of up to two seconds later.
 - **Signed automatic updates.** Both apps update from this repository's releases through a signed feed. An update waits while you are viewing or controlling the Mac, transferring files, running a remote command or using a mac-lan window; a connection that is only sitting behind the Windows tab does not hold it back, and mac-lan reconnects by itself afterwards.
 
 ## Terminal and AI agents
@@ -87,7 +88,7 @@ A command that is running when the connection drops keeps going for two minutes 
 - Apple Silicon Macs only; one PC controls a Mac at a time.
 - With **Fit Mac to this display** turned off, a Mac whose screen has a different shape from your monitor shows bars at the sides or top. The fit option uses a macOS display interface that Apple does not document, so a macOS update can break it; mac-lan then falls back to the normal desktop with bars. Windows may be rearranged on the Mac while it is on. From alpha.56 the Mac draws that desktop at the size it is streamed, not at double density, which keeps the picture smooth; the Mac's own screen therefore looks softer than usual until you stop viewing.
 - No image or file clipboard, microphone, IME, multi-touch or stylus. Keys are sent by physical position, so use the same keyboard layout on both.
-- The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network.
+- The 60 fps figure is a target, not a measurement; actual smoothness depends on both computers and the network. Both computers send through your access point, so a weak or busy Wi-Fi link on either one shows as stutter and late clicks. A network cable on the PC, or both computers near the same access point, gives the steadiest picture; a home network with several access points can move a computer to a distant one.
 - This is a preview. Releases are checked with headless tests and on the author's two computers, not on a range of hardware.
 
 ## Building

@@ -270,7 +270,7 @@ func hostSession(helper, address string, gui, noUpdates, terminalConsent bool, c
 		if gui {
 			broker.emit(map[string]any{"type": "state", "message": "Sharing active. Windows control remains explicit."})
 		}
-		err := runCapture(helper, s.selected, send, status, events)
+		err := runCapture(helper, s.selected, send, status, events, s.keyframes)
 		if err != nil {
 			diagnostics.Emit("mac", "capture-failed", captureFailureCode(err), nil)
 		} else {
@@ -348,7 +348,9 @@ func streamDescription(r start) string {
 	}
 	return fmt.Sprintf("hardware H.264 / %d Mbit/s", bitrate)
 }
-func runCapture(helper string, r start, send func([]byte), status func(string), events <-chan input) error {
+
+// keyframes may be nil; each value on it asks the helper for a keyframe now.
+func runCapture(helper string, r start, send func([]byte), status func(string), events <-chan input, keyframes <-chan struct{}) error {
 	codec := r.Codec
 	if codec == "" {
 		codec = "h264"
@@ -416,6 +418,10 @@ func runCapture(helper string, r start, send func([]byte), status func(string), 
 					return
 				}
 				if enc.Encode(e) != nil {
+					return
+				}
+			case <-keyframes:
+				if enc.Encode(input{Type: "keyframe"}) != nil {
 					return
 				}
 			case <-done:

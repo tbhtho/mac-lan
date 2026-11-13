@@ -119,6 +119,26 @@ void Check(bool condition,string description){if(!condition)throw new Exception(
     queue.Enqueue(new byte[5],3);queue.Enqueue(Packet(3,1),4);
     Check(queue.Count==0,"invalid packet revokes dependent references");
 }
+{
+    // Until a keyframe arrives the picture stands still, and the Mac sends one by itself only
+    // every two seconds. The queue says when it discarded frames so Windows can ask at once.
+    var queue=new EncodedFrameQueue();
+    Check(!queue.TakeKeyframeRequest(),"a new queue does not ask for a keyframe");
+    queue.Enqueue(Packet(2,1),0);queue.Enqueue(Packet(3,2),10);
+    Check(queue.Drain(20).Count==2&&!queue.TakeKeyframeRequest(),"frames delivered in order do not ask for a keyframe");
+    queue.Enqueue(Packet(3,4),30);
+    Check(queue.TakeKeyframeRequest()&&!queue.TakeKeyframeRequest(),"a sequence gap asks for a keyframe exactly once");
+    queue.Enqueue(Packet(3,5),40);
+    Check(queue.TakeKeyframeRequest(),"each further discarded delta asks again, for the caller to space out");
+    queue.Enqueue(Packet(2,6),50);
+    Check(!queue.TakeKeyframeRequest()&&queue.Count==1,"an arriving keyframe withdraws the request");
+    queue.Enqueue(Packet(3,7),60);
+    Check(queue.Drain(400).Count==0&&queue.TakeKeyframeRequest(),"frames that expired behind a stalled UI ask for a keyframe even when nothing else arrives");
+    queue.Enqueue(Packet(2,8),410);queue.Enqueue(Packet(3,9),411);queue.Clear();
+    Check(!queue.TakeKeyframeRequest(),"ending a stream does not ask for a keyframe");
+    queue.Enqueue(Packet(1,10),420);queue.Enqueue(Packet(1,11),900);
+    Check(queue.Drain(2000).Count==0&&!queue.TakeKeyframeRequest(),"independent JPEG pictures never ask for a keyframe");
+}
 foreach(int delay in new[]{18,25,40})
 {
     using var fixture=JsonDocument.Parse(JsonSerializer.Serialize(SlowBridge(delay)));

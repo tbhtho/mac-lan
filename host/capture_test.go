@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 		if mode == "setup" {
 			message = "Capture setup failed: fixture error /Users/private-name secret-token 192.168.1.2"
 		}
-		if mode == "disconnect" || mode == "held-disconnect" {
+		if mode == "disconnect" || mode == "held-disconnect" || mode == "keyframe-request" {
 			var e input
 			dec := json.NewDecoder(os.Stdin)
 			var sequence []string
@@ -39,6 +39,10 @@ func TestMain(m *testing.M) {
 			if mode == "held-disconnect" && strings.Join(sequence, ",") != "key,button,release" {
 				fmt.Fprintln(os.Stderr, "fixture did not receive owned input followed by release before EOF")
 				os.Exit(4)
+			}
+			if mode == "keyframe-request" && strings.Join(sequence, ",") != "keyframe,release" {
+				fmt.Fprintln(os.Stderr, "fixture did not receive the keyframe request followed by release before EOF")
+				os.Exit(5)
 			}
 			json.NewEncoder(os.Stderr).Encode(map[string]any{"type": "status", "paused": false, "message": "Windows disconnected; capture stopped"})
 			os.Stdout.Close()
@@ -60,7 +64,7 @@ func TestCaptureFailurePreservesFirstNativeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input))
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input), nil)
 	if err == nil || captureFailureCode(err) != "h264-unavailable.-12908" {
 		t.Fatalf("secondary input pipe shutdown hid the original native error: %v", err)
 	}
@@ -74,7 +78,7 @@ func TestCaptureDisconnectAllowsCleanNativeExit(t *testing.T) {
 	}
 	events := make(chan input)
 	close(events)
-	if err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events); err != nil {
+	if err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events, nil); err != nil {
 		t.Fatalf("normal viewer disconnect must not become capture-failed: %v", err)
 	}
 }
@@ -91,9 +95,30 @@ func TestCaptureDisconnectReleasesOwnedKeysAndButtonsBeforeEOF(t *testing.T) {
 		events <- input{Type: "key", Code: 55, Down: true}
 		events <- input{Type: "button", Button: 2, Down: true}
 		close(events)
-		if err := runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events); err != nil {
+		if err := runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events, nil); err != nil {
 			t.Fatalf("attempt %d: disconnect did not release owned input: %v", attempt, err)
 		}
+	}
+}
+
+// The host asks for a keyframe when its send queue has discarded frames; the helper must receive it.
+func TestCaptureForwardsKeyframeRequestToHelper(t *testing.T) {
+	t.Setenv("MACDOW_CAPTURE_FIXTURE", "keyframe-request")
+	helper, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan input)
+	keyframes := make(chan struct{}, 1)
+	keyframes <- struct{}{}
+	go func() {
+		for len(keyframes) > 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
+		close(events)
+	}()
+	if err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, events, keyframes); err != nil {
+		t.Fatalf("the keyframe request did not reach the helper: %v", err)
 	}
 }
 
@@ -103,7 +128,7 @@ func TestCaptureFailurePreservesNativeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) { t.Error("failure fixture sent a video frame") }, func(string) {}, make(chan input))
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) { t.Error("failure fixture sent a video frame") }, func(string) {}, make(chan input), nil)
 	if err == nil || !strings.Contains(err.Error(), "Hardware H.264 unavailable (-12908)") {
 		t.Fatalf("native failure was replaced by a generic process exit: %v", err)
 	}
@@ -118,7 +143,7 @@ func TestCaptureFailureDiagnosticExcludesNativePrivateDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input))
+	err = runCapture(helper, start{Width: 1600, FPS: 60, Quality: 70}, func([]byte) {}, func(string) {}, make(chan input), nil)
 	if err == nil || !strings.Contains(err.Error(), "/Users/private-name") {
 		t.Fatalf("authenticated LAN error must retain the native setup reason: %v", err)
 	}

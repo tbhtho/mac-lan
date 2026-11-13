@@ -105,9 +105,9 @@ func TestVideoQueueExpiredPrefixRetainsFreshKeySegment(t *testing.T) {
 	now := time.Now()
 	q.push(encodedFixture(2, 1, 10), now)
 	q.push(encodedFixture(3, 2, 10), now.Add(10*time.Millisecond))
-	q.push(encodedFixture(2, 3, 10), now.Add(200*time.Millisecond))
-	q.push(encodedFixture(3, 4, 10), now.Add(210*time.Millisecond))
-	expectQueueSequences(t, q, now.Add(300*time.Millisecond), 3, 4)
+	q.push(encodedFixture(2, 3, 10), now.Add(videoQueueMaxAge-50*time.Millisecond))
+	q.push(encodedFixture(3, 4, 10), now.Add(videoQueueMaxAge-40*time.Millisecond))
+	expectQueueSequences(t, q, now.Add(videoQueueMaxAge+50*time.Millisecond), 3, 4)
 }
 
 func TestVideoQueueSourceSequenceGapWaitsForKeyframe(t *testing.T) {
@@ -277,5 +277,181 @@ func TestMacAudioIsWrittenBeforeQueuedVideoAndNeverQueuedAsVideo(t *testing.T) {
 	})
 	if len(kinds) != 2 || kinds[0] != 4 || kinds[1] != 2 {
 		t.Fatalf("audio must go out first, got kinds %v", kinds)
+	}
+}
+
+// Until a new keyframe arrives the viewer shows a frozen picture, and the encoder sends its
+// own only every two seconds. The queue therefore says when it has discarded frames, so the
+// host can ask the capture helper for a keyframe at once.
+func TestVideoQueueAsksForKeyframeAfterDiscardingFrames(t *testing.T) {
+	q := newVideoQueue()
+	now := time.Now()
+	if q.keyframeDue(now) {
+		t.Fatal("a queue that has not discarded anything asked for a keyframe")
+	}
+	q.push(encodedFixture(2, 1, 10), now)
+	q.push(encodedFixture(3, 2, 10), now.Add(10*time.Millisecond))
+	if q.keyframeDue(now.Add(20 * time.Millisecond)) {
+		t.Fatal("a queue holding decodable frames asked for a keyframe")
+	}
+	late := now.Add(videoQueueMaxAge + 20*time.Millisecond)
+	q.push(encodedFixture(3, 3, 10), late)
+	expectQueueSequences(t, q, late)
+	if !q.keyframeDue(late) {
+		t.Fatal("discarded frames did not ask for a keyframe")
+	}
+	if q.keyframeDue(late.Add(videoKeyRequestInterval / 2)) {
+		t.Fatal("keyframe requests were not spaced out")
+	}
+	if !q.keyframeDue(late.Add(videoKeyRequestInterval)) {
+		t.Fatal("an unanswered keyframe request was not repeated")
+	}
+	answered := late.Add(videoKeyRequestInterval + 10*time.Millisecond)
+	q.push(encodedFixture(2, 4, 10), answered)
+	if q.keyframeDue(answered.Add(videoKeyRequestInterval)) {
+		t.Fatal("the queue kept asking after the keyframe arrived")
+	}
+	expectQueueSequences(t, q, answered, 4)
+}
+
+func TestVideoQueueAsksForKeyframeAfterSourceGap(t *testing.T) {
+	q := newVideoQueue()
+	now := time.Now()
+	q.push(encodedFixture(2, 1, 10), now)
+	q.push(encodedFixture(3, 3, 10), now)
+	if !q.keyframeDue(now) {
+		t.Fatal("a broken frame chain did not ask for a keyframe")
+	}
+}
+
+// JPEG pictures are independent; nothing needs to be re-requested for them.
+func TestVideoQueueNeverAsksForKeyframeForJPEG(t *testing.T) {
+	q := newVideoQueue()
+	now := time.Now()
+	q.push(encodedFixture(1, 1, 10), now)
+	q.push(encodedFixture(1, 2, 10), now.Add(videoQueueMaxAge+time.Second))
+	if q.keyframeDue(now.Add(videoQueueMaxAge + 2*time.Second)) {
+		t.Fatal("a JPEG stream asked for a keyframe")
+	}
+}
+
+// The request waits until the writer is free again: a keyframe produced while the link is
+// still stalled would only be discarded in turn.
+func TestVideoWriterAsksForKeyframeWhenStalledLinkResumes(t *testing.T) {
+	q := newVideoQueue()
+	requested := make(chan struct{}, 8)
+	q.requestKey = func() { requested <- struct{}{} }
+	began := time.Now()
+	q.push(encodedFixture(2, 1, 10), began)
+	done := make(chan struct{})
+	defer close(done)
+	entered, resume := make(chan struct{}), make(chan struct{})
+	written := make(chan uint32, 8)
+	go writeQueuedVideo(done, q, make(chan statusMessage), nil, func(text bool, data []byte) error {
+		sequence := binary.BigEndian.Uint32(data[1:5])
+		if sequence == 1 {
+			close(entered)
+			<-resume
+		}
+		written <- sequence
+		return nil
+	})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("writer did not begin the first frame")
+	}
+	q.push(encodedFixture(3, 2, 10), began.Add(10*time.Millisecond))
+	q.push(encodedFixture(3, 3, 10), began.Add(videoQueueMaxAge+50*time.Millisecond))
+	q.push(encodedFixture(3, 4, 10), began.Add(videoQueueMaxAge+60*time.Millisecond))
+	select {
+	case <-requested:
+		t.Fatal("a keyframe was requested while the link was still stalled")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(resume)
+	select {
+	case <-requested:
+	case <-time.After(time.Second):
+		t.Fatal("no keyframe was requested when the link resumed")
+	}
+	q.push(encodedFixture(2, 5, 10), time.Now())
+	q.push(encodedFixture(3, 6, 10), time.Now())
+	for _, want := range []uint32{1, 5, 6} {
+		select {
+		case got := <-written:
+			if got != want {
+				t.Fatalf("wrote sequence %d, want %d", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("sequence %d was not written", want)
+		}
+	}
+}
+
+// A drop that happens while the writer is idle must wake it to ask.
+func TestVideoWriterAsksForKeyframeWhileIdle(t *testing.T) {
+	q := newVideoQueue()
+	requested := make(chan struct{}, 8)
+	q.requestKey = func() { requested <- struct{}{} }
+	done := make(chan struct{})
+	defer close(done)
+	written := make(chan uint32, 8)
+	go writeQueuedVideo(done, q, make(chan statusMessage), nil, func(text bool, data []byte) error {
+		written <- binary.BigEndian.Uint32(data[1:5])
+		return nil
+	})
+	q.push(encodedFixture(2, 1, 10), time.Now())
+	select {
+	case <-written:
+	case <-time.After(time.Second):
+		t.Fatal("the keyframe was not written")
+	}
+	q.push(encodedFixture(3, 3, 10), time.Now())
+	select {
+	case <-requested:
+	case <-time.After(time.Second):
+		t.Fatal("an idle writer did not ask for a keyframe after a broken frame chain")
+	}
+}
+
+// End to end on the host: frames lost in the queue reach the capture side as a keyframe request.
+func TestServerAsksCaptureForKeyframeAfterDiscardingFrames(t *testing.T) {
+	var s *server
+	s = &server{token: strings.Repeat("k", 64), peerAllowed: func(string) bool { return true }, slot: make(chan struct{}, 1),
+		catalog: func() ([]window, error) { return nil, nil },
+		consent: func(start) bool { return true },
+		stream: func(send func([]byte), _ func(string), events <-chan input) error {
+			send(encodedFixture(2, 1, 10))
+			send(encodedFixture(3, 3, 10))
+			select {
+			case <-s.keyframes:
+				send(encodedFixture(2, 4, 10))
+			case <-time.After(2 * time.Second):
+				t.Error("the capture side was not asked for a keyframe")
+			}
+			for range events {
+			}
+			return nil
+		},
+	}
+	c := connectFixture(t, s)
+	if err := c.WriteJSON(start{Type: "start", FPS: 60, Width: 1280, Quality: 70, Codec: "h264"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		kind, b, err := c.ReadMessage()
+		if err != nil {
+			t.Fatalf("the replacement keyframe never arrived: %v", err)
+		}
+		if kind != websocket.BinaryMessage {
+			continue
+		}
+		if sequence := binary.BigEndian.Uint32(b[1:5]); sequence == 4 {
+			return
+		} else if sequence != 1 {
+			t.Fatalf("an undecodable frame was sent: sequence %d", sequence)
+		}
 	}
 }

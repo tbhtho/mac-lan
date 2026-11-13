@@ -54,6 +54,9 @@ internal sealed partial class MainWindow : Window
     HwndSource? source;
     readonly TabBar tabBar;
     readonly DesktopWorkspace desktopWorkspace=new(new DesktopWindows());
+    // This PC's Wi-Fi signal while the Mac is being viewed; see WifiLink.
+    readonly WifiLink wifiLink=new((code,state)=>Telemetry.Log.Record("wifi-link",code,state));
+    long lastWifiRefresh;
     long lastWorkspaceRefresh;
     readonly StackPanel streamSection=new(){Visibility=Visibility.Collapsed};
     readonly TextBlock viewProgress=new(){Text="Waiting for Mac video...",Foreground=Ink,FontSize=15,Margin=new Thickness(16,12,16,12)};
@@ -544,6 +547,9 @@ internal sealed partial class MainWindow : Window
     void Tick()
     {
         session?.UiTick();
+        bool viewing=session?.IsReady==true&&(remote||appWindow!=null);
+        if(!viewing){if(lastWifiRefresh!=0){lastWifiRefresh=0;wifiLink.Forget();}}
+        else if(lastWifiRefresh==0||Environment.TickCount64-lastWifiRefresh>=5000){lastWifiRefresh=Environment.TickCount64;wifiLink.Refresh();}
         if(lastWorkspaceRefresh==0||Environment.TickCount64-lastWorkspaceRefresh>=1000){lastWorkspaceRefresh=Environment.TickCount64;RefreshDesktopWorkspace();}
         if(session?.IsPaired==true&&(lastUiHealth==0||Stopwatch.GetElapsedTime(lastUiHealth).TotalSeconds>=5)){lastUiHealth=Stopwatch.GetTimestamp();LogDiagnostic("ui-health","ok",UiHealth());}
         // Re-raise only when something is actually out of order; raising every tick made the bar flicker.
@@ -552,7 +558,7 @@ internal sealed partial class MainWindow : Window
             if(Native.TaskbarAbove(this))Native.KeepAbove(this);
             if(Native.IsAbove(this,tabBar))tabBar.KeepAbove();
         }
-        RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);TryAutomaticControl();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,Reconnecting&&!paired?"Reconnecting…":session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":remote?"Control paused":"Click Mac to control"):null);
+        RefreshContext();string? videoBlocked=ControlVideoBlockReason();if(gate.CanRoute&&videoBlocked!=null)gate.Disarm(videoBlocked);TryAutomaticControl();UpdateControl();tabBar.SetConnection(paired,gate.CanRoute,Reconnecting&&!paired?"Reconnecting…":session?.IsStarting==true?"Waiting for Mac approval":session?.IsReady==true&&(appView??desktop).LastPresented==0?"Waiting for video":session?.IsReady==true&&(remote||appWindow!=null)&&!gate.CanRoute?controlIssue??(videoBlocked is "video-stale" or "native-heartbeat-stale"?"Video catching up":remote?"Control paused":"Click Mac to control"):viewing?wifiLink.WeakNote:null);
         if((appView??desktop).LastPresented>0)viewProgress.Visibility=Visibility.Collapsed;
         if(appWindow!=null)appWindow.Title=AppTitle();
         SendLease();
@@ -813,7 +819,11 @@ internal sealed class RemoteView : WebView2
     void PumpFrames()
     {
         if(!ready||!bridge.Ready||bridge.HasPending||frames==null||currentStream?.Invoke()!=true)return;
-        var batch=frames.Drain(Environment.TickCount64);if(batch.Count==0)return;
+        var batch=frames.Drain(Environment.TickCount64);
+        // Frames this PC had to discard leave the picture frozen until a keyframe; ask for one now
+        // instead of waiting up to two seconds for the Mac's next periodic one.
+        if(frames.TakeKeyframeRequest())KeyframeNeeded?.Invoke();
+        if(batch.Count==0)return;
         long number=bridge.Begin(Environment.TickCount64)!.Value;
         CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{type="frames",epoch=bridge.Epoch,batch=number,frames=batch.Select(Convert.ToBase64String)}));
         frameWatchdog.Start();

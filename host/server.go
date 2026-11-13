@@ -230,6 +230,9 @@ type server struct {
 	videoError string
 	// selected is only accessed while slot is held.
 	selected start
+	// keyframes carries the send queue's requests for a keyframe to the capture helper of the
+	// current stream; like selected it is only accessed while slot is held.
+	keyframes chan struct{}
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -459,6 +462,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	frames := newVideoQueue()
+	keyframes := make(chan struct{}, 1)
+	s.keyframes = keyframes
+	frames.requestKey = func() {
+		select {
+		case keyframes <- struct{}{}:
+		default:
+		}
+	}
 	// About half a second of Mac audio; when full the oldest chunk is dropped, never video.
 	audio := make(chan []byte, 24)
 	status := make(chan statusMessage, 4)

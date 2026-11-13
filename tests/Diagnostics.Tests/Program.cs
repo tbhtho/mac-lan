@@ -54,6 +54,21 @@ try
         var fields=DiagnosticHostFields.Viewer(message.RootElement);
         Check(fields.Count==3&&fields["fps"]==59.5&&fields["queueFrames"]==5,"viewer health retains numeric frame rate and backlog without arbitrary payload fields");
     }
+    {
+        Check(WifiLink.Weak(50)&&WifiLink.Weak(1)&&WifiLink.Weak(0)&&!WifiLink.Weak(51)&&!WifiLink.Weak(100)&&!WifiLink.Weak(-1),"a Wi-Fi signal of half strength or less counts as weak; an unknown value does not");
+        string first=WifiLink.Fingerprint(new byte[]{0x0c,0x7c,0x28,0xe7,0x97,0x08}),second=WifiLink.Fingerprint(new byte[]{0xe2,0x0d,0x13,0xc1,0x78,0x4f});
+        Check(first.Length==4&&first!=second&&first==WifiLink.Fingerprint(new byte[]{0x0c,0x7c,0x28,0xe7,0x97,0x08})&&!first.Contains("0c7c")&&!first.Contains("9708"),"an access point is logged as a short stable fingerprint that tells two apart without its address");
+        var reports=new List<string>();var link=new WifiLink((code,state)=>{lock(reports)reports.Add(code+" "+JsonSerializer.Serialize(state));});
+        Check(link.Current==null&&link.WeakNote==null,"before any reading the bar shows no Wi-Fi note");
+        // Reads this machine's real adapter state, if it has Wi-Fi; nothing is changed.
+        link.Refresh();link.Refresh();
+        for(int i=0;i<40&&link.Current==null;i++)Thread.Sleep(50);
+        Thread.Sleep(100);
+        var reading=link.Current;
+        lock(reports)Check(reading==null?reports.Count==0&&link.WeakNote==null:reading.Value.Signal is >=0 and <=100&&reports.Count==1&&reports[0].Contains("\"signal\":"+reading.Value.Signal)&&(link.WeakNote!=null)==WifiLink.Weak(reading.Value.Signal),"a reading is reported once with its signal, and a machine without Wi-Fi reports nothing");
+        link.Forget();
+        Check(link.Current==null&&link.WeakNote==null,"leaving the Mac view forgets the last reading");
+    }
     Console.WriteLine($"{checks} diagnostic checks passed; temporary local files only.");
 }
 finally{Directory.Delete(root,true);}

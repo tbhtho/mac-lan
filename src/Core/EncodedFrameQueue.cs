@@ -15,6 +15,9 @@ public sealed class EncodedFrameQueue
     int bytes;
     uint? lastSequence;
     bool waitingForKey=true,jpeg;
+    // Encoded frames were discarded, so the picture stands still until a keyframe arrives. The
+    // Mac sends one by itself only every two seconds; the caller asks for one now instead.
+    bool keyframeWanted;
     record Entry(byte[] Packet,long Received);
     public EncodedFrameQueue(int maxFrames=64,int maxBytes=8*1024*1024,int maxAgeMilliseconds=250)
     {
@@ -23,7 +26,9 @@ public sealed class EncodedFrameQueue
     }
     public int Count{get{lock(sync)return pending.Count;}}
     public int Bytes{get{lock(sync)return bytes;}}
-    public void Clear(){lock(sync)Reset();}
+    public void Clear(){lock(sync){Reset();keyframeWanted=false;}}
+    /// <summary>True once after frames were discarded and nothing decodable is left.</summary>
+    public bool TakeKeyframeRequest(){lock(sync){bool wanted=keyframeWanted;keyframeWanted=false;return wanted;}}
     void Reset(){pending.Clear();bytes=0;lastSequence=null;waitingForKey=true;jpeg=false;}
     public void Enqueue(byte[] packet,long receivedMilliseconds)
     {
@@ -34,13 +39,13 @@ public sealed class EncodedFrameQueue
             byte kind=packet[0];
             if(kind==1)
             {
-                Reset();jpeg=true;pending.Add(new(packet,receivedMilliseconds));bytes=packet.Length;return;
+                Reset();keyframeWanted=false;jpeg=true;pending.Add(new(packet,receivedMilliseconds));bytes=packet.Length;return;
             }
             if(jpeg)Reset();
             uint sequence=BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(1,4));
             if(lastSequence is uint previous&&sequence!=unchecked(previous+1))Reset();
-            if(kind==2)waitingForKey=false;
-            if(waitingForKey)return;
+            if(kind==2){waitingForKey=false;keyframeWanted=false;}
+            if(waitingForKey){keyframeWanted=true;return;}
             lastSequence=sequence;pending.Add(new(packet,receivedMilliseconds));bytes+=packet.Length;
             if(pending.Count>maxFrames||bytes>maxBytes)Recover(receivedMilliseconds);
         }
@@ -75,6 +80,6 @@ public sealed class EncodedFrameQueue
             if(pending[i].Packet[0] is not (1 or 2))continue;
             pending.RemoveRange(0,i);bytes=tailBytes;return;
         }
-        Reset();
+        bool encoded=!jpeg;Reset();keyframeWanted=encoded;
     }
 }
